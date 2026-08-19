@@ -1,0 +1,17 @@
+<div class="state-panel error-state" role="alert">
+    <span class="state-icon"><Icon Name="alert" Size="24" /></span>
+    <strong>数据载入失败</strong>
+    <span>@Message</span>
+    @if (OnRetry.HasDelegate)
+    {
+        <button type="button" class="button secondary small" @onclick="OnRetry">
+            <Icon Name="refresh" Size="16" />
+            重试
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter] public string Message { get; set; } = "请稍后重试。";
+    [Parameter] public EventCallback OnRetry { get; set; }
+}

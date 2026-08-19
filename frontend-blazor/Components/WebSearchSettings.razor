@@ -1,0 +1,128 @@
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<section class="web-search-card" data-testid="web-search-settings">
+    <header>
+        <div><h2>Web Search 模拟</h2><p>为不具备原生搜索能力的请求配置 Brave 或 Tavily，并追踪月度配额。</p></div>
+        <div class="web-search-actions"><button type="button" class="button secondary small" disabled="@(loading || saving || MissingProviderTypes.Count == 0)" @onclick="AddProvider">添加提供商</button><button type="button" class="button primary small" disabled="@(loading || saving)" @onclick="SaveAsync">@(saving ? "保存中…" : "保存配置")</button></div>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="web-search-alert" role="alert"><Icon Name="alert" Size="16" />@error</div>
+    }
+    @if (loading)
+    {
+        <LoadingState Text="正在加载 Web Search 配置" />
+    }
+    else
+    {
+        <div class="web-search-body">
+            <ToggleField Label="启用 Web Search 模拟" Hint="至少需要一个已配置 API Key 的提供商"><InputCheckbox @bind-Value="config.Enabled" /></ToggleField>
+
+            @if (config.Providers.Count == 0)
+            {
+                <div class="web-search-empty"><span>尚未配置搜索提供商</span><button type="button" class="button secondary small" @onclick="AddProvider">添加 Brave</button></div>
+            }
+            else
+            {
+                <div class="provider-list">
+                    @for (var index = 0; index < config.Providers.Count; index++)
+                    {
+                        var provider = config.Providers[index];
+                        <article @key="provider.Type">
+                            <header><div><strong>@ProviderLabel(provider.Type)</strong><span>@(provider.ApiKeyConfigured ? "API Key 已配置" : "API Key 未配置")</span></div><button type="button" class="icon-button" title="移除提供商" @onclick="() => RemoveProvider(provider)"><Icon Name="trash" Size="16" /></button></header>
+                            <div class="provider-grid">
+                                <Field Label="提供商"><select @bind="provider.Type" disabled><option value="brave">Brave Search</option><option value="tavily">Tavily</option></select></Field>
+                                <Field Label="API Key" Hint="@(provider.ApiKeyConfigured ? "已配置；留空保留" : "请输入 API Key")"><input type="password" autocomplete="new-password" @bind="provider.ApiKey" /></Field>
+                                <Field Label="月度配额" Hint="留空表示不限制"><input type="number" min="0" value="@provider.QuotaLimit" @onchange="args => provider.QuotaLimit = ParseNullableLong(args.Value)" /></Field>
+                                <Field Label="关联代理"><select value="@provider.ProxyId" @onchange="args => provider.ProxyId = ParseNullableLong(args.Value)"><option value="">直连</option>@foreach (var proxy in proxies) { <option value="@proxy.Id">@proxy.Name</option> }</select></Field>
+                                <Field Label="订阅开始时间"><input type="datetime-local" value="@UnixLocalValue(provider.SubscribedAt)" @onchange="args => provider.SubscribedAt = ParseUnixLocal(args.Value?.ToString())" /></Field>
+                                <Field Label="到期时间"><input type="datetime-local" value="@UnixLocalValue(provider.ExpiresAt)" @onchange="args => provider.ExpiresAt = ParseUnixLocal(args.Value?.ToString())" /></Field>
+                            </div>
+                            <footer>
+                                <div><span>本周期已使用</span><strong>@provider.QuotaUsed.ToString("N0")@(provider.QuotaLimit.HasValue ? $" / {provider.QuotaLimit.Value:N0}" : string.Empty)</strong></div>
+                                <button type="button" class="button secondary small" disabled="@testing" @onclick="() => ResetUsageAsync(provider)">重置用量</button>
+                            </footer>
+                        </article>
+                    }
+                </div>
+            }
+
+            <section class="search-test">
+                <header><div><strong>搜索连通性测试</strong><span>使用当前已保存的配置，不消耗月度用量计数。</span></div><button type="button" class="button secondary small" disabled="@(testing || string.IsNullOrWhiteSpace(testQuery))" @onclick="TestAsync">@(testing ? "测试中…" : "执行搜索")</button></header>
+                <input type="search" placeholder="输入测试查询，例如：今年世界大事件" @bind="testQuery" @bind:event="oninput" />
+                @if (testResult is not null)
+                {
+                    <div class="search-results"><p>提供商：<b>@testResult.Provider</b> · 查询：@testResult.Query · @testResult.Results.Count 条结果</p>@foreach (var item in testResult.Results) { <a href="@item.Url" target="_blank" rel="noopener noreferrer"><strong>@item.Title</strong><span>@item.Snippet</span><small>@item.Url</small></a> }</div>
+                }
+            </section>
+        </div>
+    }
+</section>
+
+@code {
+    private WebSearchEmulationConfigDto config = new();
+    private List<ProxyDto> proxies = [];
+    private WebSearchTestResultDto? testResult;
+    private string testQuery = "搜索今年世界大事件";
+    private bool loading = true, saving, testing;
+    private string? error;
+    private List<string> MissingProviderTypes => new[] { "brave", "tavily" }.Where(type => config.Providers.All(x => !x.Type.Equals(type, StringComparison.OrdinalIgnoreCase))).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var configTask = Api.GetWebSearchEmulationConfigAsync();
+            var proxyTask = Api.GetProxiesAsync();
+            await Task.WhenAll(configTask, proxyTask);
+            config = await configTask; proxies = await proxyTask;
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private void AddProvider()
+    {
+        var type = MissingProviderTypes.FirstOrDefault();
+        if (type is not null) config.Providers.Add(new WebSearchProviderConfigDto { Type = type });
+    }
+
+    private void RemoveProvider(WebSearchProviderConfigDto provider) => config.Providers.Remove(provider);
+
+    private async Task SaveAsync()
+    {
+        saving = true; error = null;
+        try
+        {
+            config = await Api.UpdateWebSearchEmulationConfigAsync(config);
+            Toasts.Success("Web Search 模拟配置已保存");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task TestAsync()
+    {
+        testing = true; error = null; testResult = null;
+        try { testResult = await Api.TestWebSearchEmulationAsync(testQuery); Toasts.Success("搜索测试完成"); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { testing = false; }
+    }
+
+    private async Task ResetUsageAsync(WebSearchProviderConfigDto provider)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认重置 {ProviderLabel(provider.Type)} 的当前月度用量？")) return;
+        testing = true; error = null;
+        try { await Api.ResetWebSearchUsageAsync(provider.Type); provider.QuotaUsed = 0; Toasts.Success("搜索配额用量已重置"); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { testing = false; }
+    }
+
+    private static long? ParseNullableLong(object? value) => long.TryParse(value?.ToString(), out var number) && number >= 0 ? number : null;
+    private static long? ParseUnixLocal(string? value) => DateTime.TryParse(value, out var date) ? new DateTimeOffset(DateTime.SpecifyKind(date, DateTimeKind.Local)).ToUnixTimeSeconds() : null;
+    private static string UnixLocalValue(long? value) => value.HasValue ? DateTimeOffset.FromUnixTimeSeconds(value.Value).ToLocalTime().ToString("yyyy-MM-ddTHH:mm") : string.Empty;
+    private static string ProviderLabel(string type) => type.Equals("tavily", StringComparison.OrdinalIgnoreCase) ? "Tavily" : "Brave Search";
+}

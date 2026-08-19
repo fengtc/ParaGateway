@@ -1,0 +1,78 @@
+.user-defaults-card,
+.auth-source-list,
+.auth-source-body,
+.defaults-subsection,
+.quota-section {
+    display: grid;
+    gap: 1rem;
+}
+
+.defaults-subsection,
+.quota-section {
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+}
+
+.defaults-subsection.compact {
+    padding-top: .8rem;
+}
+
+.subsection-heading,
+.auth-source-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.subsection-heading h3,
+.auth-source-heading h3,
+.quota-heading h3 {
+    margin: 0;
+    font-size: .9rem;
+}
+
+.subsection-heading p,
+.auth-source-heading p,
+.quota-heading p {
+    margin: .2rem 0 0;
+    color: var(--muted);
+    font-size: .72rem;
+    line-height: 1.5;
+}
+
+.auth-source-card {
+    display: grid;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+}
+
+.auth-source-body {
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+}
+
+.inline-switch {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    color: var(--muted);
+    font-size: .72rem;
+    white-space: nowrap;
+}
+
+.inline-switch input {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--primary);
+}
+
+@media (max-width: 760px) {
+    .subsection-heading,
+    .auth-source-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}

@@ -1,0 +1,314 @@
+@page "/groups"
+@page "/admin/groups"
+@implements IDisposable
+@using System.Text.Json
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>分组管理 · ParaGateway</PageTitle>
+
+<section class="groups-workspace">
+    <div class="groups-toolbar">
+        <div class="groups-toolbar-left">
+            <div class="search-box groups-search"><Icon Name="search" Size="17" /><input value="@search" @oninput="SearchChangedAsync" placeholder="搜索分组..." aria-label="搜索分组" /></div>
+            <select class="compact-select" value="@platformFilter" @onchange="PlatformFilterChangedAsync" aria-label="平台筛选">
+                <option value="">全部平台</option><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option><option value="composite">Composite</option>
+            </select>
+            <select class="compact-select" value="@statusFilter" @onchange="StatusFilterChangedAsync" aria-label="状态筛选"><option value="">全部状态</option><option value="active">正常</option><option value="inactive">停用</option></select>
+            <select class="compact-select" value="@exclusiveFilter" @onchange="ExclusiveFilterChangedAsync" aria-label="分组类型筛选"><option value="">全部分组</option><option value="false">公开分组</option><option value="true">专属分组</option></select>
+        </div>
+        <div class="groups-toolbar-actions">
+            <button type="button" class="button secondary icon-only" title="刷新" aria-label="刷新" disabled="@loading" @onclick="RefreshAsync"><Icon Name="refresh" Size="17" /></button>
+            <div class="menu-anchor">
+                <button type="button" class="button secondary" aria-expanded="@showColumnMenu" @onclick="ToggleColumnMenu"><Icon Name="columns" Size="16" /> 列设置</button>
+                @if (showColumnMenu)
+                {
+                    <div class="settings-menu columns-menu">
+                        @foreach (var column in ToggleableColumns)
+                        {
+                            <button type="button" @onclick="() => ToggleColumnAsync(column.Key)"><span>@column.Label</span>@if (IsColumnVisible(column.Key)) { <Icon Name="check" Size="15" /> }</button>
+                        }
+                    </div>
+                }
+            </div>
+            <button type="button" class="button secondary" @onclick="OpenSortAsync"><Icon Name="chevrons-up-down" Size="16" /> 排序</button>
+            <button type="button" class="button primary" data-tour="groups-create-btn" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 创建分组</button>
+        </div>
+    </div>
+
+    @if (loading)
+    {
+        <LoadingState Text="正在载入分组" />
+    }
+    else if (error is not null)
+    {
+        <ErrorState Message="@error" OnRetry="RefreshAsync" />
+    }
+    else if (groups.Count == 0)
+    {
+        <EmptyState Title="暂无分组" Description="调整筛选条件，或创建第一个分组。"><Action><button type="button" class="button primary small" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> 创建分组</button></Action></EmptyState>
+    }
+    else
+    {
+        <div class="groups-table-card">
+            <div class="groups-table-scroll">
+                <table class="groups-data-table">
+                    <thead>
+                        <tr>
+                            <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("name")'>名称 @SortIndicator("name")</button></th>
+                            @if (IsColumnVisible("id")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("id")'>ID @SortIndicator("id")</button></th> }
+                            @if (IsColumnVisible("platform")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("platform")'>平台 @SortIndicator("platform")</button></th> }
+                            @if (IsColumnVisible("billing_type")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("billing_type")'>计费类型 @SortIndicator("billing_type")</button></th> }
+                            @if (IsColumnVisible("rate_multiplier")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("rate_multiplier")'>费率倍数 @SortIndicator("rate_multiplier")</button></th> }
+                            @if (IsColumnVisible("is_exclusive")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("is_exclusive")'>类型 @SortIndicator("is_exclusive")</button></th> }
+                            @if (IsColumnVisible("account_count")) { <th>账号数</th> }
+                            @if (IsColumnVisible("capacity")) { <th>容量</th> }
+                            @if (IsColumnVisible("usage")) { <th>用量</th> }
+                            @if (IsColumnVisible("status")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("status")'>状态 @SortIndicator("status")</button></th> }
+                            <th class="actions-column">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var group in groups)
+                        {
+                            <tr @key="group.Id">
+                                <td class="name-cell"><strong>@group.Name</strong>@if (!string.IsNullOrWhiteSpace(group.Description)) { <small title="@group.Description">@group.Description</small> }</td>
+                                @if (IsColumnVisible("id")) { <td class="numeric-cell">#@group.Id</td> }
+                                @if (IsColumnVisible("platform")) { <td><span class="platform-badge @group.Platform">@PlatformLabel(group.Platform)</span></td> }
+                                @if (IsColumnVisible("billing_type"))
+                                {
+                                    <td>
+                                        <span class="billing-badge @(group.SubscriptionType == "subscription" ? "subscription" : null)">@(group.SubscriptionType == "subscription" ? "订阅（配额）" : "标准（余额）")</span>
+                                        @if (group.SubscriptionType == "subscription")
+                                        {
+                                            <div class="billing-limits">
+                                                @if (HasAnyLimit(group)) { <span>@LimitSummary(group)</span> } else { <span>不限额</span> }
+                                                <span>累计 @Money(GetUsage(group).TotalCost)</span>
+                                            </div>
+                                        }
+                                    </td>
+                                }
+                                @if (IsColumnVisible("rate_multiplier")) { <td><span class="rate-value">@FormatRate(group.RateMultiplier)x</span></td> }
+                                @if (IsColumnVisible("is_exclusive")) { <td><span class="type-badge @(group.IsExclusive ? "exclusive" : null)">@(group.IsExclusive ? "专属" : "公开")</span></td> }
+                                @if (IsColumnVisible("account_count"))
+                                {
+                                    <td><div class="account-counts"><span>可用:<strong class="available">@group.ActiveAccountCount</strong> 个账号</span>@if (group.RateLimitedAccountCount > 0) { <span>限流:<strong class="limited">@group.RateLimitedAccountCount</strong> 个账号</span> }<span>总量:<strong>@group.AccountCount</strong> 个账号</span></div></td>
+                                }
+                                @if (IsColumnVisible("capacity")) { <td>@CapacityCell(group)</td> }
+                                @if (IsColumnVisible("usage")) { <td><div class="usage-cell"><span>今日<strong>@Money(GetUsage(group).TodayCost)</strong></span><span>累计<strong>@Money(GetUsage(group).TotalCost)</strong></span></div></td> }
+                                @if (IsColumnVisible("status")) { <td><span class="status-badge @(group.Status == "active" ? "success" : "danger")">@(group.Status == "active" ? "正常" : "停用")</span></td> }
+                                <td class="actions-column">
+                                    <div class="row-actions">
+                                        <button type="button" title="编辑" @onclick="() => OpenEdit(group)"><Icon Name="pencil" Size="15" /><span>编辑</span></button>
+                                        <button type="button" title="复制" disabled="@duplicatingIds.Contains(group.Id)" @onclick="() => DuplicateAsync(group)"><Icon Name="copy" Size="15" /><span>@(duplicatingIds.Contains(group.Id) ? "复制中" : "复制")</span></button>
+                                        @if (group.Platform == "composite") { <button type="button" title="组合路由" class="cyan-action" @onclick="() => OpenCompositeRoutes(group)"><Icon Name="swap" Size="15" /><span>路由</span></button> }
+                                        <button type="button" title="用户专属倍率" class="purple-action" @onclick='() => OpenOverrides(group, "rate")'><Icon Name="dollar" Size="15" /><span>专属倍率</span></button>
+                                        <button type="button" title="用户专属 RPM" class="orange-action" @onclick='() => OpenOverrides(group, "rpm")'><Icon Name="pulse" Size="15" /><span>专属 RPM</span></button>
+                                        <button type="button" title="删除" class="danger-action" @onclick="() => OpenDelete(group)"><Icon Name="trash" Size="15" /><span>删除</span></button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="groups-pagination">
+            <span>第 @RangeStart-@RangeEnd 条，共 @total 条</span>
+            <div class="page-controls">
+                <label>每页<select value="@pageSize" @onchange="PageSizeChangedAsync" aria-label="每页条数"><option value="20">20</option><option value="50">50</option><option value="100">100</option></select>条</label>
+                <button type="button" class="icon-button" aria-label="上一页" disabled="@(page <= 1)" @onclick="PreviousPageAsync"><Icon Name="chevron-left" Size="16" /></button>
+                @foreach (var pageNumber in VisiblePages) { <button type="button" class="page-button @(pageNumber == page ? "active" : null)" @onclick="() => GoToPageAsync(pageNumber)">@pageNumber</button> }
+                <button type="button" class="icon-button" aria-label="下一页" disabled="@(page >= TotalPages)" @onclick="NextPageAsync"><Icon Name="chevron-right" Size="16" /></button>
+            </div>
+        </div>
+    }
+</section>
+
+<AppModal Open="@editorOpen" Title="@(editingId is null ? "创建分组" : "编辑分组")" MaxWidth="820px" OnClose="CloseEditor">
+    <ChildContent>
+        <EditForm id="group-editor" Model="form" OnValidSubmit="SaveAsync" FormName="group-editor">
+            <DataAnnotationsValidator />
+            @if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }
+            <div class="editor-section"><h3>基本配置</h3><div class="form-grid">
+                <div class="form-field full"><label for="group-name">名称</label><InputText id="group-name" @bind-Value="form.Name" placeholder="请输入分组名称" /><ValidationMessage For="() => form.Name" /></div>
+                <div class="form-field full"><label for="group-description">说明</label><InputTextArea id="group-description" @bind-Value="form.Description" rows="3" placeholder="可选说明" /></div>
+                <div class="form-field"><label for="group-platform">平台</label><InputSelect id="group-platform" @bind-Value="form.Platform" disabled="@(editingId is not null)"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option><option value="composite">Composite</option></InputSelect>@if (editingId is not null) { <small>平台创建后不可修改。</small> }</div>
+                <div class="form-field"><label for="group-status">状态</label><select id="group-status" value="@(formActive ? "active" : "inactive")" @onchange="StatusFormChanged" disabled="@(editingId is null)"><option value="active">正常</option><option value="inactive">停用</option></select>@if (editingId is null) { <small>新分组默认启用。</small> }</div>
+                <div class="form-field"><label for="group-rate">费率倍数</label><InputNumber id="group-rate" @bind-Value="form.RateMultiplier" min="0" step="0.001" /></div>
+                <div class="form-field"><label for="group-rpm">RPM 限制</label><InputNumber id="group-rpm" @bind-Value="form.RpmLimit" min="0" step="1" /><small>0 表示不限制。</small></div>
+                <label class="toggle-row full"><InputCheckbox @bind-Value="form.IsExclusive" /><span><strong>专属分组</strong><small>仅授权用户可访问此分组。</small></span></label>
+            </div></div>
+
+            <div class="editor-section"><h3>计费与订阅</h3><div class="form-grid">
+                <div class="form-field full"><label for="group-subscription">计费类型</label><InputSelect id="group-subscription" @bind-Value="form.SubscriptionType" disabled="@(editingId is not null)"><option value="standard">标准（余额）</option><option value="subscription">订阅（配额）</option></InputSelect>@if (editingId is not null) { <small>计费类型创建后不可修改。</small> }</div>
+                @if (form.SubscriptionType == "subscription")
+                {
+                    <div class="form-field"><label for="group-daily-limit">每日限额（USD）</label><InputNumber id="group-daily-limit" @bind-Value="form.DailyLimitUsd" min="0" step="0.01" placeholder="不限" /></div>
+                    <div class="form-field"><label for="group-weekly-limit">每周限额（USD）</label><InputNumber id="group-weekly-limit" @bind-Value="form.WeeklyLimitUsd" min="0" step="0.01" placeholder="不限" /></div>
+                    <div class="form-field"><label for="group-monthly-limit">每月限额（USD）</label><InputNumber id="group-monthly-limit" @bind-Value="form.MonthlyLimitUsd" min="0" step="0.01" placeholder="不限" /></div>
+                }
+            </div></div>
+
+            <details class="advanced-editor"><summary><span><strong>高级配置</strong><small>模型定价、模型路由、能力开关与其他官方字段</small></span><Icon Name="chevron-down" Size="16" /></summary><div class="form-field"><label for="group-advanced">完整配置 JSON</label><InputTextArea id="group-advanced" @bind-Value="form.AdvancedJson" rows="12" placeholder='{"model_routing_enabled":false}' /><small>保存时保留后端返回的全部配置；上方字段会覆盖同名值。</small></div></details>
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseEditor">取消</button><button type="submit" form="group-editor" class="button primary" disabled="@saving"><Icon Name="save" Size="16" /> 保存</button></Footer>
+</AppModal>
+
+<AppModal Open="@sortOpen" Title="分组排序" MaxWidth="620px" OnClose="CloseSort">
+    <ChildContent>
+        <p class="sort-help">调整顺序后保存。顺序越靠前，调度优先级越高。</p>
+        @if (sortLoading) { <LoadingState Text="正在载入全部分组" /> }
+        else { <div class="sort-list">@for (var index = 0; index < sortableGroups.Count; index++) { var row = sortableGroups[index]; var rowIndex = index; <div class="sort-row" @key="row.Id"><span class="sort-handle"><Icon Name="chevrons-up-down" Size="16" /></span><span class="platform-badge @row.Platform">@PlatformLabel(row.Platform)</span><strong>@row.Name</strong><small>#@row.Id</small><div><button type="button" class="icon-button" title="上移" disabled="@(rowIndex == 0)" @onclick="() => MoveSort(rowIndex, -1)"><Icon Name="chevron-up" Size="15" /></button><button type="button" class="icon-button" title="下移" disabled="@(rowIndex == sortableGroups.Count - 1)" @onclick="() => MoveSort(rowIndex, 1)"><Icon Name="chevron-down" Size="15" /></button></div></div> }</div> }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseSort">取消</button><button type="button" class="button primary" disabled="@(sortSaving || sortLoading)" @onclick="SaveSortAsync"><Icon Name="save" Size="16" /> 保存</button></Footer>
+</AppModal>
+
+<AppModal Open="@(deleteTarget is not null)" Title="删除分组" MaxWidth="480px" OnClose="CloseDelete">
+    <ChildContent>@if (deleteTarget is not null) { <div class="delete-confirm"><div class="delete-icon"><Icon Name="alert" Size="22" /></div><div><strong>确定删除“@deleteTarget.Name”吗？</strong><p>删除后无法恢复；请先确认没有账号或用户仍依赖此分组。</p></div></div>@if (!string.IsNullOrWhiteSpace(deleteError)) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@deleteError</span></div> } }</ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseDelete">取消</button><button type="button" class="button danger" disabled="@deleting" @onclick="DeleteAsync"><Icon Name="trash" Size="16" /> 删除</button></Footer>
+</AppModal>
+
+<GroupOverridesModal Open="@(overrideGroup is not null)" Group="@overrideGroup" Mode="@overrideMode" OnClose="CloseOverrides" OnSaved="RefreshAsync" />
+<CompositeRoutesModal Open="@(compositeRoutesGroup is not null)" Group="@compositeRoutesGroup" OnClose="CloseCompositeRoutes" />
+
+@code {
+    private const string HiddenColumnsKey = "group-hidden-columns";
+    private static readonly JsonSerializerOptions PreferenceJson = new(JsonSerializerDefaults.Web);
+    private static readonly IReadOnlyList<ColumnOption> ToggleableColumns = [new("id", "ID"), new("platform", "平台"), new("billing_type", "计费类型"), new("rate_multiplier", "费率倍数"), new("is_exclusive", "类型"), new("account_count", "账号数"), new("capacity", "容量"), new("usage", "用量"), new("status", "状态")];
+
+    private readonly HashSet<string> hiddenColumns = ["id"];
+    private readonly HashSet<string> duplicatingIds = [];
+    private readonly Dictionary<long, GroupUsageSummaryDto> usageMap = [];
+    private readonly Dictionary<long, GroupCapacitySummaryDto> capacityMap = [];
+    private CancellationTokenSource? searchDebounce;
+    private List<GroupDto> groups = [];
+    private List<GroupDto> sortableGroups = [];
+    private GroupInput form = new();
+    private GroupDto? deleteTarget;
+    private GroupDto? overrideGroup;
+    private GroupDto? compositeRoutesGroup;
+    private string overrideMode = "rate";
+    private string? editingId;
+    private string? error;
+    private string? modalError;
+    private string? deleteError;
+    private string search = string.Empty;
+    private string platformFilter = string.Empty;
+    private string statusFilter = string.Empty;
+    private string exclusiveFilter = string.Empty;
+    private string sortBy = "sort_order";
+    private string sortOrder = "asc";
+    private int page = 1;
+    private int pageSize = 20;
+    private long total;
+    private bool loading = true;
+    private bool saving;
+    private bool editorOpen;
+    private bool formActive = true;
+    private bool showColumnMenu;
+    private bool sortOpen;
+    private bool sortLoading;
+    private bool sortSaving;
+    private bool deleting;
+
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+    private long RangeStart => total == 0 ? 0 : (page - 1L) * pageSize + 1;
+    private long RangeEnd => Math.Min(total, page * (long)pageSize);
+    private IEnumerable<int> VisiblePages { get { var start = Math.Max(1, Math.Min(page - 2, TotalPages - 4)); var end = Math.Min(TotalPages, start + 4); return Enumerable.Range(start, end - start + 1); } }
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var saved = await JS.InvokeAsync<string?>("localStorage.getItem", HiddenColumnsKey);
+            var values = string.IsNullOrWhiteSpace(saved) ? null : JsonSerializer.Deserialize<List<string>>(saved, PreferenceJson);
+            if (values is not null) { hiddenColumns.Clear(); foreach (var value in values.Where(x => ToggleableColumns.Any(c => c.Key == x))) hiddenColumns.Add(value); StateHasChanged(); }
+            else await SaveColumnPreferencesAsync();
+        }
+        catch (JSException) { }
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        showColumnMenu = false;
+        try
+        {
+            var result = await Api.GetAdminGroupsAsync(page, pageSize, search, platformFilter, statusFilter, ParseExclusive(), sortBy, sortOrder);
+            groups = result.Items;
+            total = result.Total;
+            if (page > TotalPages) { page = TotalPages; await LoadAsync(); return; }
+            await LoadSummariesAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; groups = []; total = 0; }
+        finally { loading = false; }
+    }
+
+    private async Task LoadSummariesAsync()
+    {
+        try { var usage = await Api.GetAdminGroupUsageSummaryAsync("Asia/Shanghai"); usageMap.Clear(); foreach (var item in usage) usageMap[item.GroupId] = item; } catch (ApiException) { usageMap.Clear(); }
+        try { var capacities = await Api.GetAdminGroupCapacitySummaryAsync(); capacityMap.Clear(); foreach (var item in capacities) capacityMap[item.GroupId] = item; } catch (ApiException) { capacityMap.Clear(); }
+    }
+
+    private async Task RefreshAsync() { searchDebounce?.Cancel(); await LoadAsync(); }
+    private async Task SearchChangedAsync(ChangeEventArgs e) { search = e.Value?.ToString() ?? string.Empty; page = 1; searchDebounce?.Cancel(); searchDebounce?.Dispose(); var current = searchDebounce = new(); try { await Task.Delay(350, current.Token); await LoadAsync(); } catch (OperationCanceledException) { } }
+    private async Task PlatformFilterChangedAsync(ChangeEventArgs e) { platformFilter = e.Value?.ToString() ?? string.Empty; page = 1; await LoadAsync(); }
+    private async Task StatusFilterChangedAsync(ChangeEventArgs e) { statusFilter = e.Value?.ToString() ?? string.Empty; page = 1; await LoadAsync(); }
+    private async Task ExclusiveFilterChangedAsync(ChangeEventArgs e) { exclusiveFilter = e.Value?.ToString() ?? string.Empty; page = 1; await LoadAsync(); }
+    private bool? ParseExclusive() => exclusiveFilter switch { "true" => true, "false" => false, _ => null };
+
+    private async Task ChangeSortAsync(string key) { if (sortBy == key) sortOrder = sortOrder == "asc" ? "desc" : "asc"; else { sortBy = key; sortOrder = "asc"; } page = 1; await LoadAsync(); }
+    private string SortIndicator(string key) => sortBy == key ? (sortOrder == "asc" ? "↑" : "↓") : string.Empty;
+
+    private async Task PageSizeChangedAsync(ChangeEventArgs e) { if (int.TryParse(e.Value?.ToString(), out var value)) pageSize = value; page = 1; await LoadAsync(); }
+    private Task PreviousPageAsync() => GoToPageAsync(page - 1);
+    private Task NextPageAsync() => GoToPageAsync(page + 1);
+    private async Task GoToPageAsync(int target) { var normalized = Math.Clamp(target, 1, TotalPages); if (normalized == page) return; page = normalized; await LoadAsync(); }
+
+    private void ToggleColumnMenu() => showColumnMenu = !showColumnMenu;
+    private bool IsColumnVisible(string key) => !hiddenColumns.Contains(key);
+    private async Task ToggleColumnAsync(string key) { if (!hiddenColumns.Remove(key)) hiddenColumns.Add(key); await SaveColumnPreferencesAsync(); }
+    private async Task SaveColumnPreferencesAsync() { try { await JS.InvokeVoidAsync("localStorage.setItem", HiddenColumnsKey, JsonSerializer.Serialize(hiddenColumns, PreferenceJson)); } catch (JSException) { } }
+
+    private void OpenCreate() { editingId = null; form = new GroupInput(); formActive = true; modalError = null; editorOpen = true; showColumnMenu = false; }
+    private void OpenEdit(GroupDto group) { editingId = group.Id; form = new GroupInput { Name = group.Name, Description = group.Description, Platform = group.Platform, RateMultiplier = group.RateMultiplier, IsExclusive = group.IsExclusive, SubscriptionType = group.SubscriptionType, DailyLimitUsd = group.DailyLimitUsd, WeeklyLimitUsd = group.WeeklyLimitUsd, MonthlyLimitUsd = group.MonthlyLimitUsd, RpmLimit = group.RpmLimit, AdvancedJson = group.AdvancedJson }; formActive = group.Status == "active"; modalError = null; editorOpen = true; }
+    private void StatusFormChanged(ChangeEventArgs e) => formActive = e.Value?.ToString() != "inactive";
+    private void CloseEditor() => editorOpen = false;
+    private async Task SaveAsync() { saving = true; modalError = null; try { if (editingId is null) await Api.CreateGroupAsync(form); else await Api.UpdateGroupAsync(editingId, form, formActive); editorOpen = false; Toasts.Success(editingId is null ? "分组已创建" : "分组已更新"); await LoadAsync(); } catch (ApiException ex) { modalError = ex.Message; } finally { saving = false; } }
+
+    private async Task DuplicateAsync(GroupDto group) { if (!duplicatingIds.Add(group.Id)) return; try { var duplicate = await Api.DuplicateGroupAsync(group.Id); Toasts.Success($"已复制为“{duplicate.Name}”"); await LoadAsync(); } catch (ApiException ex) { Toasts.Error(ex.Message); } finally { duplicatingIds.Remove(group.Id); } }
+    private void OpenDelete(GroupDto group) { deleteTarget = group; deleteError = null; }
+    private void CloseDelete() { if (!deleting) deleteTarget = null; }
+    private async Task DeleteAsync() { if (deleteTarget is null) return; deleting = true; deleteError = null; try { await Api.DeleteGroupAsync(deleteTarget.Id); Toasts.Success("分组已删除"); deleteTarget = null; await LoadAsync(); } catch (ApiException ex) { deleteError = ex.Message; } finally { deleting = false; } }
+
+    private void OpenOverrides(GroupDto group, string mode) { overrideGroup = group; overrideMode = mode; }
+    private void CloseOverrides() => overrideGroup = null;
+    private void OpenCompositeRoutes(GroupDto group) => compositeRoutesGroup = group;
+    private void CloseCompositeRoutes() => compositeRoutesGroup = null;
+
+    private async Task OpenSortAsync() { sortOpen = true; sortLoading = true; showColumnMenu = false; try { sortableGroups = (await Api.GetGroupsAsync()).OrderBy(x => x.SortOrder).ThenBy(x => long.TryParse(x.Id, out var id) ? id : long.MaxValue).ToList(); } catch (ApiException ex) { Toasts.Error(ex.Message); sortOpen = false; } finally { sortLoading = false; } }
+    private void CloseSort() { if (!sortSaving) sortOpen = false; }
+    private void MoveSort(int index, int delta) { var target = index + delta; if (index < 0 || index >= sortableGroups.Count || target < 0 || target >= sortableGroups.Count) return; (sortableGroups[index], sortableGroups[target]) = (sortableGroups[target], sortableGroups[index]); }
+    private async Task SaveSortAsync() { sortSaving = true; try { var updates = sortableGroups.Select((item, index) => new GroupSortOrderUpdateDto { Id = long.Parse(item.Id), SortOrder = index * 10 }); await Api.UpdateAdminGroupSortOrderAsync(updates); Toasts.Success("分组排序已保存"); sortOpen = false; sortBy = "sort_order"; sortOrder = "asc"; await LoadAsync(); } catch (Exception ex) when (ex is ApiException or FormatException) { Toasts.Error(ex.Message); } finally { sortSaving = false; } }
+
+    private GroupUsageSummaryDto GetUsage(GroupDto group) => long.TryParse(group.Id, out var id) && usageMap.TryGetValue(id, out var usage) ? usage : new();
+    private GroupCapacitySummaryDto? GetCapacity(GroupDto group) => long.TryParse(group.Id, out var id) && capacityMap.TryGetValue(id, out var value) ? value : null;
+    private RenderFragment CapacityCell(GroupDto group) => builder => { var c = GetCapacity(group); if (c is null) { builder.AddContent(0, "—"); return; } builder.OpenElement(1, "div"); builder.AddAttribute(2, "class", "capacity-cell"); AddCapacityLine(builder, 3, "并发", c.ConcurrencyUsed, c.ConcurrencyMax); if (c.SessionsMax > 0) AddCapacityLine(builder, 10, "会话", c.SessionsUsed, c.SessionsMax); if (c.RpmMax > 0) AddCapacityLine(builder, 20, "RPM", c.RpmUsed, c.RpmMax); builder.CloseElement(); };
+    private static void AddCapacityLine(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, int sequence, string label, int used, int max) { builder.OpenElement(sequence, "span"); builder.AddAttribute(sequence + 1, "title", label); builder.AddAttribute(sequence + 2, "class", "capacity-badge"); builder.OpenElement(sequence + 3, "strong"); builder.AddContent(sequence + 4, used); builder.CloseElement(); builder.AddContent(sequence + 5, " / "); builder.OpenElement(sequence + 6, "strong"); builder.AddContent(sequence + 7, max); builder.CloseElement(); builder.CloseElement(); }
+    private static bool HasAnyLimit(GroupDto group) => group.DailyLimitUsd is > 0 || group.WeeklyLimitUsd is > 0 || group.MonthlyLimitUsd is > 0;
+    private string LimitSummary(GroupDto group) { var values = new List<string>(); if (group.DailyLimitUsd is > 0) values.Add($"{Money(group.DailyLimitUsd.Value)}/日"); if (group.WeeklyLimitUsd is > 0) values.Add($"{Money(group.WeeklyLimitUsd.Value)}/周"); if (group.MonthlyLimitUsd is > 0) values.Add($"{Money(group.MonthlyLimitUsd.Value)}/月"); return string.Join(" · ", values); }
+    private static string PlatformLabel(string value) => value switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", "composite" => "Composite", _ => value };
+    private static string FormatRate(double value) => value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+    private static string Money(double value) => "$" + value.ToString(value is >= 0.01 or <= -0.01 ? "0.00" : "0.######", System.Globalization.CultureInfo.InvariantCulture);
+
+    public void Dispose() { searchDebounce?.Cancel(); searchDebounce?.Dispose(); }
+    private sealed record ColumnOption(string Key, string Label);
+}

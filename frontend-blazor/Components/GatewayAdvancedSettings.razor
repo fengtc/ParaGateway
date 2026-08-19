@@ -1,0 +1,127 @@
+<div class="gateway-advanced-settings" data-testid="gateway-advanced-settings">
+    <section>
+        <header><div><h2>模型回退与身份修正</h2><p>配置跨平台缺省模型、Grok 兼容策略和 Claude → Gemini 身份提示。</p></div></header>
+        <div class="advanced-grid">
+            <ToggleField Label="启用模型回退" Hint="请求模型不可用时使用对应平台缺省模型"><InputCheckbox @bind-Value="Settings.EnableModelFallback" /></ToggleField>
+            <ToggleField Label="Grok 跨客户端模型映射" Hint="在不同兼容协议间统一 Grok 模型名"><InputCheckbox @bind-Value="Settings.GrokCrossClientModelMapEnabled" /></ToggleField>
+            <Field Label="Anthropic 回退模型"><InputText @bind-Value="Settings.FallbackModelAnthropic" /></Field>
+            <Field Label="OpenAI 回退模型"><InputText @bind-Value="Settings.FallbackModelOpenAI" /></Field>
+            <Field Label="Gemini 回退模型"><InputText @bind-Value="Settings.FallbackModelGemini" /></Field>
+            <Field Label="Antigravity 回退模型"><InputText @bind-Value="Settings.FallbackModelAntigravity" /></Field>
+            <Field Label="Grok 默认文本模型"><InputText @bind-Value="Settings.GrokDefaultTextModel" /></Field>
+            <Field Label="Grok Base URL 模式"><InputSelect @bind-Value="Settings.GrokDefaultBaseUrlMode"><option value="">默认</option><option value="api">API</option><option value="chat">Chat</option></InputSelect></Field>
+            <ToggleField Label="启用身份补丁" Hint="Claude 请求转 Gemini 时注入身份说明"><InputCheckbox @bind-Value="Settings.EnableIdentityPatch" /></ToggleField>
+            <Field Label="身份补丁提示词" Full="true"><InputTextArea @bind-Value="Settings.IdentityPatchPrompt" rows="5" /></Field>
+        </div>
+    </section>
+
+    <section>
+        <header><div><h2>Claude Code 与 Codex 客户端</h2><p>限制客户端版本并统一上游 User-Agent；留空表示不限制。</p></div></header>
+        <div class="advanced-grid">
+            <Field Label="Claude Code 最低版本"><InputText @bind-Value="Settings.MinClaudeCodeVersion" /></Field>
+            <Field Label="Claude Code 最高版本"><InputText @bind-Value="Settings.MaxClaudeCodeVersion" /></Field>
+            <Field Label="Codex 最低版本"><InputText @bind-Value="Settings.MinCodexVersion" /></Field>
+            <Field Label="Codex 最高版本"><InputText @bind-Value="Settings.MaxCodexVersion" /></Field>
+            <Field Label="Codex User-Agent"><InputText @bind-Value="Settings.OpenAICodexUserAgent" /></Field>
+            <Field Label="Codex 客户端版本" Hint="@($"已同步：{Settings.OpenAICodexClientVersionSynced}")"><InputText @bind-Value="Settings.OpenAICodexClientVersion" /></Field>
+            <ToggleField Label="自动同步 Codex 版本" Hint="周期性同步官方客户端版本"><InputCheckbox @bind-Value="Settings.OpenAICodexVersionAutoSyncEnabled" /></ToggleField>
+            <ToggleField Label="允许 app-server 客户端" Hint="codex_cli_only 分组允许 App Server 客户端"><InputCheckbox @bind-Value="Settings.CodexCliOnlyAllowAppServerClients" /></ToggleField>
+            <Field Label="Codex 黑名单" Hint="每行一个版本或特征" Full="true"><InputTextArea @bind-Value="Settings.CodexCliOnlyBlacklist" rows="4" /></Field>
+            <Field Label="Codex 白名单" Hint="每行一个版本或特征" Full="true"><InputTextArea @bind-Value="Settings.CodexCliOnlyWhitelist" rows="4" /></Field>
+            <Field Label="引擎指纹信号 JSON" Full="true"><InputTextArea @bind-Value="Settings.CodexCliOnlyEngineFingerprintSignals" rows="6" /></Field>
+        </div>
+    </section>
+
+    <section>
+        <header><div><h2>账号调度</h2><p>控制低上游倍率优先、OAuth 倍率、分组隔离和高级加权调度。</p></div></header>
+        <div class="advanced-grid">
+            <ToggleField Label="低上游倍率优先" Hint="优先选择上游成本倍率更低的账号"><InputCheckbox @bind-Value="Settings.OpenAILowUpstreamRatePriorityEnabled" /></ToggleField>
+            <ToggleField Label="允许无分组密钥调度" Hint="允许未关联分组的密钥进入账号池"><InputCheckbox @bind-Value="Settings.AllowUngroupedKeyScheduling" /></ToggleField>
+            <Field Label="OpenAI OAuth 调度倍率"><InputNumber @bind-Value="Settings.OpenAIOAuthSchedulingRateMultiplier" /></Field>
+            <ToggleField Label="高级调度器" Hint="启用多维加权候选排序"><InputCheckbox @bind-Value="Settings.OpenAIAdvancedSchedulerEnabled" /></ToggleField>
+            <ToggleField Label="会话粘性参与加权" Hint="将已有会话关系纳入权重"><InputCheckbox @bind-Value="Settings.OpenAIAdvancedSchedulerStickyWeightedEnabled" /></ToggleField>
+            <ToggleField Label="订阅优先级" Hint="把订阅优先级纳入候选排序"><InputCheckbox @bind-Value="Settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled" /></ToggleField>
+        </div>
+        <div class="thresholds">
+            <h3>账号自动停调阈值</h3><p>剩余额度百分比低于阈值时暂停调度；100 表示关闭。</p>
+            <div>@foreach (var platform in ThresholdPlatforms) { <Field Label="@PlatformLabel(platform)"><input type="number" min="1" max="100" value="@Threshold(platform)" @onchange="args => SetThreshold(platform, args.Value)" /></Field> }</div>
+        </div>
+        @if (Settings.OpenAIAdvancedSchedulerEnabled)
+        {
+            <div class="scheduler-weights">
+                <Field Label="Top K"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerLbTopK" /></Field>
+                <Field Label="优先级权重"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerWeightPriority" /></Field>
+                <Field Label="负载权重"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerWeightLoad" /></Field>
+                <Field Label="队列权重"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerWeightQueue" /></Field>
+                <Field Label="错误率权重"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerWeightErrorRate" /></Field>
+                <Field Label="TTFT 权重"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerWeightTtft" /></Field>
+                <Field Label="重置时间权重"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerWeightReset" /></Field>
+                <Field Label="额度余量权重"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerWeightQuotaHeadroom" /></Field>
+                <Field Label="上游成本权重"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerWeightUpstreamCost" /></Field>
+                <Field Label="Previous Response 权重"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerWeightPreviousResponse" /></Field>
+                <Field Label="会话粘性权重"><InputText @bind-Value="Settings.OpenAIAdvancedSchedulerWeightSessionSticky" /></Field>
+            </div>
+        }
+    </section>
+
+    <section>
+        <header><div><h2>OpenAI fast / flex 策略</h2><p>按 service tier、凭据范围、用户和模型控制透传、过滤或阻止。</p></div><button type="button" class="button secondary small" @onclick="AddFastRule"><Icon Name="plus" Size="14" />添加规则</button></header>
+        @if (Settings.OpenAIFastPolicySettings.Rules.Count == 0) { <p class="advanced-empty">暂无 fast/flex 策略，未匹配请求按默认行为转发。</p> }
+        else
+        {
+            <div class="fast-rules">
+                @foreach (var rule in Settings.OpenAIFastPolicySettings.Rules)
+                {
+                    <article @key="rule"><header><strong>@rule.ServiceTier</strong><button type="button" class="icon-button" title="删除规则" @onclick="() => Settings.OpenAIFastPolicySettings.Rules.Remove(rule)"><Icon Name="trash" Size="15" /></button></header><div class="fast-grid">
+                        <Field Label="Service Tier"><select @bind="rule.ServiceTier"><option value="fast">fast</option><option value="flex">flex</option><option value="priority">priority</option><option value="all">全部</option></select></Field>
+                        <Field Label="处理动作"><select @bind="rule.Action"><option value="pass">透传</option><option value="filter">过滤 tier</option><option value="block">阻止</option></select></Field>
+                        <Field Label="适用凭据"><select @bind="rule.Scope"><option value="all">全部</option><option value="oauth">OAuth</option><option value="apikey">API Key</option></select></Field>
+                        <Field Label="限定用户 ID" Hint="逗号分隔；留空表示全部"><input value="@JoinIds(rule.UserIds)" @onchange="args => rule.UserIds = SplitIds(args.Value?.ToString())" /></Field>
+                        <Field Label="模型白名单" Hint="每行一个模型模式" Full="true"><textarea rows="4" value="@JoinLines(rule.ModelWhitelist)" @onchange="args => rule.ModelWhitelist = SplitLines(args.Value?.ToString())"></textarea></Field>
+                        @if (rule.Action == "block") { <Field Label="阻止提示" Full="true"><input @bind="rule.ErrorMessage" /></Field> }
+                        <Field Label="非白名单回退"><select @bind="rule.FallbackAction"><option value="pass">透传</option><option value="filter">过滤 tier</option><option value="block">阻止</option></select></Field>
+                        @if (rule.FallbackAction == "block") { <Field Label="回退阻止提示"><input @bind="rule.FallbackErrorMessage" /></Field> }
+                    </div></article>
+                }
+            </div>
+        }
+    </section>
+
+    <section>
+        <header><div><h2>网关转发行为</h2><p>控制指纹、元数据、签名、系统提示、缓存 TTL 与客户端时间线兼容。</p></div></header>
+        <div class="advanced-grid">
+            <ToggleField Label="统一客户端指纹" Hint="规范不同客户端上游指纹"><InputCheckbox @bind-Value="Settings.EnableFingerprintUnification" /></ToggleField>
+            <ToggleField Label="透传 metadata" Hint="保留请求中的 metadata 字段"><InputCheckbox @bind-Value="Settings.EnableMetadataPassthrough" /></ToggleField>
+            <ToggleField Label="CCH Signing" Hint="为兼容请求添加 CCH 签名"><InputCheckbox @bind-Value="Settings.EnableCchSigning" /></ToggleField>
+            <ToggleField Label="Claude OAuth 系统提示注入" Hint="为 OAuth 请求注入统一系统提示"><InputCheckbox @bind-Value="Settings.EnableClaudeOAuthSystemPromptInjection" /></ToggleField>
+            <ToggleField Label="Anthropic 1h Cache TTL" Hint="自动注入 1 小时缓存 TTL"><InputCheckbox @bind-Value="Settings.EnableAnthropicCacheTtl1hInjection" /></ToggleField>
+            <ToggleField Label="改写 messages cache_control" Hint="规范不兼容的缓存控制块"><InputCheckbox @bind-Value="Settings.RewriteMessageCacheControl" /></ToggleField>
+            <ToggleField Label="客户端 dateline 归一化" Hint="仅 Anthropic OAuth / Setup Token"><InputCheckbox @bind-Value="Settings.EnableClientDatelineNormalization" /></ToggleField>
+            <ToggleField Label="用户可查看错误请求" Hint="允许终端用户在使用记录中查看自己的失败请求"><InputCheckbox @bind-Value="Settings.AllowUserViewErrorRequests" /></ToggleField>
+            <Field Label="Antigravity User-Agent 版本"><InputText @bind-Value="Settings.AntigravityUserAgentVersion" /></Field>
+            <Field Label="Claude OAuth 系统提示" Full="true"><InputTextArea @bind-Value="Settings.ClaudeOAuthSystemPrompt" rows="6" /></Field>
+            <Field Label="Claude OAuth 提示块 JSON" Full="true"><InputTextArea @bind-Value="Settings.ClaudeOAuthSystemPromptBlocks" rows="8" /></Field>
+        </div>
+    </section>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AdminSettingsDto Settings { get; set; } = default!;
+    private static readonly string[] ThresholdPlatforms = ["openai", "anthropic", "grok"];
+
+    protected override void OnParametersSet()
+    {
+        Settings.OpenAIFastPolicySettings ??= new();
+        Settings.AccountSchedulingThresholds ??= [];
+        foreach (var platform in ThresholdPlatforms) if (!Settings.AccountSchedulingThresholds.ContainsKey(platform)) Settings.AccountSchedulingThresholds[platform] = 100;
+    }
+
+    private void AddFastRule() => Settings.OpenAIFastPolicySettings.Rules.Add(new OpenAIFastPolicyRuleDto { ServiceTier = "fast", Action = "pass", Scope = "all", FallbackAction = "pass" });
+    private int Threshold(string platform) => Settings.AccountSchedulingThresholds.TryGetValue(platform, out var value) ? Math.Clamp(value, 1, 100) : 100;
+    private void SetThreshold(string platform, object? value) => Settings.AccountSchedulingThresholds[platform] = int.TryParse(value?.ToString(), out var number) ? Math.Clamp(number, 1, 100) : 100;
+    private static string PlatformLabel(string platform) => platform switch { "openai" => "OpenAI", "anthropic" => "Anthropic", "grok" => "Grok", _ => platform };
+    private static string JoinIds(IEnumerable<long> values) => string.Join(", ", values);
+    private static List<long> SplitIds(string? value) => (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => long.TryParse(x, out var id) ? id : 0).Where(x => x > 0).Distinct().ToList();
+    private static string JoinLines(IEnumerable<string> values) => string.Join(Environment.NewLine, values);
+    private static List<string> SplitLines(string? value) => (value ?? string.Empty).Split(['\r','\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+}

@@ -1,0 +1,453 @@
+@page "/account"
+@page "/profile"
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject IJSRuntime Js
+@inject ToastService Toasts
+@inject NavigationManager Navigation
+
+<PageTitle>个人资料 · ParaGateway</PageTitle>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入个人资料" />
+}
+else if (loadError is not null)
+{
+    <ErrorState Message="@loadError" OnRetry="LoadAsync" />
+}
+else if (profile is not null)
+{
+    <div class="profile-shell" data-testid="profile-shell">
+        <section class="profile-hero" data-testid="profile-overview-hero">
+            <div class="profile-hero-avatar">
+                @if (!string.IsNullOrWhiteSpace(ProfileAvatarUrl))
+                {
+                    <img src="@ProfileAvatarUrl" alt="@DisplayName" />
+                }
+                else
+                {
+                    <span>@AvatarInitial</span>
+                }
+            </div>
+            <div class="profile-hero-main">
+                <div class="profile-hero-copy">
+                    <div class="profile-hero-title">
+                        <h2>@DisplayName</h2>
+                        <span class="status-badge @(profile.Role.Equals("admin", StringComparison.OrdinalIgnoreCase) ? "primary" : "neutral")">@RoleLabel(profile.Role)</span>
+                        <span class="status-badge @(profile.IsActive ? "success" : "danger")">@(profile.IsActive ? "活跃" : "已停用")</span>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(DisplayableEmail))
+                    {
+                        <p>@DisplayableEmail</p>
+                    }
+                    @if (SourceHints.Count > 0)
+                    {
+                        <div class="profile-source-chips">
+                            @foreach (var hint in SourceHints)
+                            {
+                                <span><Icon Name="link" Size="13" /> @hint.Text</span>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="profile-metrics">
+                    <article data-testid="profile-overview-metric-balance"><small>账户余额</small><strong>@UiFormat.Money(profile.BalanceMicros)</strong></article>
+                    <article data-testid="profile-overview-metric-concurrency"><small>并发限制</small><strong>@profile.MaxConcurrency</strong></article>
+                    <article data-testid="profile-overview-metric-member-since"><small>注册时间</small><strong>@profile.CreatedAt.ToLocalTime().ToString("yyyy年M月")</strong></article>
+                </div>
+            </div>
+        </section>
+
+        <section class="profile-card" data-testid="profile-basics-panel">
+            <header class="profile-card-header">
+                <div><h2>资料与头像</h2><p>维护公开展示信息，并保持头像与昵称风格一致。</p></div>
+                <button type="button" class="icon-button" title="刷新个人资料" aria-label="刷新个人资料" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button>
+            </header>
+            <div class="profile-basics-grid">
+                <article class="profile-inset-card avatar-editor">
+                    <div class="avatar-editor-preview">
+                        @if (!string.IsNullOrWhiteSpace(AvatarPreviewUrl))
+                        {
+                            <img src="@AvatarPreviewUrl" alt="@DisplayName" data-testid="profile-avatar-preview" />
+                        }
+                        else
+                        {
+                            <span>@AvatarInitial</span>
+                        }
+                    </div>
+                    <div class="avatar-editor-copy">
+                        <h3>资料头像</h3>
+                        <p>上传图片时会自动压缩静态图片到 20KB 以内，GIF 需自行控制在 20KB 以内。</p>
+                    </div>
+                    @if (avatarError is not null)
+                    {
+                        <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@avatarError</span></div>
+                    }
+                    <div class="button-row avatar-actions">
+                        <label class="button secondary small file-button" for="profile-avatar-file">上传图片</label>
+                        <input id="profile-avatar-file" @ref="avatarFileInput" data-testid="profile-avatar-file-input" class="visually-hidden-file" type="file" accept="image/*" @onchange="HandleAvatarSelectedAsync" />
+                        <button type="button" class="button primary small" data-testid="profile-avatar-save" disabled="@(avatarSaving || string.IsNullOrWhiteSpace(avatarDraft))" @onclick="SaveAvatarAsync">@(avatarSaving ? "保存中…" : "保存")</button>
+                        <button type="button" class="button secondary small" data-testid="profile-avatar-delete" disabled="@avatarSaving" @onclick="DeleteAvatarAsync">删除</button>
+                    </div>
+                </article>
+
+                <article class="profile-inset-card profile-editor">
+                    <h3>编辑个人资料</h3>
+                    @if (profileError is not null)
+                    {
+                        <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@profileError</span></div>
+                    }
+                    <EditForm Model="profileModel" OnValidSubmit="SaveProfileAsync" FormName="profile">
+                        <DataAnnotationsValidator />
+                        <div class="form-field">
+                            <label for="profile-name">用户名</label>
+                            <InputText id="profile-name" @bind-Value="profileModel.DisplayName" @oninput="OnDisplayNameInput" autocomplete="name" placeholder="输入用户名" />
+                            <ValidationMessage For="() => profileModel.DisplayName" />
+                        </div>
+                        <div class="profile-form-action"><button type="submit" class="button primary" disabled="@savingProfile">@(savingProfile ? "更新中…" : "更新资料")</button></div>
+                    </EditForm>
+                </article>
+            </div>
+        </section>
+
+        <section class="profile-card" data-testid="profile-auth-bindings-panel">
+            <header class="profile-card-header"><div><h2>登录方式绑定</h2><p>查看当前绑定状态，并将更多第三方登录方式关联到这个账号。</p></div></header>
+            @if (identityError is not null)
+            {
+                <div class="inline-alert danger profile-card-alert" role="alert"><Icon Name="alert" Size="18" /><span>@identityError</span></div>
+            }
+            <div class="profile-binding-grid">
+                @foreach (var item in BindingProviders)
+                {
+                    var summary = BindingSummary(item.Key);
+                    <article class="profile-binding-item">
+                        <div class="provider-avatar @item.Tone">@if (item.Key == "email") { <Icon Name="mail" Size="18" /> } else { <span>@item.Initial</span> }</div>
+                        <div class="provider-main">
+                            <div class="provider-title"><h3>@ProviderLabel(item.Key)</h3><span class="status-badge @(summary.Bound ? "success" : "neutral")">@(summary.Bound ? "已绑定" : "未绑定")</span></div>
+                            @if (item.Key == "email" && !string.IsNullOrWhiteSpace(DisplayableEmail)) { <p>@DisplayableEmail</p> }
+                            @if (item.Key != "email" && !string.IsNullOrWhiteSpace(summary.DisplayName)) { <p class="provider-identity"><strong>@summary.DisplayName</strong></p> }
+                            @if (item.Key != "email" && !string.IsNullOrWhiteSpace(summary.SubjectHint)) { <p>@summary.SubjectHint</p> }
+                            @if (summary.BoundCount > 1) { <p>已关联 @summary.BoundCount 条记录</p> }
+                            @if (!string.IsNullOrWhiteSpace(BindingNote(summary))) { <p>@BindingNote(summary)</p> }
+                        </div>
+                        <div class="provider-actions">
+                            @if (item.Key == "email")
+                            {
+                                <button type="button" class="button secondary small" data-testid="profile-binding-email-toggle" @onclick="ToggleEmailBindingForm">@(emailBindingVisible ? "收起邮箱表单" : "管理邮箱")</button>
+                            }
+                            else if (CanBindProvider(item.Key, summary))
+                            {
+                                <button type="button" class="button primary small" disabled="@bindingProviderBusy" @onclick="() => StartIdentityBindingAsync(item.Key)">@(bindingProviderBusy && bindingProvider == item.Key ? "正在跳转…" : $"绑定 {ProviderLabel(item.Key)}")</button>
+                            }
+                            else if (summary.Bound && summary.CanUnbind)
+                            {
+                                <button type="button" class="button secondary small" disabled="@unbindingProviderBusy" @onclick="() => UnbindIdentityAsync(item.Key)">@(unbindingProviderBusy && bindingProvider == item.Key ? "正在解绑…" : "解绑")</button>
+                            }
+                        </div>
+                        @if (item.Key == "email" && emailBindingVisible)
+                        {
+                            <EditForm Model="emailBinding" OnValidSubmit="BindEmailAsync" FormName="email-binding" class="email-binding-form" data-testid="profile-binding-email-form">
+                                <DataAnnotationsValidator />
+                                <div class="form-field"><label for="binding-email">邮箱</label><InputText id="binding-email" @bind-Value="emailBinding.Email" @oninput="OnEmailBindingInput" type="email" autocomplete="email" placeholder="输入邮箱地址" /><ValidationMessage For="() => emailBinding.Email" /></div>
+                                <div class="form-field"><label for="binding-code">验证码</label><div class="input-action-row"><InputText id="binding-code" @bind-Value="emailBinding.VerifyCode" @oninput="OnEmailCodeInput" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="输入验证码" /><button type="button" class="button secondary small" disabled="@sendingEmailCode" @onclick="SendEmailBindingCodeAsync">@(sendingEmailCode ? "发送中…" : "发送验证码")</button></div><ValidationMessage For="() => emailBinding.VerifyCode" /></div>
+                                <div class="form-field"><label for="binding-password">@(profile.EmailBound ? "当前密码" : "设置登录密码")</label><InputText id="binding-password" @bind-Value="emailBinding.Password" @oninput="OnEmailPasswordInput" type="password" autocomplete="current-password" placeholder="@(profile.EmailBound ? "输入当前密码" : "设置登录密码")" /><ValidationMessage For="() => emailBinding.Password" /></div>
+                                <button type="submit" class="button primary small" disabled="@bindingEmailBusy">@(bindingEmailBusy ? "处理中…" : profile.EmailBound ? "更换主邮箱" : "绑定邮箱")</button>
+                            </EditForm>
+                        }
+                    </article>
+                }
+            </div>
+        </section>
+
+        @if (SourceHints.Count > 0)
+        {
+            <section class="profile-card profile-sources-card">
+                <header class="profile-card-header"><div><h2>资料来源</h2><p>部分头像和昵称可能同步自第三方登录方式。</p></div></header>
+                <div class="profile-source-list">@foreach (var hint in SourceHints) { <div><Icon Name="link" Size="15" /><span>@hint.Text</span></div> }</div>
+            </section>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(publicSettings.ContactInfo))
+        {
+            <section class="profile-contact-card"><span class="contact-icon"><Icon Name="message-circle" Size="22" /></span><div><h2>联系客服</h2><p>@publicSettings.ContactInfo</p></div></section>
+        }
+
+        <section class="profile-card password-card">
+            <header class="profile-card-header"><div><h2>修改密码</h2><p>密码至少需要 8 个字符。</p></div></header>
+            <div class="profile-card-body">
+                @if (passwordError is not null)
+                {
+                    <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@passwordError</span></div>
+                }
+                <EditForm Model="passwordModel" OnValidSubmit="SavePasswordAsync" FormName="change-password" class="password-form">
+                    <DataAnnotationsValidator />
+                    <div class="form-field"><label for="current-password">当前密码</label><InputText id="current-password" @bind-Value="passwordModel.CurrentPassword" @oninput="OnCurrentPasswordInput" type="password" autocomplete="current-password" /><ValidationMessage For="() => passwordModel.CurrentPassword" /></div>
+                    <div class="form-field"><label for="new-password">新密码</label><InputText id="new-password" @bind-Value="passwordModel.NewPassword" @oninput="OnNewPasswordInput" type="password" autocomplete="new-password" /><small>密码至少需要 8 个字符</small><ValidationMessage For="() => passwordModel.NewPassword" /></div>
+                    <div class="form-field"><label for="confirm-password">确认新密码</label><InputText id="confirm-password" @bind-Value="passwordModel.ConfirmPassword" @oninput="OnConfirmPasswordInput" type="password" autocomplete="new-password" /><ValidationMessage For="() => passwordModel.ConfirmPassword" /></div>
+                    <div class="profile-form-action"><button type="submit" class="button primary" disabled="@savingPassword">@(savingPassword ? "修改中…" : "修改密码")</button></div>
+                </EditForm>
+            </div>
+        </section>
+
+        <SecuritySettings Profile="profile" PublicSettings="publicSettings" ProfileChanged="OnSecurityProfileChangedAsync" />
+    </div>
+}
+
+@code {
+    private ProfileDto? profile;
+    private PublicSettingsDto publicSettings = new();
+    private ProfileUpdate profileModel = new();
+    private ChangePasswordRequest passwordModel = new();
+    private ElementReference avatarFileInput;
+    private string avatarDraft = string.Empty;
+    private bool loading = true;
+    private bool savingProfile;
+    private bool savingPassword;
+    private bool avatarSaving;
+    private bool emailBindingVisible;
+    private bool sendingEmailCode;
+    private bool bindingEmailBusy;
+    private bool bindingProviderBusy;
+    private bool unbindingProviderBusy;
+    private string? bindingProvider;
+    private string? identityError;
+    private EmailBindingForm emailBinding = new();
+    private string? loadError;
+    private string? profileError;
+    private string? passwordError;
+    private string? avatarError;
+
+    private static readonly BindingProvider[] BindingProviders =
+    [
+        new("email", "E", "email"), new("linuxdo", "L", "linuxdo"), new("dingtalk", "D", "dingtalk"),
+        new("oidc", "O", "oidc"), new("wechat", "W", "wechat")
+    ];
+
+    private string DisplayName => string.IsNullOrWhiteSpace(profile?.DisplayName) ? profile?.Email ?? "用户" : profile.DisplayName.Trim();
+    private string AvatarInitial => DisplayName.Length == 0 ? "U" : DisplayName[..1].ToUpperInvariant();
+    private string ProfileAvatarUrl => profile?.AvatarUrl?.Trim() ?? string.Empty;
+    private string AvatarPreviewUrl => string.IsNullOrWhiteSpace(avatarDraft) ? ProfileAvatarUrl : avatarDraft;
+    private string DisplayableEmail => profile is null || (profile.Email.EndsWith(".invalid", StringComparison.OrdinalIgnoreCase) && !profile.EmailBound) ? string.Empty : profile.Email;
+    private IReadOnlyList<SourceHint> SourceHints => BuildSourceHints();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true; loadError = null;
+        try
+        {
+            var profileTask = Api.GetProfileAsync();
+            var settingsTask = Api.GetPublicSettingsAsync();
+            profile = await profileTask;
+            try { publicSettings = await settingsTask; } catch (ApiException) { publicSettings = new(); }
+            profileModel = new ProfileUpdate { DisplayName = profile.DisplayName };
+            avatarDraft = string.Empty;
+            if (!profile.Email.EndsWith(".invalid", StringComparison.OrdinalIgnoreCase)) emailBinding.Email = profile.Email;
+        }
+        catch (ApiException ex) { loadError = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private void OnDisplayNameInput(ChangeEventArgs args) => profileModel.DisplayName = args.Value?.ToString() ?? string.Empty;
+    private void OnCurrentPasswordInput(ChangeEventArgs args) => passwordModel.CurrentPassword = args.Value?.ToString() ?? string.Empty;
+    private void OnNewPasswordInput(ChangeEventArgs args) => passwordModel.NewPassword = args.Value?.ToString() ?? string.Empty;
+    private void OnConfirmPasswordInput(ChangeEventArgs args) => passwordModel.ConfirmPassword = args.Value?.ToString() ?? string.Empty;
+    private void OnEmailBindingInput(ChangeEventArgs args) => emailBinding.Email = args.Value?.ToString() ?? string.Empty;
+    private void OnEmailCodeInput(ChangeEventArgs args) => emailBinding.VerifyCode = args.Value?.ToString() ?? string.Empty;
+    private void OnEmailPasswordInput(ChangeEventArgs args) => emailBinding.Password = args.Value?.ToString() ?? string.Empty;
+
+    private async Task SaveProfileAsync()
+    {
+        savingProfile = true; profileError = null;
+        try
+        {
+            profile = await Api.UpdateProfileAsync(profileModel);
+            await Auth.RefreshAsync();
+            profileModel = new ProfileUpdate { DisplayName = profile.DisplayName };
+            Toasts.Success("资料更新成功");
+        }
+        catch (ApiException ex) { profileError = ex.Message; }
+        finally { savingProfile = false; }
+    }
+
+    private async Task HandleAvatarSelectedAsync(ChangeEventArgs _)
+    {
+        avatarError = null;
+        try { avatarDraft = await Js.InvokeAsync<string>("paraGateway.prepareAvatar", avatarFileInput); }
+        catch (JSException ex) { avatarError = UserFacingJsError(ex.Message); }
+    }
+
+    private async Task SaveAvatarAsync()
+    {
+        if (profile is null || string.IsNullOrWhiteSpace(avatarDraft)) { Toasts.Error("请先上传头像图片"); return; }
+        avatarSaving = true; avatarError = null;
+        try
+        {
+            profile = await Api.UpdateProfileAsync(new ProfileUpdate { DisplayName = profile.DisplayName, AvatarUrl = avatarDraft });
+            avatarDraft = string.Empty; await Auth.RefreshAsync(); Toasts.Success("头像已更新");
+        }
+        catch (ApiException ex) { avatarError = ex.Message; }
+        finally { avatarSaving = false; }
+    }
+
+    private async Task DeleteAvatarAsync()
+    {
+        if (profile is null || (string.IsNullOrWhiteSpace(avatarDraft) && string.IsNullOrWhiteSpace(profile.AvatarUrl))) { Toasts.Error("当前没有可删除的头像"); return; }
+        avatarSaving = true; avatarError = null;
+        try
+        {
+            profile = await Api.UpdateProfileAsync(new ProfileUpdate { DisplayName = profile.DisplayName, AvatarUrl = string.Empty });
+            avatarDraft = string.Empty; await Auth.RefreshAsync(); Toasts.Success("头像已删除");
+        }
+        catch (ApiException ex) { avatarError = ex.Message; }
+        finally { avatarSaving = false; }
+    }
+
+    private Task OnSecurityProfileChangedAsync(ProfileDto updated) { profile = updated; return Task.CompletedTask; }
+
+    private void ToggleEmailBindingForm() { identityError = null; emailBindingVisible = !emailBindingVisible; }
+
+    private async Task SendEmailBindingCodeAsync()
+    {
+        sendingEmailCode = true; identityError = null;
+        try { await Api.SendEmailBindingCodeAsync(emailBinding.Email); Toasts.Success($"验证码已发送到 {emailBinding.Email}"); }
+        catch (ApiException ex) { identityError = ex.Message; }
+        finally { sendingEmailCode = false; }
+    }
+
+    private async Task BindEmailAsync()
+    {
+        bindingEmailBusy = true; identityError = null;
+        try
+        {
+            var replacing = profile?.EmailBound == true;
+            profile = await Api.BindEmailIdentityAsync(emailBinding.Email, emailBinding.VerifyCode, emailBinding.Password);
+            emailBinding.VerifyCode = string.Empty; emailBinding.Password = string.Empty; emailBindingVisible = false;
+            Toasts.Success(replacing ? "主邮箱已更新" : "账号绑定成功");
+        }
+        catch (ApiException ex) { identityError = ex.Message; }
+        finally { bindingEmailBusy = false; }
+    }
+
+    private async Task StartIdentityBindingAsync(string provider)
+    {
+        bindingProviderBusy = true; bindingProvider = provider; identityError = null;
+        try
+        {
+            await Api.PrepareOAuthBindAccessTokenCookieAsync();
+            var start = await Api.StartIdentityBindingAsync(provider, "/profile");
+            if (string.IsNullOrWhiteSpace(start.AuthorizeUrl)) throw new ApiException("后端未返回 OAuth 授权地址。", System.Net.HttpStatusCode.BadGateway);
+            start.AuthorizeUrl = await AddWeChatModeAsync(provider, start.AuthorizeUrl);
+            await Js.InvokeVoidAsync("sessionStorage.setItem", "paragateway.oauth.binding_provider", provider);
+            Navigation.NavigateTo(start.AuthorizeUrl, forceLoad: true);
+        }
+        catch (ApiException ex) { identityError = ex.Message; }
+        finally { bindingProviderBusy = false; }
+    }
+
+    private async Task<string> AddWeChatModeAsync(string provider, string authorizeUrl)
+    {
+        if (!provider.Equals("wechat", StringComparison.OrdinalIgnoreCase)) return authorizeUrl;
+        var uri = Navigation.ToAbsoluteUri(authorizeUrl); var query = ParseQueryValues(uri.Query); if (query.ContainsKey("mode")) return authorizeUrl;
+        var settings = publicSettings.WeChatOAuthEnabled || publicSettings.WeChatOAuthOpenEnabled.HasValue || publicSettings.WeChatOAuthMpEnabled.HasValue ? publicSettings : await Api.GetPublicSettingsAsync();
+        var userAgent = await Js.InvokeAsync<string>("paraGateway.getUserAgent");
+        var isWeChatBrowser = userAgent.Contains("MicroMessenger", StringComparison.OrdinalIgnoreCase);
+        var openEnabled = settings.WeChatOAuthOpenEnabled ?? settings.WeChatOAuthEnabled;
+        var mpEnabled = settings.WeChatOAuthMpEnabled ?? settings.WeChatOAuthEnabled;
+        var mode = isWeChatBrowser ? "mp" : "open";
+        if (mode == "mp" && !mpEnabled) throw new ApiException("当前微信环境未启用公众号 OAuth，请使用微信外部浏览器打开。", System.Net.HttpStatusCode.BadRequest);
+        if (mode == "open" && !openEnabled) throw new ApiException("当前浏览器未启用微信开放平台 OAuth，请在微信内打开。", System.Net.HttpStatusCode.BadRequest);
+        var builder = new UriBuilder(uri); var values = ParseQueryValues(builder.Query); values["mode"] = mode;
+        builder.Query = string.Join("&", values.Select(pair => $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value)}"));
+        return authorizeUrl.StartsWith("/", StringComparison.Ordinal) ? builder.Path + builder.Query + builder.Fragment : builder.Uri.ToString();
+    }
+
+    private static Dictionary<string, string> ParseQueryValues(string query)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2); var key = Uri.UnescapeDataString(parts[0].Replace('+', ' ')); if (string.IsNullOrWhiteSpace(key)) continue;
+            values[key] = parts.Length == 1 ? string.Empty : Uri.UnescapeDataString(parts[1].Replace('+', ' '));
+        }
+        return values;
+    }
+
+    private async Task UnbindIdentityAsync(string provider)
+    {
+        unbindingProviderBusy = true; bindingProvider = provider; identityError = null;
+        try { profile = await Api.UnbindIdentityAsync(provider); Toasts.Success($"{ProviderLabel(provider)} 已解绑"); }
+        catch (ApiException ex) { identityError = ex.Message; }
+        finally { unbindingProviderBusy = false; }
+    }
+
+    private async Task SavePasswordAsync()
+    {
+        savingPassword = true; passwordError = null;
+        try { await Api.ChangePasswordAsync(passwordModel); passwordModel = new(); Toasts.Success("密码修改成功"); }
+        catch (ApiException ex) { passwordError = ex.Message; }
+        finally { savingPassword = false; }
+    }
+
+    private UserIdentitySummaryDto BindingSummary(string provider)
+    {
+        if (profile is null) return new() { Provider = provider };
+        var summary = profile.Identities.For(provider);
+        if (summary.Bound || summary.BoundCount > 0 || summary.CanBind.HasValue || summary.CanUnbind || !string.IsNullOrWhiteSpace(summary.Note)) return summary;
+        if (profile.AuthBindings.TryGetValue(provider, out var auth)) return auth;
+        return profile.IdentityBindings.TryGetValue(provider, out var identity) ? identity : summary;
+    }
+
+    private bool CanBindProvider(string provider, UserIdentitySummaryDto summary) => !summary.Bound && IsProviderEnabled(provider) && summary.CanBind != false;
+    private bool IsProviderEnabled(string provider) => provider switch
+    {
+        "linuxdo" => publicSettings.LinuxDoOAuthEnabled,
+        "dingtalk" => publicSettings.DingTalkOAuthEnabled,
+        "oidc" => publicSettings.OidcOAuthEnabled,
+        "wechat" => publicSettings.WeChatOAuthOpenEnabled == true || publicSettings.WeChatOAuthMpEnabled == true || publicSettings.WeChatOAuthEnabled,
+        _ => false
+    };
+
+    private string ProviderLabel(string provider) => provider switch
+    {
+        "email" => "邮箱", "linuxdo" => "LinuxDo", "dingtalk" => "钉钉",
+        "oidc" => string.IsNullOrWhiteSpace(publicSettings.OidcOAuthProviderName) ? "OIDC" : publicSettings.OidcOAuthProviderName,
+        "wechat" => "微信", "github" => "GitHub", "google" => "Google", _ => provider
+    };
+
+    private static string BindingNote(UserIdentitySummaryDto summary) => summary.NoteKey switch
+    {
+        "profile.authBindings.notes.emailManagedFromProfile" => "主邮箱在资料表单中管理",
+        "profile.authBindings.notes.canUnbind" => "你可以解绑这个登录方式。",
+        "profile.authBindings.notes.bindAnotherBeforeUnbind" => "请先绑定其他登录方式，再解除当前绑定。",
+        _ => summary.Note ?? string.Empty
+    };
+
+    private IReadOnlyList<SourceHint> BuildSourceHints()
+    {
+        if (profile is null) return [];
+        var result = new List<SourceHint>();
+        var avatar = SourceFor("avatar", profile.AvatarSource);
+        var username = SourceFor("username", profile.UsernameSource) ?? SourceFor("display_name", profile.DisplayNameSource) ?? SourceFor("nickname", profile.NicknameSource);
+        if (avatar is not null) result.Add(new("avatar", $"头像当前来自 {ProviderLabel(SourceProvider(avatar))}"));
+        if (username is not null) result.Add(new("username", $"昵称当前来自 {ProviderLabel(SourceProvider(username))}"));
+        return result;
+    }
+
+    private UserProfileSourceContextDto? SourceFor(string key, UserProfileSourceContextDto? fallback) => profile?.ProfileSources.TryGetValue(key, out var value) == true && value is not null ? value : fallback;
+    private static string SourceProvider(UserProfileSourceContextDto value) => string.IsNullOrWhiteSpace(value.Provider) ? value.Source : value.Provider;
+    private static string RoleLabel(string role) => role.Equals("admin", StringComparison.OrdinalIgnoreCase) ? "管理员" : "用户";
+    private static string UserFacingJsError(string value) => value.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Replace("Error: ", string.Empty, StringComparison.OrdinalIgnoreCase) ?? "读取所选图片失败";
+
+    private sealed record BindingProvider(string Key, string Initial, string Tone);
+    private sealed record SourceHint(string Key, string Text);
+
+    private sealed class EmailBindingForm
+    {
+        [Required(ErrorMessage = "请输入邮箱"), EmailAddress(ErrorMessage = "邮箱格式不正确")] public string Email { get; set; } = string.Empty;
+        [Required(ErrorMessage = "请输入验证码")] public string VerifyCode { get; set; } = string.Empty;
+        [Required(ErrorMessage = "请输入密码"), MinLength(6, ErrorMessage = "密码至少需要 6 个字符")] public string Password { get; set; } = string.Empty;
+    }
+}

@@ -1,0 +1,127 @@
+using Xunit;
+
+namespace ParaGateway.Frontend.Tests;
+
+public sealed class AccountPageParityTests
+{
+    [Fact]
+    public void AccountPageMatchesOfficialFilterAndActionSurface()
+    {
+        var markup = Read("Pages", "Providers.razor");
+
+        Assert.Contains("@page \"/admin/accounts\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("@page \"/admin/upstream-accounts\"", markup, StringComparison.Ordinal);
+        Assert.Contains("搜索账号名称...", markup, StringComparison.Ordinal);
+        Assert.Contains("全部平台", markup, StringComparison.Ordinal);
+        Assert.Contains("全部类型", markup, StringComparison.Ordinal);
+        Assert.Contains("全部状态", markup, StringComparison.Ordinal);
+        Assert.Contains("全部Privacy状态", markup, StringComparison.Ordinal);
+        Assert.Contains("全部分组", markup, StringComparison.Ordinal);
+        Assert.Contains("自动刷新", markup, StringComparison.Ordinal);
+        Assert.Contains("更多操作", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("compact oauth-entry", markup, StringComparison.Ordinal);
+        Assert.Contains("OAuth 接入", markup, StringComparison.Ordinal);
+        Assert.Contains("新建账号", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AccountPageContainsOfficialTableBulkAndEmptyStates()
+    {
+        var markup = Read("Pages", "Providers.razor");
+
+        foreach (var text in new[] { "平台/类型", "API 地址", "认证", "容量", "用量窗口", "实时调度评分", "计费倍率", "上游声明倍率", "暂无账号", "通过官方 OAuth 接入平台账号" })
+        {
+            Assert.Contains(text, markup, StringComparison.Ordinal);
+        }
+        Assert.Contains("选择全部", markup, StringComparison.Ordinal);
+        Assert.Contains("BatchDeleteAccountsAsync", markup, StringComparison.Ordinal);
+        Assert.Contains("BulkSetAccountsSchedulableAsync", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AccountPageConnectsOfficialDataAndRowActions()
+    {
+        var markup = Read("Pages", "Providers.razor");
+
+        foreach (var method in new[] { "DuplicateAccountAsync", "RecoverAccountStateAsync", "ResetAccountQuotaAsync", "ClearAccountRateLimitAsync", "GetAccountStatsAsync", "GetAccountsDataAsync", "ImportAccountsDataAsync", "PreviewAccountsFromCrsAsync", "SyncAccountsFromCrsAsync" })
+        {
+            Assert.Contains($"Api.{method}", markup, StringComparison.Ordinal);
+        }
+        Assert.Contains("href=\"/provider-oauth\"", markup, StringComparison.Ordinal);
+        Assert.Contains("href=\"/admin/error-passthrough\"", markup, StringComparison.Ordinal);
+        Assert.Contains("href=\"/admin/tls-fingerprints\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Api.PreviewAccountModelsAsync", markup, StringComparison.Ordinal);
+        Assert.Contains("读取平台模型", markup, StringComparison.Ordinal);
+        Assert.Contains("调度负载因子（可选）", markup, StringComparison.Ordinal);
+        Assert.Contains("CanRefreshToken(row)", markup, StringComparison.Ordinal);
+        Assert.Contains("!CanBulkRefresh", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"/provider-oauth\">重新授权", markup, StringComparison.Ordinal);
+        Assert.Contains("编辑已有账号时不可更改平台或认证类型", markup, StringComparison.Ordinal);
+        Assert.Contains("数值越小越优先", markup, StringComparison.Ordinal);
+        Assert.Contains("启用账号调度", markup, StringComparison.Ordinal);
+        Assert.Contains("SetAccountSchedulableAsync(saved.Id, form.Schedulable)", markup, StringComparison.Ordinal);
+        Assert.Contains("AccountGroupSelectionPolicy.IsSelectable", markup, StringComparison.Ordinal);
+        Assert.Contains("editorContext.Validate()", markup, StringComparison.Ordinal);
+        Assert.Contains("editorContext.GetValidationMessages()", markup, StringComparison.Ordinal);
+        Assert.Contains("@onclick=\"SubmitEditorAsync\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("type=\"submit\" form=\"account-editor\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AccountClientUsesOfficialGoEndpointsAndServerPaging()
+    {
+        var client = Read("Services", "ApiClient.cs");
+
+        Assert.Contains("GetAccountsPageAsync", client, StringComparison.Ordinal);
+        Assert.Contains("include_scheduler_score=true", client, StringComparison.Ordinal);
+        Assert.Contains("/admin/accounts/{Uri.EscapeDataString(id)}/duplicate", client, StringComparison.Ordinal);
+        Assert.Contains("/admin/accounts/batch-delete", client, StringComparison.Ordinal);
+        Assert.Contains("/admin/accounts/bulk-update", client, StringComparison.Ordinal);
+        Assert.Contains("/admin/accounts/data", client, StringComparison.Ordinal);
+        Assert.Contains("/admin/accounts/sync/crs/preview", client, StringComparison.Ordinal);
+        Assert.Contains("/admin/accounts/sync/crs", client, StringComparison.Ordinal);
+        Assert.Contains("/admin/accounts/models/sync-upstream-preview", client, StringComparison.Ordinal);
+        Assert.Contains("ParseAccountTestEvents", client, StringComparison.Ordinal);
+        Assert.Contains("Dictionary<string, List<string>>", client, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AccountShellUsesOfficialTitleDescription()
+    {
+        var layout = Read("Layout", "MainLayout.razor");
+        Assert.Contains("new(\"账号管理\", \"管理官方平台账号、认证凭据、分组与调度状态\")", layout, StringComparison.Ordinal);
+        Assert.Contains("new(\"上游账号\", \"管理独立的 OpenAI、Claude 兼容上游连接与调度策略\")", layout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeCreateModalMatchesOfficialAccountTypeSurface()
+    {
+        var markup = Read("Components", "NativeAccountCreateModal.razor");
+
+        foreach (var text in new[]
+        {
+            "Claude Code", "Claude Console", "AWS Bedrock", "Vertex",
+            "ChatGPT OAuth", "Responses API", "OAuth 授权（Gemini）",
+            "API 密钥（AI Studio）", "Antigravity OAuth", "Grok OAuth",
+            "GitHub Copilot", "Device OAuth"
+        })
+        {
+            Assert.Contains(text, markup, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("platform-@platform", markup, StringComparison.Ordinal);
+        Assert.Contains("https://cloudcode-pa.googleapis.com", markup, StringComparison.Ordinal);
+        Assert.Contains("\"antigravity\" => \"sk-...\"", markup, StringComparison.Ordinal);
+        Assert.Contains("请输入 Base URL", markup, StringComparison.Ordinal);
+        Assert.Contains("_ => await Api.StartOpenAIOAuthAsync()", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("StartOpenAIOAuthAsync(redirectUri)", markup, StringComparison.Ordinal);
+        Assert.Contains("RedirectUri = platform == \"grok\"", markup, StringComparison.Ordinal);
+        Assert.Contains("localhost:1455", markup, StringComparison.Ordinal);
+    }
+
+    private static string Read(params string[] segments)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        return File.ReadAllText(Path.Combine([root, .. segments]));
+    }
+}

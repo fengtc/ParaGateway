@@ -1,0 +1,36 @@
+@page "/admin/tls-fingerprints"
+@using System.Globalization
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>TLS 指纹模板 · ParaGateway</PageTitle>
+<div class="page-header"><div><h1>TLS 指纹模板</h1><p>维护上游连接使用的 ClientHello 指纹参数。</p></div><button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 新建模板</button></div>
+@if (loading) { <LoadingState Text="正在载入 TLS 模板" /> }
+else if (error is not null) { <ErrorState Message="@error" OnRetry="LoadAsync" /> }
+else if (profiles.Count == 0) { <EmptyState Title="暂无 TLS 指纹模板" Description="创建模板后可在上游账号配置中引用。"><Action><button type="button" class="button primary small" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> 新建模板</button></Action></EmptyState> }
+else
+{
+    <DxGrid Data="@profiles" KeyFieldName="Id" ShowFilterRow="true" ShowSearchPanel="true" PageSize="20" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer"><Columns><DxGridDataColumn FieldName="Name" Caption="名称" MinWidth="190" /><DxGridDataColumn FieldName="Description" Caption="说明" MinWidth="220" /><DxGridDataColumn FieldName="EnableGrease" Caption="GREASE" Width="95" /><DxGridDataColumn Caption="套件数量" Width="120"><CellDisplayTemplate Context="context">@{ var row = (TlsFingerprintProfileDto)context.DataItem; }@(row.CipherSuites.Count + row.Curves.Count + row.SignatureAlgorithms.Count + row.Extensions.Count)</CellDisplayTemplate></DxGridDataColumn><DxGridDataColumn FieldName="UpdatedAt" Caption="更新时间" DisplayFormat="yyyy-MM-dd HH:mm" MinWidth="160" /><DxGridDataColumn Caption="操作" Width="120"><CellDisplayTemplate Context="context">@{ var row = (TlsFingerprintProfileDto)context.DataItem; }<button type="button" class="icon-button" title="编辑" aria-label="编辑" @onclick="() => OpenEdit(row)"><Icon Name="pencil" Size="16" /></button><button type="button" class="icon-button danger" title="删除" aria-label="删除" @onclick="() => DeleteAsync(row)"><Icon Name="trash" Size="16" /></button></CellDisplayTemplate></DxGridDataColumn></Columns></DxGrid>
+}
+
+<AppModal Open="editorOpen" Title="@(editing is null ? "新建 TLS 指纹模板" : "编辑 TLS 指纹模板")" MaxWidth="820px" OnClose="CloseEditor"><ChildContent><EditForm id="tls-editor" Model="form" OnValidSubmit="SaveAsync" FormName="tls-editor"><DataAnnotationsValidator />@if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }<div class="form-grid"><div class="form-field"><label for="tls-name">名称</label><InputText id="tls-name" @bind-Value="form.Name" /></div><label class="toggle-row"><InputCheckbox @bind-Value="form.EnableGrease" /> 启用 GREASE</label><div class="form-field full"><label for="tls-description">说明</label><InputTextArea id="tls-description" @bind-Value="form.Description" rows="2" /></div><div class="form-field"><label for="tls-cipher">Cipher Suites</label><InputText id="tls-cipher" @bind-Value="form.CipherSuites" placeholder="4865, 4866" /></div><div class="form-field"><label for="tls-curves">Curves</label><InputText id="tls-curves" @bind-Value="form.Curves" placeholder="29, 23" /></div><div class="form-field"><label for="tls-point">Point Formats</label><InputText id="tls-point" @bind-Value="form.PointFormats" /></div><div class="form-field"><label for="tls-signature">Signature Algorithms</label><InputText id="tls-signature" @bind-Value="form.SignatureAlgorithms" /></div><div class="form-field"><label for="tls-alpn">ALPN Protocols</label><InputText id="tls-alpn" @bind-Value="form.AlpnProtocols" placeholder="h2, http/1.1" /></div><div class="form-field"><label for="tls-versions">Supported Versions</label><InputText id="tls-versions" @bind-Value="form.SupportedVersions" /></div><div class="form-field"><label for="tls-keyshare">Key Share Groups</label><InputText id="tls-keyshare" @bind-Value="form.KeyShareGroups" /></div><div class="form-field"><label for="tls-psk">PSK Modes</label><InputText id="tls-psk" @bind-Value="form.PskModes" /></div><div class="form-field"><label for="tls-ext">Extensions</label><InputText id="tls-ext" @bind-Value="form.Extensions" /></div></div></EditForm></ChildContent><Footer><button type="button" class="button secondary" @onclick="CloseEditor">取消</button><button type="submit" form="tls-editor" class="button primary" disabled="@saving">保存</button></Footer></AppModal>
+
+@code {
+    private List<TlsFingerprintProfileDto> profiles = [];
+    private TlsFingerprintProfileDto? editing;
+    private TlsFingerprintProfileForm form = new();
+    private bool loading = true, saving, editorOpen;
+    private string? error, modalError;
+    protected override Task OnInitializedAsync() => LoadAsync();
+    private async Task LoadAsync() { loading = true; error = null; try { profiles = await Api.GetTlsFingerprintProfilesAsync(); } catch (ApiException ex) { error = ex.Message; } finally { loading = false; } }
+    private void OpenCreate() { editing = null; form = new(); modalError = null; editorOpen = true; }
+    private void OpenEdit(TlsFingerprintProfileDto row) { editing = row; form = TlsFingerprintProfileForm.From(row); modalError = null; editorOpen = true; }
+    private void CloseEditor() => editorOpen = false;
+    private async Task SaveAsync() { saving = true; modalError = null; try { var payload = new Dictionary<string, object?> { ["name"] = form.Name.Trim(), ["description"] = EmptyToNull(form.Description), ["enable_grease"] = form.EnableGrease, ["cipher_suites"] = ParseUshorts(form.CipherSuites), ["curves"] = ParseUshorts(form.Curves), ["point_formats"] = ParseUshorts(form.PointFormats), ["signature_algorithms"] = ParseUshorts(form.SignatureAlgorithms), ["alpn_protocols"] = Split(form.AlpnProtocols), ["supported_versions"] = ParseUshorts(form.SupportedVersions), ["key_share_groups"] = ParseUshorts(form.KeyShareGroups), ["psk_modes"] = ParseUshorts(form.PskModes), ["extensions"] = ParseUshorts(form.Extensions) }; if (editing is null) await Api.CreateTlsFingerprintProfileAsync(payload); else await Api.UpdateTlsFingerprintProfileAsync(editing.Id, payload); editorOpen = false; Toasts.Success("TLS 指纹模板已保存"); await LoadAsync(); } catch (ApiException ex) { modalError = ex.Message; } finally { saving = false; } }
+    private async Task DeleteAsync(TlsFingerprintProfileDto row) { if (!await JS.InvokeAsync<bool>("confirm", $"确认删除模板“{row.Name}”？")) return; try { await Api.DeleteTlsFingerprintProfileAsync(row.Id); Toasts.Success("模板已删除"); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } }
+    private static string? EmptyToNull(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static List<string> Split(string value) => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    private static List<ushort> ParseUshorts(string value) => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => ushort.TryParse(x, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : (ushort)0).Where(x => x > 0).Distinct().ToList();
+}

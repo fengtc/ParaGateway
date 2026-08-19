@@ -1,0 +1,609 @@
+@page "/admin/settings"
+@using System.Text.Json
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>系统设置 · ParaGateway</PageTitle>
+
+<div class="settings-page">
+    <header class="settings-heading">
+        <div><span>系统配置</span><h1>系统设置</h1><p>配置站点、安全、用户默认值、网关行为、邮件和备份。敏感字段仅显示配置状态，不会回显服务端明文。</p></div>
+        <button type="button" class="button secondary" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="16" />刷新</button>
+    </header>
+
+    <nav class="settings-tabs" role="tablist" aria-label="系统设置">
+        @foreach (var tab in Tabs)
+        {
+            <button type="button" id="settings-tab-@tab.Id" role="tab" aria-selected="@(activeTab == tab.Id)" class="@(activeTab == tab.Id ? "active" : null)" @onclick="() => activeTab = tab.Id"><Icon Name="@tab.Icon" Size="16" />@tab.Label</button>
+        }
+    </nav>
+
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@error</span><button type="button" @onclick="LoadAsync">重试</button></div>
+    }
+
+    @if (loading)
+    {
+        <LoadingState Text="正在载入系统设置" />
+    }
+    else
+    {
+        <main class="settings-content">
+            @if (activeTab == "general")
+            {
+                <section class="settings-card">
+                    <header><div><h2>站点与品牌</h2><p>控制公共首页、文档入口和表格默认展示。</p></div></header>
+                    <div class="settings-grid">
+                        <Field Label="站点名称"><InputText @bind-Value="settings.SiteName" /></Field>
+                        <Field Label="站点副标题"><InputText @bind-Value="settings.SiteSubtitle" /></Field>
+                        <Field Label="Logo 地址" Full="true"><InputText @bind-Value="settings.SiteLogo" /></Field>
+                        <Field Label="API 基础地址"><InputText @bind-Value="settings.ApiBaseUrl" /></Field>
+                        <Field Label="文档地址"><InputText @bind-Value="settings.DocUrl" /></Field>
+                        <Field Label="联系信息" Full="true"><InputText @bind-Value="settings.ContactInfo" /></Field>
+                        <Field Label="首页内容" Full="true"><InputTextArea @bind-Value="settings.HomeContent" rows="7" /></Field>
+                        <Field Label="表格默认每页"><InputNumber @bind-Value="settings.TableDefaultPageSize" /></Field>
+                        <Field Label="表格页数选项（逗号分隔）"><InputText @bind-Value="pageSizeOptionsText" /></Field>
+                        <ToggleField Label="紧凑首页" Hint="为已登录用户使用紧凑工作台布局"><InputCheckbox @bind-Value="settings.CompactHomeEnabled" /></ToggleField>
+                        <ToggleField Label="隐藏 CCS 导入入口" Hint="不在上游账号页面显示 CCS 导入按钮"><InputCheckbox @bind-Value="settings.HideCcsImportButton" /></ToggleField>
+                        <ToggleField Label="后端模式" Hint="由 Go 服务控制精简模式访问边界"><InputCheckbox @bind-Value="settings.BackendModeEnabled" /></ToggleField>
+                    </div>
+                </section>
+                <CustomNavigationSettings Endpoints="settings.CustomEndpoints" MenuItems="settings.CustomMenuItems" />
+            }
+            else if (activeTab == "agreement")
+            {
+                <section class="settings-card">
+                    <header><div><h2>登录协议</h2><p>控制登录时展示的服务协议和隐私文档；管理员合规确认弹窗仍按 ParaGateway 要求保持关闭。</p></div></header>
+                    <div class="settings-grid">
+                        <ToggleField Label="启用登录协议" Hint="用户登录前必须查看或确认协议"><InputCheckbox @bind-Value="settings.LoginAgreementEnabled" /></ToggleField>
+                        <Field Label="确认模式"><InputSelect @bind-Value="settings.LoginAgreementMode"><option value="modal">弹窗确认</option><option value="checkbox">勾选确认</option></InputSelect></Field>
+                        <Field Label="条款更新日期" Hint="日期或内容变化后，用户需要重新同意"><input type="date" value="@settings.LoginAgreementUpdatedAt" @onchange="args => settings.LoginAgreementUpdatedAt = args.Value?.ToString() ?? string.Empty" /></Field>
+                    </div>
+                </section>
+                <AgreementDocumentsEditor Documents="settings.LoginAgreementDocuments" Enabled="settings.LoginAgreementEnabled" />
+            }
+            else if (activeTab == "features")
+            {
+                <section class="settings-card">
+                    <header><div><h2>功能开关</h2><p>对应官方侧栏和公共功能入口；支付功能已按要求排除。</p></div></header>
+                    <div class="settings-grid">
+                        <ToggleField Label="Ops 监控" Hint="采集并展示网关运维指标"><InputCheckbox @bind-Value="settings.OpsMonitoringEnabled" /></ToggleField>
+                        <ToggleField Label="实时监控" Hint="启用 Ops WebSocket 实时指标"><InputCheckbox @bind-Value="settings.OpsRealtimeMonitoringEnabled" /></ToggleField>
+                        <Field Label="Ops 查询模式"><InputSelect @bind-Value="settings.OpsQueryModeDefault"><option value="auto">自动</option><option value="raw">原始日志</option><option value="preagg">预聚合</option></InputSelect></Field>
+                        <Field Label="指标采集间隔（秒）"><InputNumber @bind-Value="settings.OpsMetricsIntervalSeconds" /></Field>
+                        <ToggleField Label="渠道监控" Hint="开放渠道监控页及后台任务"><InputCheckbox @bind-Value="settings.ChannelMonitorEnabled" /></ToggleField>
+                        <Field Label="渠道监控模式"><InputSelect @bind-Value="settings.ChannelMonitorMode"><option value="v1">V1 主动探测</option><option value="v2">V2 被动聚合</option></InputSelect></Field>
+                        <Field Label="默认探测间隔（秒）"><InputNumber @bind-Value="settings.ChannelMonitorDefaultIntervalSeconds" /></Field>
+                        <ToggleField Label="隐藏吞吐量" Hint="对非管理员隐藏绝对吞吐数值"><InputCheckbox @bind-Value="settings.ChannelMonitorHideThroughput" /></ToggleField>
+                        <ToggleField Label="可用渠道" Hint="允许用户查看当前可用渠道"><InputCheckbox @bind-Value="settings.AvailableChannelsEnabled" /></ToggleField>
+                        <ToggleField Label="模型广场" Hint="开放模型目录页"><InputCheckbox @bind-Value="settings.ModelPlazaEnabled" /></ToggleField>
+                        <ToggleField Label="模型广场要求登录" Hint="未登录用户不能访问模型目录"><InputCheckbox @bind-Value="settings.ModelPlazaRequireAuth" /></ToggleField>
+                        <ToggleField Label="风险控制" Hint="开放内容审计与风控处理"><InputCheckbox @bind-Value="settings.RiskControlEnabled" /></ToggleField>
+                        <ToggleField Label="邀请返利" Hint="开放邀请与返利功能"><InputCheckbox @bind-Value="settings.AffiliateEnabled" /></ToggleField>
+                        <ToggleField Label="Cyber 会话屏蔽" Hint="对命中 Cyber 风控规则的会话执行临时屏蔽"><InputCheckbox @bind-Value="settings.CyberSessionBlockEnabled" /></ToggleField>
+                        @if (settings.CyberSessionBlockEnabled)
+                        {
+                            <Field Label="会话屏蔽 TTL（秒）"><InputNumber @bind-Value="settings.CyberSessionBlockTtlSeconds" min="1" /></Field>
+                        }
+                        @if (settings.AffiliateEnabled)
+                        {
+                            <ToggleField Label="管理员充值计入返利" Hint="管理员为被邀请用户充值时也产生邀请返利"><InputCheckbox @bind-Value="settings.AffiliateAdminRechargeEnabled" /></ToggleField>
+                            <Field Label="返利比例（%）"><InputNumber @bind-Value="settings.AffiliateRebateRate" min="0" max="100" step="0.01" /></Field>
+                            <Field Label="返利冻结时间（小时）"><InputNumber @bind-Value="settings.AffiliateRebateFreezeHours" min="0" max="720" /></Field>
+                            <Field Label="返利有效期（天）" Hint="0 表示长期有效"><InputNumber @bind-Value="settings.AffiliateRebateDurationDays" min="0" max="3650" /></Field>
+                            <Field Label="单个受邀人返利上限" Hint="0 表示不限制"><InputNumber @bind-Value="settings.AffiliateRebatePerInviteeCap" min="0" step="0.01" /></Field>
+                        }
+                        <Field Label="模型广场说明" Full="true"><InputTextArea @bind-Value="settings.ModelPlazaDescription" rows="4" /></Field>
+                    </div>
+                </section>
+            }
+            else if (activeTab == "security")
+            {
+                <section class="settings-card admin-key-card">
+                    <header><div><h2>管理员 API Key</h2><p>用于机器调用管理接口。完整密钥只在创建或重新生成后显示一次。</p></div></header>
+                    @if (!adminApiKey.Exists)
+                    {
+                        <div class="empty-secret"><span>尚未配置管理员 API Key</span><button type="button" class="button primary" disabled="@adminKeyBusy" @onclick="GenerateAdminApiKeyAsync">创建密钥</button></div>
+                    }
+                    else
+                    {
+                        <div class="secret-status"><code>@adminApiKey.MaskedKey</code><div><button type="button" class="button secondary" disabled="@adminKeyBusy" @onclick="GenerateAdminApiKeyAsync">重新生成</button><button type="button" class="button danger" disabled="@adminKeyBusy" @onclick="DeleteAdminApiKeyAsync">删除</button></div></div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(generatedAdminApiKey))
+                    {
+                        <div class="generated-secret"><div><b>请立即保存，此密钥关闭后无法再次查看</b><code>@generatedAdminApiKey</code></div><button type="button" class="button primary" @onclick="CopyAdminApiKeyAsync"><Icon Name="copy" Size="15" />复制密钥</button></div>
+                    }
+                </section>
+                <section class="settings-card">
+                    <header><div><h2>注册与会话安全</h2><p>影响新用户注册、二次验证、会话绑定和审计保留。</p></div></header>
+                    <div class="settings-grid">
+                        <ToggleField Label="开放注册" Hint="允许新用户创建账户"><InputCheckbox @bind-Value="settings.RegistrationEnabled" /></ToggleField>
+                        <ToggleField Label="注册邮箱验证" Hint="新用户必须完成邮箱验证"><InputCheckbox @bind-Value="settings.EmailVerifyEnabled" /></ToggleField>
+                        <ToggleField Label="邮箱域名配额" Hint="启用按邮箱域名限制注册数量"><InputCheckbox @bind-Value="settings.RegistrationEmailDomainQuotaEnabled" /></ToggleField>
+                        <ToggleField Label="注册优惠码" Hint="注册流程显示优惠码输入"><InputCheckbox @bind-Value="settings.PromoCodeEnabled" /></ToggleField>
+                        <ToggleField Label="邀请码注册" Hint="注册时必须提交邀请码"><InputCheckbox @bind-Value="settings.InvitationCodeEnabled" /></ToggleField>
+                        <ToggleField Label="允许重置密码" Hint="开放忘记密码流程"><InputCheckbox @bind-Value="settings.PasswordResetEnabled" /></ToggleField>
+                        <ToggleField Label="TOTP 双因素认证" Hint="@(settings.TotpEncryptionKeyConfigured ? "加密密钥已配置" : "尚未配置 TOTP 加密密钥")"><InputCheckbox @bind-Value="settings.TotpEnabled" /></ToggleField>
+                        <ToggleField Label="Passkey 登录" Hint="@(settings.PasskeyConfigured ? $"RP ID：{settings.PasskeyRpId}" : "尚未完成 Passkey 部署配置")"><InputCheckbox @bind-Value="settings.PasskeyEnabled" /></ToggleField>
+                        <ToggleField Label="敏感操作二次确认" Hint="备份、恢复及高风险修改要求 step-up"><InputCheckbox @bind-Value="settings.StepUpEnabled" /></ToggleField>
+                        <ToggleField Label="会话绑定" Hint="绑定登录 IP 与 User-Agent"><InputCheckbox @bind-Value="settings.SessionBindingEnabled" /></ToggleField>
+                        <Field Label="审计日志保留天数"><InputNumber @bind-Value="settings.AuditLogRetentionDays" /></Field>
+                        <Field Label="前端地址"><InputText @bind-Value="settings.FrontendUrl" /></Field>
+                        <Field Label="注册邮箱后缀白名单" Hint="多个后缀用逗号分隔" Full="true"><InputText @bind-Value="suffixText" /></Field>
+                    </div>
+                </section>
+                <section class="settings-card">
+                    <header><div><h2>面板 API 限流</h2><p>保护用户面板及公共接口，限制值由 Go 服务实时执行。</p></div><button type="button" class="button primary small" disabled="@runtimeSaving" @onclick="SavePanelRateLimitAsync">保存此项</button></header>
+                    <div class="settings-grid">
+                        <ToggleField Label="启用面板限流" Hint="按用户或来源 IP 执行分钟窗口"><InputCheckbox @bind-Value="panelRateLimit.Enabled" /></ToggleField>
+                        <ToggleField Label="管理员豁免" Hint="JWT 管理员不受普通面板限流"><InputCheckbox @bind-Value="panelRateLimit.ExemptAdmin" /></ToggleField>
+                        <Field Label="用户 RPM"><InputNumber @bind-Value="panelRateLimit.UserRpm" /></Field>
+                        <Field Label="重接口 RPM"><InputNumber @bind-Value="panelRateLimit.HeavyRpm" /></Field>
+                        <Field Label="公共接口 IP RPM"><InputNumber @bind-Value="panelRateLimit.PublicIpRpm" /></Field>
+                    </div>
+                </section>
+                <SecurityAdvancedSettings Settings="settings" Secrets="securitySecrets" />
+            }
+            else if (activeTab == "users")
+            {
+                <UserDefaultsSettings Settings="settings" />
+            }
+            else if (activeTab == "gateway")
+            {
+                <section class="settings-card">
+                    <header><div><h2>529 过载冷却</h2><p>上游返回 529 时暂停账号调度，避免持续打满过载节点。</p></div><button type="button" class="button primary small" disabled="@runtimeSaving" @onclick="SaveOverloadAsync">保存此项</button></header>
+                    <div class="settings-grid"><ToggleField Label="启用 529 冷却" Hint="由账号调度器自动标记临时不可用"><InputCheckbox @bind-Value="overloadCooldown.Enabled" /></ToggleField><Field Label="冷却时间（分钟）"><InputNumber @bind-Value="overloadCooldown.CooldownMinutes" /></Field></div>
+                </section>
+                <section class="settings-card">
+                    <header><div><h2>429 默认回避</h2><p>无法解析上游重置时间时使用默认冷却窗口。</p></div><button type="button" class="button primary small" disabled="@runtimeSaving" @onclick="SaveRateLimit429Async">保存此项</button></header>
+                    <div class="settings-grid"><ToggleField Label="启用 429 冷却" Hint="避免立刻重试同一个限流账号"><InputCheckbox @bind-Value="rateLimit429.Enabled" /></ToggleField><Field Label="冷却时间（秒）"><InputNumber @bind-Value="rateLimit429.CooldownSeconds" /></Field></div>
+                </section>
+                <section class="settings-card">
+                    <header><div><h2>流超时处理</h2><p>连续流式请求超时达到阈值后执行指定动作。</p></div><button type="button" class="button primary small" disabled="@runtimeSaving" @onclick="SaveStreamTimeoutAsync">保存此项</button></header>
+                    <div class="settings-grid">
+                        <ToggleField Label="启用流超时处理" Hint="按账号累计滑动窗口"><InputCheckbox @bind-Value="streamTimeout.Enabled" /></ToggleField>
+                        <Field Label="处理动作"><InputSelect @bind-Value="streamTimeout.Action"><option value="temp_unsched">临时停止调度</option><option value="error">标记账号错误</option><option value="none">仅记录</option></InputSelect></Field>
+                        <Field Label="停止调度（分钟）"><InputNumber @bind-Value="streamTimeout.TempUnschedMinutes" /></Field>
+                        <Field Label="触发次数"><InputNumber @bind-Value="streamTimeout.ThresholdCount" /></Field>
+                        <Field Label="统计窗口（分钟）"><InputNumber @bind-Value="streamTimeout.ThresholdWindowMinutes" /></Field>
+                    </div>
+                </section>
+                <section class="settings-card">
+                    <header><div><h2>请求整流器</h2><p>修复部分客户端缺失的 thinking 与 API Key 签名结构。</p></div><button type="button" class="button primary small" disabled="@runtimeSaving" @onclick="SaveRectifierAsync">保存此项</button></header>
+                    <div class="settings-grid">
+                        <ToggleField Label="启用整流器" Hint="允许对符合条件的请求进行兼容修正"><InputCheckbox @bind-Value="rectifier.Enabled" /></ToggleField>
+                        <ToggleField Label="Thinking Signature" Hint="修正缺失的 thinking 签名"><InputCheckbox @bind-Value="rectifier.ThinkingSignatureEnabled" /></ToggleField>
+                        <ToggleField Label="Thinking Budget" Hint="修正 thinking budget"><InputCheckbox @bind-Value="rectifier.ThinkingBudgetEnabled" /></ToggleField>
+                        <ToggleField Label="API Key Signature" Hint="按自定义关键词识别客户端"><InputCheckbox @bind-Value="rectifier.ApiKeySignatureEnabled" /></ToggleField>
+                        <Field Label="API Key 匹配关键词" Hint="每行一个，最多 50 条" Full="true"><InputTextArea @bind-Value="rectifierPatternsText" rows="7" /></Field>
+                    </div>
+                </section>
+                <BetaPolicySettings />
+                <AccountUsageRuntimeSettings />
+                <WebSearchSettings />
+                <GatewayAdvancedSettings Settings="settings" />
+            }
+            else if (activeTab == "email")
+            {
+                <section class="settings-card">
+                    <header>
+                        <div><h2>SMTP 邮件</h2><p>配置系统邮件发送。密码留空时测试和保存都会复用服务端现有密钥。</p></div>
+                        <div class="card-header-actions"><button type="button" class="button secondary small" disabled="@smtpBusy" @onclick="TestSmtpAsync">测试连接</button><button type="button" class="button primary small" disabled="@(smtpBusy || string.IsNullOrWhiteSpace(testEmailAddress))" @onclick="SendTestEmailAsync">发送测试邮件</button></div>
+                    </header>
+                    <div class="settings-grid">
+                        <Field Label="SMTP 主机"><InputText @bind-Value="settings.SmtpHost" /></Field>
+                        <Field Label="SMTP 端口"><InputNumber @bind-Value="settings.SmtpPort" /></Field>
+                        <Field Label="SMTP 用户名"><InputText @bind-Value="settings.SmtpUsername" /></Field>
+                        <Field Label="SMTP 密码" Hint="@(settings.SmtpPasswordConfigured ? "已配置；留空保留" : "尚未配置")"><input type="password" autocomplete="new-password" @bind="smtpPassword" /></Field>
+                        <Field Label="发件地址"><InputText @bind-Value="settings.SmtpFromEmail" /></Field>
+                        <Field Label="发件名称"><InputText @bind-Value="settings.SmtpFromName" /></Field>
+                        <ToggleField Label="使用 TLS" Hint="连接 SMTP 时协商 TLS"><InputCheckbox @bind-Value="settings.SmtpUseTls" /></ToggleField>
+                        <Field Label="测试收件地址" Hint="只用于当前测试，不会保存"><input type="email" autocomplete="email" @bind="testEmailAddress" @bind:event="oninput" /></Field>
+                    </div>
+                </section>
+                <NotificationSettings Settings="settings" />
+                <EmailTemplateEditor />
+            }
+            else if (activeTab == "backup")
+            {
+                <section class="settings-card backup-links">
+                    <header><div><h2>备份与数据管理</h2><p>备份目标修改、下载和恢复属于敏感操作，由 Go 后端执行 step-up 2FA。</p></div></header>
+                    <div><a class="backup-link" href="/admin/data-management"><Icon Name="database" Size="22" /><span><b>数据管理</b><small>Agent 状态、来源配置、S3 档案与备份任务</small></span><Icon Name="chevron-right" /></a><a class="backup-link" href="/admin/backups"><Icon Name="box" Size="22" /><span><b>备份管理</b><small>S3、定时备份、下载、恢复及删除</small></span><Icon Name="chevron-right" /></a></div>
+                </section>
+            }
+        </main>
+
+        @if (activeTab != "backup")
+        {
+            <footer class="settings-savebar"><div><b>保存通用设置</b><span>密钥输入仅在非空时提交；未显示字段保持服务端原值。</span></div><button type="button" class="button primary" disabled="@saving" @onclick="SaveAsync"><Icon Name="save" Size="16" />@(saving ? "正在保存…" : "保存设置")</button></footer>
+        }
+    }
+</div>
+
+@code {
+    private static readonly (string Id, string Label, string Icon)[] Tabs =
+    [
+        ("general", "常规", "dashboard"), ("agreement", "用户协议", "file-text"), ("features", "功能", "sparkles"),
+        ("security", "安全", "shield"), ("users", "用户", "user"), ("gateway", "网关", "server"),
+        ("email", "邮件", "bell"), ("backup", "备份", "database")
+    ];
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
+    private static readonly string[] AuthSourceIds = ["email", "linuxdo", "oidc", "wechat", "github", "google", "dingtalk"];
+    private static readonly string[] QuotaPlatforms = ["anthropic", "openai", "gemini", "antigravity", "grok"];
+
+    private AdminSettingsDto settings = new();
+    private AdminApiKeyStatusDto adminApiKey = new();
+    private OverloadCooldownSettingsDto overloadCooldown = new();
+    private RateLimit429CooldownSettingsDto rateLimit429 = new();
+    private PanelRateLimitSettingsDto panelRateLimit = new();
+    private StreamTimeoutSettingsDto streamTimeout = new();
+    private RectifierSettingsDto rectifier = new();
+    private AdminSecuritySecretInputs securitySecrets = new();
+    private Dictionary<string, JsonElement> original = new(StringComparer.OrdinalIgnoreCase);
+    private string activeTab = "general", suffixText = string.Empty, pageSizeOptionsText = string.Empty, rectifierPatternsText = string.Empty;
+    private string smtpPassword = string.Empty, generatedAdminApiKey = string.Empty, testEmailAddress = string.Empty;
+    private bool loading = true, saving, runtimeSaving, adminKeyBusy, smtpBusy;
+    private string? error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true; error = null; generatedAdminApiKey = string.Empty;
+        try
+        {
+            var settingsTask = Api.GetAdminSettingsAsync();
+            var keyTask = Api.GetAdminApiKeyStatusAsync();
+            var overloadTask = Api.GetOverloadCooldownSettingsAsync();
+            var rateTask = Api.GetRateLimit429CooldownSettingsAsync();
+            var panelTask = Api.GetPanelRateLimitSettingsAsync();
+            var streamTask = Api.GetStreamTimeoutSettingsAsync();
+            var rectifierTask = Api.GetRectifierSettingsAsync();
+            await Task.WhenAll(settingsTask, keyTask, overloadTask, rateTask, panelTask, streamTask, rectifierTask);
+
+            var raw = await settingsTask;
+            original = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(raw.GetRawText(), WebJson) ?? new(StringComparer.OrdinalIgnoreCase);
+            settings = raw.Deserialize<AdminSettingsDto>(WebJson) ?? new();
+            NormalizeUserDefaults();
+            adminApiKey = await keyTask; overloadCooldown = await overloadTask; rateLimit429 = await rateTask;
+            panelRateLimit = await panelTask; streamTimeout = await streamTask; rectifier = await rectifierTask;
+            suffixText = string.Join(", ", settings.RegistrationEmailSuffixWhitelist);
+            pageSizeOptionsText = string.Join(", ", settings.TablePageSizeOptions);
+            rectifierPatternsText = string.Join(Environment.NewLine, rectifier.ApiKeySignaturePatterns);
+            smtpPassword = string.Empty;
+            securitySecrets = new();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        saving = true; error = null;
+        try
+        {
+            var payload = original.ToDictionary(x => x.Key, x => (object?)x.Value.Clone(), StringComparer.OrdinalIgnoreCase);
+            var values = new Dictionary<string, object?>
+            {
+                ["registration_enabled"] = settings.RegistrationEnabled, ["email_verify_enabled"] = settings.EmailVerifyEnabled,
+                ["registration_email_suffix_whitelist"] = SplitDistinct(suffixText), ["registration_email_domain_quota_enabled"] = settings.RegistrationEmailDomainQuotaEnabled,
+                ["promo_code_enabled"] = settings.PromoCodeEnabled, ["password_reset_enabled"] = settings.PasswordResetEnabled,
+                ["frontend_url"] = settings.FrontendUrl.Trim(), ["invitation_code_enabled"] = settings.InvitationCodeEnabled,
+                ["totp_enabled"] = settings.TotpEnabled, ["passkey_enabled"] = settings.PasskeyEnabled, ["session_binding_enabled"] = settings.SessionBindingEnabled,
+                ["step_up_enabled"] = settings.StepUpEnabled, ["audit_log_retention_days"] = settings.AuditLogRetentionDays,
+                ["login_agreement_enabled"] = settings.LoginAgreementEnabled, ["login_agreement_mode"] = settings.LoginAgreementMode,
+                ["login_agreement_updated_at"] = settings.LoginAgreementUpdatedAt.Trim(),
+                ["login_agreement_documents"] = settings.LoginAgreementDocuments.Where(x => !string.IsNullOrWhiteSpace(x.Title) || !string.IsNullOrWhiteSpace(x.ContentMarkdown)).Select((x, index) => new LegalDocumentDto { Id = NormalizeDocumentSlug(x.Id, index), Title = x.Title.Trim(), ContentMarkdown = x.ContentMarkdown }).ToList(),
+                ["site_name"] = settings.SiteName.Trim(), ["site_logo"] = settings.SiteLogo.Trim(),
+                ["site_subtitle"] = settings.SiteSubtitle.Trim(), ["api_base_url"] = settings.ApiBaseUrl.Trim(), ["contact_info"] = settings.ContactInfo.Trim(),
+                ["doc_url"] = settings.DocUrl.Trim(), ["home_content"] = settings.HomeContent, ["compact_home_enabled"] = settings.CompactHomeEnabled,
+                ["hide_ccs_import_button"] = settings.HideCcsImportButton, ["table_default_page_size"] = settings.TableDefaultPageSize,
+                ["table_page_size_options"] = SplitPositiveIntegers(pageSizeOptionsText), ["backend_mode_enabled"] = settings.BackendModeEnabled,
+                ["custom_endpoints"] = settings.CustomEndpoints.Where(x => !string.IsNullOrWhiteSpace(x.Name) || !string.IsNullOrWhiteSpace(x.Endpoint)).Select(x => new CustomEndpointDto { Name = x.Name.Trim(), Endpoint = x.Endpoint.Trim(), Description = x.Description.Trim() }).ToList(),
+                ["custom_menu_items"] = settings.CustomMenuItems.Where(x => !string.IsNullOrWhiteSpace(x.Label) || !string.IsNullOrWhiteSpace(x.Url)).Select((x, index) => new CustomMenuItemDto { Id = string.IsNullOrWhiteSpace(x.Id) ? $"menu-{Guid.NewGuid():N}" : x.Id, Label = x.Label.Trim(), IconSvg = x.IconSvg.Trim(), Url = x.Url.Trim(), PageSlug = x.PageSlug?.Trim(), Visibility = x.Visibility == "admin" ? "admin" : "user", SortOrder = index }).ToList(),
+                ["default_balance"] = settings.DefaultBalance, ["default_concurrency"] = settings.DefaultConcurrency, ["default_user_rpm_limit"] = settings.DefaultUserRpmLimit,
+                ["default_subscriptions"] = SanitizeSubscriptions(settings.DefaultSubscriptions),
+                ["default_platform_quotas"] = NormalizePlatformQuotas(settings.DefaultPlatformQuotas),
+                ["force_email_on_third_party_signup"] = settings.ForceEmailOnThirdPartySignup,
+                ["affiliate_enabled"] = settings.AffiliateEnabled,
+                ["affiliate_rebate_rate"] = Math.Clamp(settings.AffiliateRebateRate, 0, 100),
+                ["affiliate_rebate_freeze_hours"] = Math.Clamp(settings.AffiliateRebateFreezeHours, 0, 720),
+                ["affiliate_rebate_duration_days"] = Math.Clamp(settings.AffiliateRebateDurationDays, 0, 3650),
+                ["affiliate_rebate_per_invitee_cap"] = Math.Max(0, settings.AffiliateRebatePerInviteeCap),
+                ["affiliate_admin_recharge_enabled"] = settings.AffiliateAdminRechargeEnabled,
+                ["risk_control_enabled"] = settings.RiskControlEnabled,
+                ["cyber_session_block_enabled"] = settings.CyberSessionBlockEnabled,
+                ["cyber_session_block_ttl_seconds"] = Math.Max(1, settings.CyberSessionBlockTtlSeconds),
+                ["ops_monitoring_enabled"] = settings.OpsMonitoringEnabled, ["ops_realtime_monitoring_enabled"] = settings.OpsRealtimeMonitoringEnabled,
+                ["ops_query_mode_default"] = settings.OpsQueryModeDefault, ["ops_metrics_interval_seconds"] = settings.OpsMetricsIntervalSeconds,
+                ["channel_monitor_enabled"] = settings.ChannelMonitorEnabled, ["channel_monitor_mode"] = settings.ChannelMonitorMode,
+                ["channel_monitor_default_interval_seconds"] = settings.ChannelMonitorDefaultIntervalSeconds, ["channel_monitor_hide_throughput"] = settings.ChannelMonitorHideThroughput,
+                ["available_channels_enabled"] = settings.AvailableChannelsEnabled, ["model_plaza_enabled"] = settings.ModelPlazaEnabled,
+                ["model_plaza_require_auth"] = settings.ModelPlazaRequireAuth, ["model_plaza_description"] = settings.ModelPlazaDescription,
+                ["enable_model_fallback"] = settings.EnableModelFallback, ["fallback_model_anthropic"] = settings.FallbackModelAnthropic.Trim(),
+                ["fallback_model_openai"] = settings.FallbackModelOpenAI.Trim(), ["fallback_model_gemini"] = settings.FallbackModelGemini.Trim(),
+                ["fallback_model_antigravity"] = settings.FallbackModelAntigravity.Trim(), ["grok_default_text_model"] = settings.GrokDefaultTextModel.Trim(),
+                ["grok_cross_client_model_map_enabled"] = settings.GrokCrossClientModelMapEnabled, ["grok_default_base_url_mode"] = settings.GrokDefaultBaseUrlMode,
+                ["enable_identity_patch"] = settings.EnableIdentityPatch, ["identity_patch_prompt"] = settings.IdentityPatchPrompt,
+                ["min_claude_code_version"] = settings.MinClaudeCodeVersion.Trim(), ["max_claude_code_version"] = settings.MaxClaudeCodeVersion.Trim(),
+                ["allow_ungrouped_key_scheduling"] = settings.AllowUngroupedKeyScheduling,
+                ["enable_fingerprint_unification"] = settings.EnableFingerprintUnification, ["enable_metadata_passthrough"] = settings.EnableMetadataPassthrough,
+                ["enable_cch_signing"] = settings.EnableCchSigning, ["enable_claude_oauth_system_prompt_injection"] = settings.EnableClaudeOAuthSystemPromptInjection,
+                ["claude_oauth_system_prompt"] = settings.ClaudeOAuthSystemPrompt, ["claude_oauth_system_prompt_blocks"] = settings.ClaudeOAuthSystemPromptBlocks,
+                ["enable_anthropic_cache_ttl_1h_injection"] = settings.EnableAnthropicCacheTtl1hInjection,
+                ["rewrite_message_cache_control"] = settings.RewriteMessageCacheControl, ["enable_client_dateline_normalization"] = settings.EnableClientDatelineNormalization,
+                ["antigravity_user_agent_version"] = settings.AntigravityUserAgentVersion.Trim(), ["openai_codex_user_agent"] = settings.OpenAICodexUserAgent.Trim(),
+                ["openai_codex_client_version"] = settings.OpenAICodexClientVersion.Trim(), ["openai_codex_version_auto_sync_enabled"] = settings.OpenAICodexVersionAutoSyncEnabled,
+                ["min_codex_version"] = settings.MinCodexVersion.Trim(), ["max_codex_version"] = settings.MaxCodexVersion.Trim(),
+                ["codex_cli_only_blacklist"] = settings.CodexCliOnlyBlacklist, ["codex_cli_only_whitelist"] = settings.CodexCliOnlyWhitelist,
+                ["codex_cli_only_allow_app_server_clients"] = settings.CodexCliOnlyAllowAppServerClients,
+                ["codex_cli_only_engine_fingerprint_signals"] = settings.CodexCliOnlyEngineFingerprintSignals,
+                ["openai_low_upstream_rate_priority_enabled"] = settings.OpenAILowUpstreamRatePriorityEnabled,
+                ["openai_oauth_scheduling_rate_multiplier"] = settings.OpenAIOAuthSchedulingRateMultiplier,
+                ["openai_advanced_scheduler_enabled"] = settings.OpenAIAdvancedSchedulerEnabled,
+                ["openai_advanced_scheduler_sticky_weighted_enabled"] = settings.OpenAIAdvancedSchedulerStickyWeightedEnabled,
+                ["openai_advanced_scheduler_subscription_priority_enabled"] = settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled,
+                ["openai_advanced_scheduler_lb_top_k"] = settings.OpenAIAdvancedSchedulerLbTopK.Trim(),
+                ["openai_advanced_scheduler_weight_priority"] = settings.OpenAIAdvancedSchedulerWeightPriority.Trim(),
+                ["openai_advanced_scheduler_weight_load"] = settings.OpenAIAdvancedSchedulerWeightLoad.Trim(),
+                ["openai_advanced_scheduler_weight_queue"] = settings.OpenAIAdvancedSchedulerWeightQueue.Trim(),
+                ["openai_advanced_scheduler_weight_error_rate"] = settings.OpenAIAdvancedSchedulerWeightErrorRate.Trim(),
+                ["openai_advanced_scheduler_weight_ttft"] = settings.OpenAIAdvancedSchedulerWeightTtft.Trim(),
+                ["openai_advanced_scheduler_weight_reset"] = settings.OpenAIAdvancedSchedulerWeightReset.Trim(),
+                ["openai_advanced_scheduler_weight_quota_headroom"] = settings.OpenAIAdvancedSchedulerWeightQuotaHeadroom.Trim(),
+                ["openai_advanced_scheduler_weight_upstream_cost"] = settings.OpenAIAdvancedSchedulerWeightUpstreamCost.Trim(),
+                ["openai_advanced_scheduler_weight_previous_response"] = settings.OpenAIAdvancedSchedulerWeightPreviousResponse.Trim(),
+                ["openai_advanced_scheduler_weight_session_sticky"] = settings.OpenAIAdvancedSchedulerWeightSessionSticky.Trim(),
+                ["account_scheduling_thresholds"] = settings.AccountSchedulingThresholds.ToDictionary(x => x.Key, x => Math.Clamp(x.Value, 1, 100)),
+                ["openai_fast_policy_settings"] = settings.OpenAIFastPolicySettings,
+                ["allow_user_view_error_requests"] = settings.AllowUserViewErrorRequests,
+                ["smtp_host"] = settings.SmtpHost.Trim(), ["smtp_port"] = settings.SmtpPort, ["smtp_username"] = settings.SmtpUsername.Trim(),
+                ["smtp_from_email"] = settings.SmtpFromEmail.Trim(), ["smtp_from_name"] = settings.SmtpFromName.Trim(), ["smtp_use_tls"] = settings.SmtpUseTls,
+                ["balance_low_notify_enabled"] = settings.BalanceLowNotifyEnabled,
+                ["balance_low_notify_threshold"] = Math.Max(0, settings.BalanceLowNotifyThreshold),
+                ["balance_low_notify_recharge_url"] = settings.BalanceLowNotifyRechargeUrl.Trim(),
+                ["subscription_expiry_notify_enabled"] = settings.SubscriptionExpiryNotifyEnabled,
+                ["account_quota_notify_enabled"] = settings.AccountQuotaNotifyEnabled,
+                ["account_quota_notify_emails"] = settings.AccountQuotaNotifyEmails
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry.Email))
+                    .Select(entry => new NotifyEmailEntryDto { Email = entry.Email.Trim(), Disabled = entry.Disabled, Verified = entry.Verified })
+                    .ToList(),
+                ["turnstile_enabled"] = settings.TurnstileEnabled, ["turnstile_site_key"] = settings.TurnstileSiteKey.Trim(),
+                ["tencent_captcha_enabled"] = settings.TencentCaptchaEnabled, ["tencent_captcha_app_id"] = settings.TencentCaptchaAppId.Trim(),
+                ["tencent_captcha_region"] = settings.TencentCaptchaRegion, ["aliyun_captcha_enabled"] = settings.AliyunCaptchaEnabled,
+                ["aliyun_captcha_access_key_id"] = settings.AliyunCaptchaAccessKeyId.Trim(), ["aliyun_captcha_scene_id"] = settings.AliyunCaptchaSceneId.Trim(),
+                ["aliyun_captcha_prefix"] = settings.AliyunCaptchaPrefix.Trim(), ["aliyun_captcha_region"] = settings.AliyunCaptchaRegion,
+                ["api_key_acl_trust_forwarded_ip"] = settings.ApiKeyAclTrustForwardedIp,
+                ["forwarded_client_ip_headers"] = settings.ForwardedClientIpHeaders.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Take(10).ToList(),
+                ["linuxdo_connect_enabled"] = settings.LinuxDoConnectEnabled, ["linuxdo_connect_client_id"] = settings.LinuxDoConnectClientId.Trim(),
+                ["linuxdo_connect_redirect_url"] = settings.LinuxDoConnectRedirectUrl.Trim(),
+                ["dingtalk_connect_enabled"] = settings.DingTalkConnectEnabled, ["dingtalk_connect_client_id"] = settings.DingTalkConnectClientId.Trim(),
+                ["dingtalk_connect_redirect_url"] = settings.DingTalkConnectRedirectUrl.Trim(),
+                ["dingtalk_connect_corp_restriction_policy"] = settings.DingTalkConnectCorpRestrictionPolicy,
+                ["dingtalk_connect_internal_corp_id"] = settings.DingTalkConnectInternalCorpId.Trim(),
+                ["dingtalk_connect_bypass_registration"] = settings.DingTalkConnectBypassRegistration,
+                ["dingtalk_connect_sync_corp_email"] = settings.DingTalkConnectSyncCorpEmail,
+                ["dingtalk_connect_sync_display_name"] = settings.DingTalkConnectSyncDisplayName,
+                ["dingtalk_connect_sync_dept"] = settings.DingTalkConnectSyncDept,
+                ["dingtalk_connect_sync_corp_email_attr_key"] = settings.DingTalkConnectSyncCorpEmailAttrKey.Trim(),
+                ["dingtalk_connect_sync_display_name_attr_key"] = settings.DingTalkConnectSyncDisplayNameAttrKey.Trim(),
+                ["dingtalk_connect_sync_dept_attr_key"] = settings.DingTalkConnectSyncDeptAttrKey.Trim(),
+                ["dingtalk_connect_sync_corp_email_attr_name"] = settings.DingTalkConnectSyncCorpEmailAttrName.Trim(),
+                ["dingtalk_connect_sync_display_name_attr_name"] = settings.DingTalkConnectSyncDisplayNameAttrName.Trim(),
+                ["dingtalk_connect_sync_dept_attr_name"] = settings.DingTalkConnectSyncDeptAttrName.Trim(),
+                ["wechat_connect_enabled"] = settings.WeChatConnectEnabled,
+                ["wechat_connect_app_id"] = FirstNonEmpty(settings.WeChatConnectOpenAppId, settings.WeChatConnectMpAppId, settings.WeChatConnectMobileAppId, settings.WeChatConnectAppId),
+                ["wechat_connect_open_app_id"] = settings.WeChatConnectOpenAppId.Trim(), ["wechat_connect_mp_app_id"] = settings.WeChatConnectMpAppId.Trim(),
+                ["wechat_connect_mobile_app_id"] = settings.WeChatConnectMobileAppId.Trim(), ["wechat_connect_open_enabled"] = settings.WeChatConnectOpenEnabled,
+                ["wechat_connect_mp_enabled"] = settings.WeChatConnectMpEnabled, ["wechat_connect_mobile_enabled"] = settings.WeChatConnectMobileEnabled,
+                ["wechat_connect_mode"] = settings.WeChatConnectMode, ["wechat_connect_scopes"] = settings.WeChatConnectScopes.Trim(),
+                ["wechat_connect_redirect_url"] = settings.WeChatConnectRedirectUrl.Trim(),
+                ["wechat_connect_frontend_redirect_url"] = settings.WeChatConnectFrontendRedirectUrl.Trim(),
+                ["github_oauth_enabled"] = settings.GitHubOAuthEnabled, ["github_oauth_client_id"] = settings.GitHubOAuthClientId.Trim(),
+                ["github_oauth_redirect_url"] = settings.GitHubOAuthRedirectUrl.Trim(),
+                ["github_oauth_frontend_redirect_url"] = settings.GitHubOAuthFrontendRedirectUrl.Trim(),
+                ["google_oauth_enabled"] = settings.GoogleOAuthEnabled, ["google_oauth_client_id"] = settings.GoogleOAuthClientId.Trim(),
+                ["google_oauth_redirect_url"] = settings.GoogleOAuthRedirectUrl.Trim(),
+                ["google_oauth_frontend_redirect_url"] = settings.GoogleOAuthFrontendRedirectUrl.Trim(),
+                ["oidc_connect_enabled"] = settings.OidcConnectEnabled, ["oidc_connect_provider_name"] = settings.OidcConnectProviderName.Trim(),
+                ["oidc_connect_client_id"] = settings.OidcConnectClientId.Trim(), ["oidc_connect_issuer_url"] = settings.OidcConnectIssuerUrl.Trim(),
+                ["oidc_connect_discovery_url"] = settings.OidcConnectDiscoveryUrl.Trim(), ["oidc_connect_authorize_url"] = settings.OidcConnectAuthorizeUrl.Trim(),
+                ["oidc_connect_token_url"] = settings.OidcConnectTokenUrl.Trim(), ["oidc_connect_userinfo_url"] = settings.OidcConnectUserinfoUrl.Trim(),
+                ["oidc_connect_jwks_url"] = settings.OidcConnectJwksUrl.Trim(), ["oidc_connect_scopes"] = settings.OidcConnectScopes.Trim(),
+                ["oidc_connect_redirect_url"] = settings.OidcConnectRedirectUrl.Trim(),
+                ["oidc_connect_frontend_redirect_url"] = settings.OidcConnectFrontendRedirectUrl.Trim(),
+                ["oidc_connect_token_auth_method"] = settings.OidcConnectTokenAuthMethod,
+                ["oidc_connect_use_pkce"] = settings.OidcConnectUsePkce, ["oidc_connect_validate_id_token"] = settings.OidcConnectValidateIdToken,
+                ["oidc_connect_allowed_signing_algs"] = settings.OidcConnectAllowedSigningAlgs.Trim(),
+                ["oidc_connect_clock_skew_seconds"] = settings.OidcConnectClockSkewSeconds,
+                ["oidc_connect_require_email_verified"] = settings.OidcConnectRequireEmailVerified,
+                ["oidc_connect_userinfo_email_path"] = settings.OidcConnectUserinfoEmailPath.Trim(),
+                ["oidc_connect_userinfo_id_path"] = settings.OidcConnectUserinfoIdPath.Trim(),
+                ["oidc_connect_userinfo_username_path"] = settings.OidcConnectUserinfoUsernamePath.Trim()
+            };
+            foreach (var value in values) payload[value.Key] = value.Value;
+            foreach (var sourceId in AuthSourceIds)
+            {
+                if (!settings.AuthSourceDefaults.TryGetValue(sourceId, out var source)) continue;
+                payload[$"auth_source_default_{sourceId}_balance"] = Math.Max(0, source.Balance);
+                payload[$"auth_source_default_{sourceId}_concurrency"] = Math.Max(1, source.Concurrency);
+                payload[$"auth_source_default_{sourceId}_subscriptions"] = SanitizeSubscriptions(source.Subscriptions);
+                payload[$"auth_source_default_{sourceId}_grant_on_signup"] = source.GrantOnSignup;
+                payload[$"auth_source_default_{sourceId}_grant_on_first_bind"] = source.GrantOnFirstBind;
+                payload[$"auth_source_default_{sourceId}_platform_quotas"] = NormalizePlatformQuotas(source.PlatformQuotas);
+            }
+            foreach (var secret in SecretSettingKeys) payload.Remove(secret);
+            if (!string.IsNullOrWhiteSpace(smtpPassword)) payload["smtp_password"] = smtpPassword;
+            AddSecretIfPresent(payload, "turnstile_secret_key", securitySecrets.TurnstileSecretKey);
+            AddSecretIfPresent(payload, "tencent_captcha_app_secret_key", securitySecrets.TencentCaptchaAppSecretKey);
+            AddSecretIfPresent(payload, "tencent_captcha_cloud_secret_id", securitySecrets.TencentCaptchaCloudSecretId);
+            AddSecretIfPresent(payload, "tencent_captcha_cloud_secret_key", securitySecrets.TencentCaptchaCloudSecretKey);
+            AddSecretIfPresent(payload, "aliyun_captcha_access_key_secret", securitySecrets.AliyunCaptchaAccessKeySecret);
+            AddSecretIfPresent(payload, "linuxdo_connect_client_secret", securitySecrets.LinuxDoConnectClientSecret);
+            AddSecretIfPresent(payload, "dingtalk_connect_client_secret", securitySecrets.DingTalkConnectClientSecret);
+            AddSecretIfPresent(payload, "wechat_connect_app_secret", securitySecrets.WeChatConnectAppSecret);
+            AddSecretIfPresent(payload, "wechat_connect_open_app_secret", securitySecrets.WeChatConnectOpenAppSecret);
+            AddSecretIfPresent(payload, "wechat_connect_mp_app_secret", securitySecrets.WeChatConnectMpAppSecret);
+            AddSecretIfPresent(payload, "wechat_connect_mobile_app_secret", securitySecrets.WeChatConnectMobileAppSecret);
+            AddSecretIfPresent(payload, "github_oauth_client_secret", securitySecrets.GitHubOAuthClientSecret);
+            AddSecretIfPresent(payload, "google_oauth_client_secret", securitySecrets.GoogleOAuthClientSecret);
+            AddSecretIfPresent(payload, "oidc_connect_client_secret", securitySecrets.OidcConnectClientSecret);
+
+            settings = await Api.UpdateAdminSettingsTypedAsync(payload);
+            await ReloadGenericStateAsync();
+            smtpPassword = string.Empty;
+            securitySecrets = new();
+            Toasts.Success("系统设置已保存");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task ReloadGenericStateAsync()
+    {
+        var raw = await Api.GetAdminSettingsAsync();
+        original = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(raw.GetRawText(), WebJson) ?? original;
+        settings = raw.Deserialize<AdminSettingsDto>(WebJson) ?? settings;
+        NormalizeUserDefaults();
+        suffixText = string.Join(", ", settings.RegistrationEmailSuffixWhitelist);
+        pageSizeOptionsText = string.Join(", ", settings.TablePageSizeOptions);
+    }
+
+    private async Task GenerateAdminApiKeyAsync()
+    {
+        if (adminApiKey.Exists && !await JS.InvokeAsync<bool>("confirm", "重新生成后，旧管理员 API Key 会立即失效。确认继续？")) return;
+        adminKeyBusy = true; error = null;
+        try { var generated = await Api.RegenerateAdminApiKeyAsync(); generatedAdminApiKey = generated.Key; adminApiKey = await Api.GetAdminApiKeyStatusAsync(); Toasts.Success("管理员 API Key 已生成"); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { adminKeyBusy = false; }
+    }
+
+    private async Task DeleteAdminApiKeyAsync()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "删除后，所有使用当前管理员 API Key 的客户端会立即失效。确认删除？")) return;
+        adminKeyBusy = true; error = null;
+        try { await Api.DeleteAdminApiKeyAsync(); adminApiKey = new(); generatedAdminApiKey = string.Empty; Toasts.Success("管理员 API Key 已删除"); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { adminKeyBusy = false; }
+    }
+
+    private async Task CopyAdminApiKeyAsync() { if (!string.IsNullOrWhiteSpace(generatedAdminApiKey)) { await JS.InvokeVoidAsync("navigator.clipboard.writeText", generatedAdminApiKey); Toasts.Success("管理员 API Key 已复制"); } }
+    private SmtpTestRequestDto CurrentSmtpTestRequest() => new()
+    {
+        SmtpHost = settings.SmtpHost.Trim(), SmtpPort = settings.SmtpPort, SmtpUsername = settings.SmtpUsername.Trim(),
+        SmtpPassword = smtpPassword, SmtpUseTls = settings.SmtpUseTls
+    };
+
+    private async Task TestSmtpAsync()
+    {
+        smtpBusy = true; error = null;
+        try { var result = await Api.TestSmtpConnectionAsync(CurrentSmtpTestRequest()); Toasts.Success(string.IsNullOrWhiteSpace(result.Message) ? "SMTP 连接成功" : result.Message); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { smtpBusy = false; }
+    }
+
+    private async Task SendTestEmailAsync()
+    {
+        if (string.IsNullOrWhiteSpace(testEmailAddress)) return;
+        smtpBusy = true; error = null;
+        try
+        {
+            var smtp = CurrentSmtpTestRequest();
+            var result = await Api.SendTestEmailAsync(new SendTestEmailRequestDto
+            {
+                Email = testEmailAddress.Trim(), SmtpHost = smtp.SmtpHost, SmtpPort = smtp.SmtpPort, SmtpUsername = smtp.SmtpUsername,
+                SmtpPassword = smtp.SmtpPassword, SmtpUseTls = smtp.SmtpUseTls,
+                SmtpFromEmail = settings.SmtpFromEmail.Trim(), SmtpFromName = settings.SmtpFromName.Trim()
+            });
+            Toasts.Success(string.IsNullOrWhiteSpace(result.Message) ? "测试邮件已发送" : result.Message);
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { smtpBusy = false; }
+    }
+
+    private async Task SaveOverloadAsync() => await SaveRuntimeAsync(async () => overloadCooldown = await Api.UpdateOverloadCooldownSettingsAsync(overloadCooldown), "529 过载冷却已保存");
+    private async Task SaveRateLimit429Async() => await SaveRuntimeAsync(async () => rateLimit429 = await Api.UpdateRateLimit429CooldownSettingsAsync(rateLimit429), "429 默认回避已保存");
+    private async Task SavePanelRateLimitAsync() => await SaveRuntimeAsync(async () => panelRateLimit = await Api.UpdatePanelRateLimitSettingsAsync(panelRateLimit), "面板 API 限流已保存");
+    private async Task SaveStreamTimeoutAsync() => await SaveRuntimeAsync(async () => streamTimeout = await Api.UpdateStreamTimeoutSettingsAsync(streamTimeout), "流超时处理已保存");
+    private async Task SaveRectifierAsync()
+    {
+        rectifier.ApiKeySignaturePatterns = rectifierPatternsText.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal).Take(50).ToList();
+        await SaveRuntimeAsync(async () => rectifier = await Api.UpdateRectifierSettingsAsync(rectifier), "请求整流器已保存");
+        rectifierPatternsText = string.Join(Environment.NewLine, rectifier.ApiKeySignaturePatterns);
+    }
+
+    private async Task SaveRuntimeAsync(Func<Task> action, string message)
+    {
+        runtimeSaving = true; error = null;
+        try { await action(); Toasts.Success(message); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { runtimeSaving = false; }
+    }
+
+    private static List<string> SplitDistinct(string value) => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    private static List<int> SplitPositiveIntegers(string value) => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => int.TryParse(x, out var number) ? number : 0).Where(x => x > 0).Distinct().Order().ToList();
+    private static List<DefaultSubscriptionSettingDto> SanitizeSubscriptions(IEnumerable<DefaultSubscriptionSettingDto> items) => items
+        .Where(item => item.GroupId > 0 && item.ValidityDays > 0)
+        .GroupBy(item => item.GroupId)
+        .Select(group => new DefaultSubscriptionSettingDto { GroupId = group.Key, ValidityDays = Math.Clamp(group.First().ValidityDays, 1, 36500) })
+        .ToList();
+
+    private static Dictionary<string, PlatformQuotaLimitsDto> NormalizePlatformQuotas(Dictionary<string, PlatformQuotaLimitsDto>? quotas)
+    {
+        var normalized = new Dictionary<string, PlatformQuotaLimitsDto>(StringComparer.OrdinalIgnoreCase);
+        foreach (var platform in QuotaPlatforms)
+        {
+            PlatformQuotaLimitsDto? quota = null;
+            if (quotas is not null) quotas.TryGetValue(platform, out quota);
+            normalized[platform] = new PlatformQuotaLimitsDto
+            {
+                Daily = quota?.Daily is >= 0 ? quota.Daily : null,
+                Weekly = quota?.Weekly is >= 0 ? quota.Weekly : null,
+                Monthly = quota?.Monthly is >= 0 ? quota.Monthly : null
+            };
+        }
+        return normalized;
+    }
+
+    private void NormalizeUserDefaults()
+    {
+        settings.DefaultSubscriptions ??= [];
+        settings.DefaultPlatformQuotas = NormalizePlatformQuotas(settings.DefaultPlatformQuotas);
+        settings.AuthSourceDefaults = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var sourceId in AuthSourceIds)
+        {
+            settings.AuthSourceDefaults[sourceId] = new AuthSourceDefaultsDto
+            {
+                Balance = ReadExtra($"auth_source_default_{sourceId}_balance", 0m),
+                Concurrency = Math.Max(1, ReadExtra($"auth_source_default_{sourceId}_concurrency", 5)),
+                Subscriptions = ReadExtra($"auth_source_default_{sourceId}_subscriptions", new List<DefaultSubscriptionSettingDto>()),
+                GrantOnSignup = ReadExtra($"auth_source_default_{sourceId}_grant_on_signup", false),
+                GrantOnFirstBind = ReadExtra($"auth_source_default_{sourceId}_grant_on_first_bind", false),
+                PlatformQuotas = NormalizePlatformQuotas(ReadExtra($"auth_source_default_{sourceId}_platform_quotas", new Dictionary<string, PlatformQuotaLimitsDto>()))
+            };
+        }
+    }
+
+    private T ReadExtra<T>(string key, T fallback)
+    {
+        if (settings.Extra is null || !settings.Extra.TryGetValue(key, out var value)) return fallback;
+        try { return value.Deserialize<T>(WebJson) ?? fallback; }
+        catch (JsonException) { return fallback; }
+    }
+
+    private static string FirstNonEmpty(params string[] values) => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+    private static void AddSecretIfPresent(Dictionary<string, object?> payload, string key, string value)
+    {
+        if (!string.IsNullOrWhiteSpace(value)) payload[key] = value;
+    }
+
+    private static string NormalizeDocumentSlug(string value, int index)
+    {
+        var normalized = new string((value ?? string.Empty).Trim().ToLowerInvariant().Select(character => char.IsLetterOrDigit(character) || character is '-' or '_' ? character : '-').ToArray()).Trim('-', '_');
+        return string.IsNullOrWhiteSpace(normalized) ? $"document-{index + 1}" : normalized;
+    }
+    private static readonly string[] SecretSettingKeys = ["smtp_password", "turnstile_secret_key", "tencent_captcha_app_secret_key", "tencent_captcha_cloud_secret_id", "tencent_captcha_cloud_secret_key", "aliyun_captcha_access_key_secret", "linuxdo_connect_client_secret", "dingtalk_connect_client_secret", "wechat_connect_app_secret", "wechat_connect_open_app_secret", "wechat_connect_mp_app_secret", "wechat_connect_mobile_app_secret", "github_oauth_client_secret", "google_oauth_client_secret", "oidc_connect_client_secret"];
+}

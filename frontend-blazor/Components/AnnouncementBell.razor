@@ -1,0 +1,179 @@
+@implements IDisposable
+
+@inject AnnouncementService Announcements
+@inject ToastService Toasts
+
+<button type="button"
+        class="topbar-icon-link announcement-bell-trigger @(Announcements.UnreadCount > 0 ? "has-unread" : null)"
+        title="公告"
+        aria-label="公告"
+        aria-haspopup="dialog"
+        @onclick="OpenListAsync">
+    <Icon Name="bell" Size="18" />
+    @if (Announcements.UnreadCount > 0)
+    {
+        <span class="announcement-unread-dot"><i></i></span>
+        <span class="sr-only">@Announcements.UnreadCount 条未读公告</span>
+    }
+</button>
+
+<AppModal Open="@listOpen" Title="公告" MaxWidth="620px" OnClose="CloseList">
+    <ChildContent>
+        <div class="announcement-modal-summary">
+            <div>
+                <span class="announcement-modal-icon"><Icon Name="bell" Size="17" /></span>
+                @if (Announcements.UnreadCount > 0)
+                {
+                    <span><strong>@Announcements.UnreadCount</strong> 条未读公告</span>
+                }
+                else
+                {
+                    <span>所有公告均已阅读</span>
+                }
+            </div>
+            @if (Announcements.UnreadCount > 0)
+            {
+                <button type="button" class="button primary small" disabled="@Announcements.Loading" @onclick="MarkAllReadAsync">全部标记已读</button>
+            }
+        </div>
+
+        @if (Announcements.Loading && Announcements.Items.Count == 0)
+        {
+            <LoadingState Text="正在载入公告" />
+        }
+        else if (Announcements.Items.Count == 0)
+        {
+            <EmptyState Title="暂无公告" Description="当前没有需要查看的通知。" />
+        }
+        else
+        {
+            <div class="announcement-modal-list">
+                @foreach (var item in Announcements.Items)
+                {
+                    <button type="button" class="announcement-list-row @(item.ReadAt is null ? "unread" : null)" @onclick="() => OpenDetailAsync(item)" @key="item.Id">
+                        <span class="announcement-list-state"><Icon Name="@(item.ReadAt is null ? "info" : "circle-check")" Size="18" /></span>
+                        <span class="announcement-list-copy">
+                            <strong>@item.Title</strong>
+                            <small>@UiFormat.RelativeDateTime(item.CreatedAt)</small>
+                            @if (item.ReadAt is null) { <em><i></i>未读</em> }
+                        </span>
+                        <Icon Name="chevron-right" Size="17" />
+                    </button>
+                }
+            </div>
+        }
+    </ChildContent>
+</AppModal>
+
+<AppModal Open="@(detailOpen && selected is not null)" Title="@(selected?.Title ?? "公告详情")" MaxWidth="780px" OnClose="CloseDetail">
+    <ChildContent>
+        @if (selected is not null)
+        {
+            <div class="announcement-detail-meta">
+                <span class="status-badge">公告</span>
+                <span><Icon Name="clock" Size="14" /> @UiFormat.RelativeDateTime(selected.CreatedAt)</span>
+                <span class="@(selected.ReadAt is null ? "unread" : "read")">@(selected.ReadAt is null ? "未读" : "已读")</span>
+            </div>
+            <article class="announcement-markdown markdown-body">@((MarkupString)MarkdownRenderer.ToSafeHtml(selected.Content))</article>
+        }
+    </ChildContent>
+    <Footer>
+        @if (selected?.ReadAt is null)
+        {
+            <button type="button" class="button primary" @onclick="MarkSelectedReadAsync"><Icon Name="check" Size="15" /> 标记已读</button>
+        }
+        <button type="button" class="button secondary" @onclick="CloseDetail">关闭</button>
+    </Footer>
+</AppModal>
+
+@if (Announcements.CurrentPopup is { } popup)
+{
+    <div class="announcement-popup-backdrop" role="presentation">
+        <section class="announcement-popup" role="dialog" aria-modal="true" aria-labelledby="announcement-popup-title">
+            <header>
+                <span class="announcement-popup-icon"><Icon Name="bell" Size="20" /></span>
+                <span class="announcement-popup-unread"><i></i>未读公告</span>
+                <h2 id="announcement-popup-title">@popup.Title</h2>
+                <p><Icon Name="clock" Size="14" /> @UiFormat.RelativeDateTime(popup.CreatedAt)</p>
+            </header>
+            <div class="announcement-popup-body">
+                <article class="announcement-markdown markdown-body">@((MarkupString)MarkdownRenderer.ToSafeHtml(popup.Content))</article>
+            </div>
+            <footer>
+                <button type="button" class="button primary" data-testid="announcement-popup-dismiss" @onclick="DismissPopupAsync"><Icon Name="check" Size="15" /> 标记已读</button>
+            </footer>
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public string? ViewerId { get; set; }
+
+    private string? loadedViewerId;
+    private bool listOpen;
+    private bool detailOpen;
+    private UserAnnouncementDto? selected;
+
+    protected override void OnInitialized() => Announcements.Changed += OnAnnouncementsChanged;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.Equals(loadedViewerId, ViewerId, StringComparison.Ordinal)) return;
+        loadedViewerId = ViewerId;
+        Announcements.SetViewer(ViewerId);
+        if (string.IsNullOrWhiteSpace(ViewerId)) return;
+        try { await Announcements.FetchAsync(force: true); }
+        catch (ApiException) { }
+    }
+
+    private async Task OpenListAsync()
+    {
+        listOpen = true;
+        try { await Announcements.FetchAsync(); }
+        catch (ApiException ex) { Toasts.Error(ex.Message); }
+    }
+
+    private void CloseList() => listOpen = false;
+    private void CloseDetail() { detailOpen = false; selected = null; }
+
+    private async Task OpenDetailAsync(UserAnnouncementDto item)
+    {
+        selected = item;
+        detailOpen = true;
+        if (item.ReadAt is null)
+        {
+            try { await Announcements.MarkReadAsync(item.Id); }
+            catch (ApiException ex) { Toasts.Error(ex.Message); }
+        }
+    }
+
+    private async Task MarkSelectedReadAsync()
+    {
+        if (selected is null) return;
+        try
+        {
+            await Announcements.MarkReadAsync(selected.Id);
+            Toasts.Success("已标记为已读");
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Message); }
+    }
+
+    private async Task MarkAllReadAsync()
+    {
+        try
+        {
+            await Announcements.MarkAllReadAsync();
+            Toasts.Success("全部公告已标记为已读");
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Message); }
+    }
+
+    private async Task DismissPopupAsync()
+    {
+        try { await Announcements.DismissPopupAsync(); }
+        catch (ApiException ex) { Toasts.Error(ex.Message); }
+    }
+
+    private void OnAnnouncementsChanged() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Announcements.Changed -= OnAnnouncementsChanged;
+}

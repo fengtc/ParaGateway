@@ -1,0 +1,15 @@
+@if (Rows.Count > 0)
+{
+    <div class="distribution-legend">
+        @foreach (var row in Rows.Take(6))
+        {
+            <div><span title="@row.Label">@row.Label</span><strong>@(Metric == "tokens" ? FormatTokens(row.Tokens) : $"${row.Cost:0.######}")</strong></div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<DistributionLegendRow> Rows { get; set; } = [];
+    [Parameter] public string Metric { get; set; } = "tokens";
+    private static string FormatTokens(long value) => value switch { >= 1_000_000_000 => $"{value / 1_000_000_000d:0.##}B", >= 1_000_000 => $"{value / 1_000_000d:0.##}M", >= 1_000 => $"{value / 1_000d:0.##}K", _ => value.ToString("N0") };
+}

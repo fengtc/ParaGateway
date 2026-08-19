@@ -1,0 +1,133 @@
+@using ParaGateway.Frontend.Models
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+
+@if (Enabled)
+{
+    <div class="captcha-challenge" id="@HostId">
+        @if (TurnstileEnabled && !string.IsNullOrWhiteSpace(TurnstileSiteKey))
+        {
+            <div class="captcha-turnstile" id="@TurnstileHostId"></div>
+        }
+        else
+        {
+            <button type="button" class="button secondary captcha-action-button" @onclick="HandleVerifyAsync" disabled="@busy">
+                <Icon Name="shield-check" Size="16" /> @(busy ? "正在验证…" : verified ? "验证已完成" : "完成安全验证")
+            </button>
+        }
+        @if (!string.IsNullOrWhiteSpace(error))
+        {
+            <div class="field-error" role="alert">@error</div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public bool TurnstileEnabled { get; set; }
+    [Parameter] public string TurnstileSiteKey { get; set; } = string.Empty;
+    [Parameter] public bool TencentEnabled { get; set; }
+    [Parameter] public string TencentAppId { get; set; } = string.Empty;
+    [Parameter] public string TencentRegion { get; set; } = "cn";
+    [Parameter] public bool AliyunEnabled { get; set; }
+    [Parameter] public string AliyunSceneId { get; set; } = string.Empty;
+    [Parameter] public string AliyunPrefix { get; set; } = string.Empty;
+    [Parameter] public string AliyunRegion { get; set; } = "cn";
+
+    private readonly string HostId = $"captcha-{Guid.NewGuid():N}";
+    private string TurnstileHostId => $"{HostId}-turnstile";
+    private bool initialized;
+    private bool busy;
+    private bool verified;
+    private string? error;
+
+    public bool Enabled => (TurnstileEnabled && !string.IsNullOrWhiteSpace(TurnstileSiteKey))
+        || (TencentEnabled && !string.IsNullOrWhiteSpace(TencentAppId))
+        || (AliyunEnabled && !string.IsNullOrWhiteSpace(AliyunSceneId) && !string.IsNullOrWhiteSpace(AliyunPrefix));
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (initialized || !Enabled) return;
+        initialized = true;
+        try
+        {
+            await Js.InvokeVoidAsync("paraGateway.captcha.init", HostId, new
+            {
+                turnstile_enabled = TurnstileEnabled,
+                turnstile_site_key = TurnstileSiteKey,
+                tencent_enabled = TencentEnabled,
+                tencent_app_id = TencentAppId,
+                tencent_region = TencentRegion,
+                aliyun_enabled = AliyunEnabled,
+                aliyun_scene_id = AliyunSceneId,
+                aliyun_prefix = AliyunPrefix,
+                aliyun_region = AliyunRegion,
+                host_id = HostId,
+                turnstile_host_id = TurnstileHostId
+            });
+        }
+        catch (JSException ex) { error = ex.Message; }
+    }
+
+    public async Task<CaptchaProof?> GetProofAsync()
+    {
+        if (!Enabled) return null;
+        if (!initialized)
+        {
+            await InvokeAsync(StateHasChanged);
+            await Task.Delay(50);
+        }
+        var proof = await VerifyAsync();
+        if (proof is null || proof.IsEmpty)
+            throw new ApiException("请先完成安全验证。", System.Net.HttpStatusCode.BadRequest);
+        return proof;
+    }
+
+    public Task<CaptchaProof?> GetActionProofAsync() => ActionEnabled
+        ? GetProofAsync()
+        : Task.FromResult<CaptchaProof?>(null);
+
+    private bool ActionEnabled => (TencentEnabled && !string.IsNullOrWhiteSpace(TencentAppId))
+        || (AliyunEnabled && !string.IsNullOrWhiteSpace(AliyunSceneId) && !string.IsNullOrWhiteSpace(AliyunPrefix));
+
+    private async Task<CaptchaProof?> VerifyAsync()
+    {
+        if (!Enabled) return null;
+        busy = true;
+        error = null;
+        try
+        {
+            var proof = await Js.InvokeAsync<CaptchaProof?>("paraGateway.captcha.verify", HostId);
+            verified = proof is not null && !proof.IsEmpty;
+            if (!verified) error = "验证码未完成，请重试。";
+            return proof;
+        }
+        catch (JSException)
+        {
+            error = "验证码加载失败，请检查网络后重试。";
+            return null;
+        }
+        finally
+        {
+            busy = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task HandleVerifyAsync() => _ = await VerifyAsync();
+
+    public async Task ResetAsync()
+    {
+        if (!Enabled) return;
+        verified = false;
+        error = null;
+        try { await Js.InvokeVoidAsync("paraGateway.captcha.reset", HostId); } catch (JSException) { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (initialized)
+        {
+            try { await Js.InvokeVoidAsync("paraGateway.captcha.dispose", HostId); } catch (JSException) { }
+        }
+    }
+}

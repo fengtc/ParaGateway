@@ -1,0 +1,31 @@
+@page "/custom/{Id}"
+@inject ApiClient Api
+
+<PageTitle>自定义页面 · ParaGateway</PageTitle>
+<div class="page-header"><div><h1>自定义页面</h1><p>由管理员维护的 Markdown 内容。</p></div><button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button></div>
+@if (loading) { <LoadingState Text="正在载入自定义页面" /> }
+else if (error is not null) { <ErrorState Message="@error" OnRetry="LoadAsync" /> }
+else if (string.IsNullOrWhiteSpace(markdown)) { <EmptyState Title="页面不存在" Description="请确认自定义菜单配置和页面标识。" /> }
+else { <article class="content-section markdown-lite"><div class="markdown-body">@((MarkupString)MarkdownRenderer.ToSafeHtml(markdown))</div></article> }
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+    private string markdown = string.Empty;
+    private bool loading = true;
+    private string? error;
+    private string? loadedId;
+    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override Task OnParametersSetAsync()
+    {
+        if (!string.Equals(loadedId, Id, StringComparison.OrdinalIgnoreCase)) return LoadAsync();
+        return Task.CompletedTask;
+    }
+    private async Task LoadAsync()
+    {
+        loadedId = Id;
+        loading = true; error = null;
+        try { markdown = await Api.GetCustomPageMarkdownAsync(Id); }
+        catch (ApiException ex) { error = ex.Message; markdown = string.Empty; }
+        finally { loading = false; }
+    }
+}

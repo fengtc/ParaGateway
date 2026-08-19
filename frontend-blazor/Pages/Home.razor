@@ -1,0 +1,16 @@
+@page "/"
+@page "/dashboard"
+@page "/admin"
+@page "/admin/dashboard"
+@inject AuthSession Auth
+
+<PageTitle>仪表盘 · ParaGateway</PageTitle>
+
+@if (Auth.User?.IsAdmin == true)
+{
+    <AdminDashboardPanel />
+}
+else
+{
+    <UserDashboardPanel />
+}

@@ -1,0 +1,260 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject AuthSession Auth
+@inject AnnouncementService Announcements
+@inject ApiClient Api
+@inject NavigationManager Navigation
+@inject IJSRuntime Js
+
+<div class="app-shell" data-theme="@(isDark ? "dark" : "light")">
+    <aside class="app-sidebar @(sidebarCollapsed ? "collapsed" : null) @(sidebarOpen ? "open" : null)">
+        <NavMenu Collapsed="@(sidebarCollapsed && !sidebarOpen)"
+                 IsDark="@isDark"
+                 OnNavigate="CloseSidebar"
+                 OnToggleTheme="ToggleThemeAsync"
+                 OnToggleCollapsed="ToggleSidebarAsync"
+                 OnExpandRequested="ExpandSidebarAsync" />
+    </aside>
+
+    @if (sidebarOpen)
+    {
+        <button type="button" class="sidebar-scrim" aria-label="关闭导航" @onclick="CloseSidebar"></button>
+    }
+
+    <div class="app-main @(sidebarCollapsed ? "sidebar-is-collapsed" : null)">
+        <header class="app-topbar">
+            <div class="topbar-left">
+                <button type="button" class="icon-button mobile-menu" title="打开导航" aria-label="打开导航" @onclick="OpenSidebar">
+                    <Icon Name="menu" />
+                </button>
+                <div class="topbar-context">
+                    <h1>@PageContext.Title</h1>
+                    @if (!string.IsNullOrWhiteSpace(PageContext.Description))
+                    {
+                        <p>@PageContext.Description</p>
+                    }
+                </div>
+            </div>
+
+            <div class="topbar-actions">
+                @if (Auth.User is not null)
+                {
+                    <AnnouncementBell ViewerId="@Auth.User.Id" />
+                }
+                @if (publicSettings?.ModelPlazaEnabled == true)
+                {
+                    <a class="topbar-link" href="/model-plaza?embedded=1" title="模型广场">
+                        <Icon Name="grid" Size="17" />
+                        <span>模型广场</span>
+                    </a>
+                }
+
+                @if (Auth.User is not null)
+                {
+                    <div class="balance-summary" tabindex="0" aria-label="可用余额 @FormatMoney(Auth.User.Balance)">
+                        <Icon Name="wallet" Size="17" />
+                        <strong>@FormatMoney(Auth.User.Balance)</strong>
+                        @if (Auth.User.FrozenBalance > 0)
+                        {
+                            <span class="frozen-badge">冻结 @FormatMoney(Auth.User.FrozenBalance)</span>
+                        }
+                        <div class="balance-popover">
+                            <span>可用余额 <strong>@FormatMoney(Auth.User.Balance)</strong></span>
+                            <span>冻结金额 <strong>@FormatMoney(Auth.User.FrozenBalance)</strong></span>
+                            <span>总余额 <strong>@FormatMoney(Auth.User.Balance + Auth.User.FrozenBalance)</strong></span>
+                        </div>
+                    </div>
+                }
+
+                <div class="account-menu-wrap">
+                    <button type="button" class="account-trigger" aria-expanded="@accountMenuOpen" @onclick="ToggleAccountMenu">
+                        <span class="avatar">@Initials</span>
+                        <span class="account-copy">
+                            <strong>@DisplayName</strong>
+                            <small>@Auth.User?.Email</small>
+                        </span>
+                        <Icon Name="chevron-down" Size="15" />
+                    </button>
+                    @if (accountMenuOpen)
+                    {
+                        <div class="account-dropdown">
+                            <div class="account-dropdown-summary">
+                                <strong>@DisplayName</strong>
+                                <span>@Auth.User?.Email</span>
+                            </div>
+                            <button type="button" @onclick="OpenAccount">
+                                <Icon Name="user" Size="17" />
+                                个人资料
+                            </button>
+                            <button type="button" class="danger-text" @onclick="LogoutAsync">
+                                <Icon Name="log-out" Size="17" />
+                                退出登录
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </header>
+
+        <main class="page-content">
+            @Body
+        </main>
+    </div>
+</div>
+
+<ToastHost />
+
+@code {
+    private bool sidebarOpen;
+    private bool sidebarCollapsed;
+    private bool accountMenuOpen;
+    private bool isDark;
+    private PublicSettingsDto? publicSettings;
+
+    private PageHeaderContext PageContext => ResolvePageContext();
+
+    private string DisplayName => string.IsNullOrWhiteSpace(Auth.User?.DisplayName)
+        ? Auth.User?.IsAdmin == true ? "管理员" : "用户"
+        : Auth.User.DisplayName;
+
+    private string Initials
+    {
+        get
+        {
+            var value = DisplayName.Trim();
+            return value.Length <= 2 ? value.ToUpperInvariant() : value[..2].ToUpperInvariant();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        try { publicSettings = await Api.GetPublicSettingsAsync(); }
+        catch (ApiException) { publicSettings = null; }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            isDark = string.Equals(await Js.InvokeAsync<string>("paraGateway.getTheme"), "dark", StringComparison.OrdinalIgnoreCase);
+            sidebarCollapsed = await Js.InvokeAsync<bool>("paraGateway.getSidebarCollapsed");
+            StateHasChanged();
+        }
+        catch (JSException)
+        {
+            // 首次渲染仍可使用服务端默认外观；下次交互会再次同步偏好。
+        }
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        accountMenuOpen = false;
+        sidebarOpen = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OpenSidebar() => sidebarOpen = true;
+    private void CloseSidebar() => sidebarOpen = false;
+    private void ToggleAccountMenu() => accountMenuOpen = !accountMenuOpen;
+
+    private async Task ToggleThemeAsync()
+    {
+        isDark = !isDark;
+        try { await Js.InvokeVoidAsync("paraGateway.setTheme", isDark ? "dark" : "light"); }
+        catch (JSException) { }
+    }
+
+    private async Task ToggleSidebarAsync()
+    {
+        sidebarCollapsed = !sidebarCollapsed;
+        try { await Js.InvokeVoidAsync("paraGateway.setSidebarCollapsed", sidebarCollapsed); }
+        catch (JSException) { }
+    }
+
+    private async Task ExpandSidebarAsync()
+    {
+        if (!sidebarCollapsed) return;
+        sidebarCollapsed = false;
+        try { await Js.InvokeVoidAsync("paraGateway.setSidebarCollapsed", false); }
+        catch (JSException) { }
+    }
+
+    private void OpenAccount()
+    {
+        accountMenuOpen = false;
+        Navigation.NavigateTo("/account");
+    }
+
+    private async Task LogoutAsync()
+    {
+        accountMenuOpen = false;
+        Announcements.Reset();
+        await Auth.LogoutAsync();
+        Navigation.NavigateTo("/login", replace: true);
+    }
+
+    private PageHeaderContext ResolvePageContext()
+    {
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/').ToLowerInvariant();
+        if (path.Length == 0 || path is "admin" or "admin/dashboard")
+        {
+            return Auth.User?.IsAdmin == true
+                ? new("管理控制台", "系统概览与统计数据")
+                : new("仪表盘", "查看账号使用情况与最近请求");
+        }
+
+        return path switch
+        {
+            "dashboard" => new("仪表盘", "查看账号使用情况与最近请求"),
+            "admin/ops" => new("运维监控", "查看网关运行状态、队列与服务健康度"),
+            "users" or "admin/users" => new("用户管理", "管理用户账号、额度、并发与访问状态"),
+            "groups" or "admin/groups" => new("分组管理", "管理 API 密钥分组和费率配置"),
+            "channels" or "admin/channels" or "admin/channels/pricing" => new("渠道管理", "配置渠道定价、模型映射与分组规则"),
+            "admin/channels/monitor" => new("渠道监控", "查看渠道模型、错误与用户调用明细"),
+            "admin/subscriptions" => new("订阅管理", "管理用户订阅和配额限制"),
+            "providers" or "admin/accounts" => new("账号管理", "管理官方平台账号、认证凭据、分组与调度状态"),
+            "admin/upstream-accounts" => new("上游账号", "管理独立的 OpenAI、Claude 兼容上游连接与调度策略"),
+            "provider-oauth" => new("官方 OAuth 接入", "通过官方授权流程添加平台账号"),
+            "admin/models" => new("账号模型", "同步并管理平台账号支持的模型"),
+            "admin/announcements" => new("公告管理", "发布并维护面向用户的系统公告"),
+            "announcements" => new("公告", "查看平台最新通知与服务动态"),
+            "admin/proxies" => new("IP管理", "管理上游代理节点及账号绑定关系"),
+            "admin/risk-control" => new("内容审核", "配置请求内容审核与风险控制策略"),
+            "admin/prompt-audit" => new("提示词审计", "检索和审计命中的提示词风险记录"),
+            "admin/redeem" => new("兑换码管理", "创建、发放并追踪兑换码使用情况"),
+            "admin/promo-codes" => new("优惠码管理", "管理优惠码规则和使用记录"),
+            "admin/usage" => new("使用记录", "查询全站请求、Token 与费用明细"),
+            "admin/audit-logs" => new("操作日志", "查看管理员操作及安全审计记录"),
+            "admin/settings" => new("系统设置", "配置站点、认证、通知与网关运行参数"),
+            "admin/affiliates" or "admin/affiliates/invites" => new("邀请记录", "查看邀请关系与注册转化"),
+            "admin/affiliates/rebates" => new("返利记录", "查看邀请返利计算与发放记录"),
+            "admin/affiliates/transfers" => new("转账记录", "查看返利余额转账记录"),
+            "admin/user-attributes" => new("用户属性", "维护可扩展用户属性及其取值"),
+            "admin/backup" or "admin/backups" => new("备份与恢复", "创建、下载并恢复系统备份"),
+            "admin/data-management" => new("数据管理代理", "执行受控的数据维护和迁移操作"),
+            "admin/error-passthrough" => new("错误透传规则", "配置上游错误响应的透传策略"),
+            "admin/tls-fingerprints" => new("TLS 指纹模板", "维护上游请求使用的 TLS 指纹配置"),
+            "admin/system" => new("系统更新", "查看版本、运行信息与更新状态"),
+            "api-keys" or "keys" => new("API 密钥", "创建并管理用于调用网关的 API 密钥"),
+            "batch-image" or "docs/batch-image" => new("批量生图", "查看批量图像生成的接入方式"),
+            "usage" => new("使用记录", "查看请求、Token 和费用明细"),
+            "available-channels" => new("可用渠道", "查看当前账号可以使用的分组与模型"),
+            "monitor" => new("渠道状态", "查看可用渠道的实时服务状态"),
+            "subscriptions" => new("我的订阅", "查看订阅额度、有效期和使用进度"),
+            "redeem" => new("兑换码", "兑换额度或订阅权益"),
+            "affiliate" => new("邀请返利", "管理邀请链接并查看返利记录"),
+            "account" or "profile" => new("个人资料", "管理账号资料、安全设置与登录方式"),
+            "model-plaza" => new("模型广场", "浏览平台支持的模型与调用信息"),
+            _ when path.StartsWith("custom/", StringComparison.Ordinal) => new("自定义页面", "平台扩展内容"),
+            _ => new("ParaGateway", "统一管理 AI 上游账号与网关访问")
+        };
+    }
+
+    private static string FormatMoney(decimal value) => $"${value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}";
+
+    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+
+    private sealed record PageHeaderContext(string Title, string Description);
+}

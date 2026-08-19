@@ -1,0 +1,275 @@
+@page "/available-channels"
+
+@inject ApiClient Api
+
+<PageTitle>可用渠道 · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>可用渠道</h1>
+        <p>查看您可访问的渠道与其支持的模型、定价</p>
+    </div>
+    <button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="LoadAsync">
+        <span class="@(loading ? "channel-refresh spinning" : "channel-refresh")"><Icon Name="refresh" Size="17" /></span>
+    </button>
+</div>
+
+<section class="content-section available-filter-section">
+    <div class="available-toolbar">
+        <label class="search-box available-search">
+            <Icon Name="search" Size="17" />
+            <input type="search"
+                   value="@searchQuery"
+                   @oninput="OnSearchInput"
+                   placeholder="搜索渠道或模型..."
+                   aria-label="搜索渠道、分组、平台或模型" />
+        </label>
+    </div>
+</section>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入可用渠道" />
+}
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else
+{
+    var visibleChannels = FilteredChannels;
+    if (visibleChannels.Count == 0)
+    {
+        <section class="content-section available-empty-card">
+            <EmptyState Title="暂无可用渠道"
+                        Description="@(string.IsNullOrWhiteSpace(searchQuery) ? "管理员尚未配置您可访问的渠道。" : "没有匹配的渠道、平台、分组或模型。")" />
+        </section>
+    }
+    else
+    {
+        <section class="content-section available-table-card">
+            <div class="available-desktop" data-testid="desktop-channels">
+                <table class="available-table">
+                    <thead>
+                        <tr>
+                            <th class="channel-name-column">渠道名</th>
+                            <th class="channel-description-column">描述</th>
+                            <th class="channel-platform-column">平台</th>
+                            <th>我可访问的分组</th>
+                            <th>支持模型</th>
+                        </tr>
+                    </thead>
+                    @foreach (var channel in visibleChannels)
+                    {
+                        <tbody class="channel-row-group" @key="channel">
+                            @for (var sectionIndex = 0; sectionIndex < channel.Platforms.Count; sectionIndex++)
+                            {
+                                var section = channel.Platforms[sectionIndex];
+                                <tr class="@(sectionIndex > 0 ? "platform-section-row divided" : "platform-section-row")">
+                                    @if (sectionIndex == 0)
+                                    {
+                                        <td rowspan="@channel.Platforms.Count" class="channel-name-cell"><strong>@channel.Name</strong></td>
+                                        <td rowspan="@channel.Platforms.Count" class="channel-description-cell">@(string.IsNullOrWhiteSpace(channel.Description) ? "-" : channel.Description)</td>
+                                    }
+                                    <td class="channel-platform-cell">
+                                        <span class="channel-platform-badge platform-@PlatformTone(section.Platform)">
+                                            <Icon Name="@PlatformIcon(section.Platform)" Size="12" />
+                                            @section.Platform
+                                        </span>
+                                    </td>
+                                    <td class="channel-groups-cell">
+                                        <AvailableGroupList Groups="@section.Groups" UserGroupRates="@userGroupRates" ServerUtcOffset="@serverUtcOffset" />
+                                    </td>
+                                    <td class="channel-models-cell">
+                                        @if (section.SupportedModels.Count == 0)
+                                        {
+                                            <span class="no-models">未配置模型</span>
+                                        }
+                                        else
+                                        {
+                                            <div class="model-chip-list">
+                                                @foreach (var model in section.SupportedModels)
+                                                {
+                                                    <SupportedModelChip Model="@model" PlatformHint="@section.Platform" @key="model" />
+                                                }
+                                            </div>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    }
+                </table>
+            </div>
+
+            <div class="available-mobile" data-testid="mobile-channels">
+                @foreach (var channel in visibleChannels)
+                {
+                    <article class="available-channel-card" @key="channel">
+                        <header>
+                            <h2>@channel.Name</h2>
+                            <p>@(string.IsNullOrWhiteSpace(channel.Description) ? "-" : channel.Description)</p>
+                        </header>
+                        <div class="mobile-platform-list">
+                            @foreach (var section in channel.Platforms)
+                            {
+                                <section class="mobile-platform-section" @key="section">
+                                    <span class="channel-platform-badge platform-@PlatformTone(section.Platform)">
+                                        <Icon Name="@PlatformIcon(section.Platform)" Size="12" />
+                                        @section.Platform
+                                    </span>
+                                    <dl>
+                                        <div>
+                                            <dt>我可访问的分组</dt>
+                                            <dd><AvailableGroupList Groups="@section.Groups" UserGroupRates="@userGroupRates" ServerUtcOffset="@serverUtcOffset" /></dd>
+                                        </div>
+                                        <div>
+                                            <dt>支持模型</dt>
+                                            <dd>
+                                                @if (section.SupportedModels.Count == 0)
+                                                {
+                                                    <span class="no-models">未配置模型</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="model-chip-list">
+                                                        @foreach (var model in section.SupportedModels)
+                                                        {
+                                                            <SupportedModelChip Model="@model" PlatformHint="@section.Platform" @key="model" />
+                                                        }
+                                                    </span>
+                                                }
+                                            </dd>
+                                        </div>
+                                    </dl>
+                                </section>
+                            }
+                        </div>
+                    </article>
+                }
+            </div>
+        </section>
+    }
+}
+
+@code {
+    private bool loading = true;
+    private string? error;
+    private string searchQuery = string.Empty;
+    private string serverUtcOffset = string.Empty;
+    private List<UserAvailableChannelDto> channels = [];
+    private Dictionary<long, double> userGroupRates = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private IReadOnlyList<UserAvailableChannelDto> FilteredChannels
+    {
+        get
+        {
+            var query = searchQuery.Trim();
+            if (query.Length == 0) return channels;
+
+            var result = new List<UserAvailableChannelDto>();
+            foreach (var channel in channels)
+            {
+                var channelMatches = Contains(channel.Name, query) || Contains(channel.Description, query);
+                if (channelMatches)
+                {
+                    result.Add(channel);
+                    continue;
+                }
+
+                var matchingPlatforms = channel.Platforms
+                    .Where(section =>
+                        Contains(section.Platform, query)
+                        || section.Groups.Any(group => Contains(group.Name, query))
+                        || section.SupportedModels.Any(model => Contains(model.Name, query)))
+                    .ToList();
+
+                if (matchingPlatforms.Count > 0)
+                {
+                    result.Add(new UserAvailableChannelDto
+                    {
+                        Name = channel.Name,
+                        Description = channel.Description,
+                        Platforms = matchingPlatforms
+                    });
+                }
+            }
+
+            return result;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            var channelsTask = Api.GetAvailableChannelsAsync();
+            var ratesTask = LoadGroupRatesSafeAsync();
+            var timezoneTask = LoadServerTimezoneSafeAsync();
+            await Task.WhenAll(channelsTask, ratesTask, timezoneTask);
+
+            channels = await channelsTask;
+            userGroupRates = await ratesTask;
+            serverUtcOffset = await timezoneTask;
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task<Dictionary<long, double>> LoadGroupRatesSafeAsync()
+    {
+        try
+        {
+            return await Api.GetUserGroupRatesAsync();
+        }
+        catch (ApiException)
+        {
+            return [];
+        }
+    }
+
+    private async Task<string> LoadServerTimezoneSafeAsync()
+    {
+        try
+        {
+            return (await Api.GetPublicSettingsAsync()).ServerUtcOffset;
+        }
+        catch (ApiException)
+        {
+            return string.Empty;
+        }
+    }
+
+    private void OnSearchInput(ChangeEventArgs args) => searchQuery = args.Value?.ToString() ?? string.Empty;
+
+    private static bool Contains(string? value, string query) =>
+        !string.IsNullOrWhiteSpace(value) && value.Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    private static string PlatformTone(string? platform) => platform?.Trim().ToLowerInvariant() switch
+    {
+        "anthropic" => "anthropic",
+        "openai" => "openai",
+        "gemini" => "gemini",
+        "antigravity" => "antigravity",
+        "grok" => "grok",
+        "composite" => "composite",
+        _ => "default"
+    };
+
+    private static string PlatformIcon(string? platform) => platform?.Trim().ToLowerInvariant() switch
+    {
+        "composite" => "layers",
+        "grok" => "pulse",
+        _ => "sparkles"
+    };
+}

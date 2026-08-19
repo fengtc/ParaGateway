@@ -1,0 +1,14 @@
+@page "/home"
+@inject ApiClient Api
+@inject NavigationManager Navigation
+
+<PageTitle>ParaGateway · AI Gateway</PageTitle>
+<section class="public-home">
+    <div class="public-home-copy">
+        <span class="eyebrow">ParaGateway</span>
+        <h1>统一管理多个 AI 上游账号与 API 网关</h1>
+        <p>官方 Go 网关负责认证、调度、计费和流式转发；本页面提供独立主机部署的 Blazor WASM 管理入口。</p>
+        <div class="button-row"><a class="button primary" href="/login">登录管理台 <Icon Name="chevron-right" Size="16" /></a><a class="button secondary" href="/register">创建账户</a></div>
+    </div>
+    <div class="public-home-facts"><div><strong>OpenAI</strong><span>Chat Completions / Responses</span></div><div><strong>Anthropic</strong><span>Messages / Claude Code</span></div><div><strong>Gemini</strong><span>v1beta 原生兼容</span></div><div><strong>独立部署</strong><span>Go + PostgreSQL + Redis</span></div></div>
+</section>

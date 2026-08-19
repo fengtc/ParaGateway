@@ -1,0 +1,36 @@
+@using ParaGateway.Frontend.Models
+
+@if (Items.Count == 0)
+{
+    <div class="empty-editor">@(Loading ? "正在加载可订阅分组…" : "暂未配置默认订阅")</div>
+}
+else
+{
+    <div class="subscription-editor">
+        @foreach (var item in Items.ToList())
+        {
+            <div class="subscription-row" @key="item">
+                <label>
+                    <span>订阅分组</span>
+                    <InputSelect @bind-Value="item.GroupId">
+                        @foreach (var group in Groups)
+                        {
+                            <option value="@group.Id">@group.Name · @group.Platform</option>
+                        }
+                    </InputSelect>
+                </label>
+                <label>
+                    <span>有效期（天）</span>
+                    <InputNumber @bind-Value="item.ValidityDays" min="1" max="36500" />
+                </label>
+                <button type="button" class="button danger small" @onclick="() => Items.Remove(item)">删除</button>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public List<DefaultSubscriptionSettingDto> Items { get; set; } = [];
+    [Parameter, EditorRequired] public List<GoGroup> Groups { get; set; } = [];
+    [Parameter] public bool Loading { get; set; }
+}

@@ -1,0 +1,295 @@
+@using System.Text.Json
+@inject IJSRuntime JS
+@inject ToastService Toasts
+@inject NavigationManager Navigation
+
+<AppModal Open="Open" Title="使用 API 密钥" MaxWidth="900px" OnClose="CloseAsync">
+    <ChildContent>
+        @if (Key is null)
+        {
+            <LoadingState Text="正在准备调用配置" />
+        }
+        else if (string.IsNullOrWhiteSpace(Platform))
+        {
+            <div class="inline-alert warning"><Icon Name="alert" Size="18" /><span><strong>请先分配分组</strong><br />此 API 密钥尚未分配分组，请先在密钥列表中选择分组，再查看客户端配置。</span></div>
+        }
+        else
+        {
+            <div class="use-key-layout">
+                <p class="use-key-description">@Description</p>
+
+                <div class="config-tabs" role="tablist" aria-label="客户端">
+                    @foreach (var tab in ClientTabs)
+                    {
+                        <button type="button" role="tab" aria-selected="@(activeClient == tab.Id)" class="@(activeClient == tab.Id ? "active" : null)" @onclick="() => SelectClient(tab.Id)"><Icon Name="@tab.Icon" Size="15" /> @tab.Label</button>
+                    }
+                </div>
+
+                @if (ShowCodexAuthMode)
+                {
+                    <section class="auth-mode-card">
+                        <div><strong>Codex 认证模式</strong><small>兼容模式保留官方登录结构；API Key Mode 可授权客户端图片执行器。</small></div>
+                        <div class="segmented" role="radiogroup" aria-label="Codex 认证模式">
+                            <button type="button" role="radio" aria-checked="@(codexAuthMode == "legacy")" class="@(codexAuthMode == "legacy" ? "active" : null)" @onclick='() => codexAuthMode = "legacy"'>兼容模式</button>
+                            <button type="button" role="radio" aria-checked="@(codexAuthMode == "api-key")" class="@(codexAuthMode == "api-key" ? "active" : null)" @onclick='() => codexAuthMode = "api-key"'>API Key Mode</button>
+                        </div>
+                        @if (codexAuthMode == "api-key")
+                        {
+                            <div class="restart-note"><Icon Name="alert" Size="15" /><span>保存后请完全退出并重启 Codex Desktop 或 CLI，再新建任务，让客户端重新构建工具注册表。</span></div>
+                        }
+                    </section>
+                }
+
+                @if (ShellTabs.Count > 0)
+                {
+                    <div class="config-tabs shell-tabs" role="tablist" aria-label="操作系统">
+                        @foreach (var tab in ShellTabs)
+                        {
+                            <button type="button" role="tab" aria-selected="@(activeShell == tab.Id)" class="@(activeShell == tab.Id ? "active" : null)" @onclick="() => activeShell = tab.Id">@tab.Label</button>
+                        }
+                    </div>
+                }
+
+                <div class="config-files">
+                    @foreach (var file in Files)
+                    {
+                        <article class="config-file" @key="file.Path">
+                            @if (!string.IsNullOrWhiteSpace(file.Hint)) { <p class="config-hint"><Icon Name="alert" Size="14" /> @file.Hint</p> }
+                            <header><code>@file.Path</code><button type="button" @onclick="() => CopyAsync(file)"><Icon Name="@(copiedPath == file.Path ? "check" : "copy")" Size="14" /> @(copiedPath == file.Path ? "已复制" : "复制")</button></header>
+                            <pre><code>@file.Content</code></pre>
+                        </article>
+                    }
+                </div>
+
+                @if (activeClient != "opencode")
+                {
+                    <div class="inline-alert info"><Icon Name="info" Size="17" /><span>@Note</span></div>
+                }
+            </div>
+        }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseAsync">关闭</button></Footer>
+</AppModal>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public ApiKeyDto? Key { get; set; }
+    [Parameter] public string BaseUrl { get; set; } = string.Empty;
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private string activeClient = "claude";
+    private string activeShell = "unix";
+    private string codexAuthMode = "legacy";
+    private string? copiedPath;
+    private string lastKeyId = string.Empty;
+
+    private string Platform => Key?.GroupPlatform?.Trim().ToLowerInvariant() ?? string.Empty;
+    private string EffectiveBaseUrl => (string.IsNullOrWhiteSpace(BaseUrl) ? Navigation.BaseUri.TrimEnd('/') : BaseUrl.TrimEnd('/'));
+    private bool ShowCodexAuthMode => Platform == "openai" && activeClient is "codex" or "codex-ws";
+
+    private IReadOnlyList<TabItem> ClientTabs => Platform switch
+    {
+        "openai" => BuildOpenAiTabs(),
+        "gemini" => [new("gemini", "Gemini CLI", "sparkles"), new("opencode", "OpenCode", "terminal")],
+        "antigravity" => [new("claude", "Claude Code", "terminal"), new("gemini", "Gemini CLI", "sparkles"), new("opencode", "OpenCode", "terminal")],
+        "grok" => [new("grok", "Grok CLI", "terminal"), new("claude", "Claude Code", "terminal"), new("codex", "Codex CLI", "terminal"), new("opencode", "OpenCode", "terminal")],
+        _ => [new("claude", "Claude Code", "terminal"), new("opencode", "OpenCode", "terminal")]
+    };
+
+    private IReadOnlyList<TabItem> ShellTabs => activeClient switch
+    {
+        "opencode" => [],
+        "codex" or "codex-ws" or "grok" => [new("unix", "macOS / Linux", ""), new("windows", "Windows", "")],
+        _ => [new("unix", "macOS / Linux", ""), new("cmd", "Windows CMD", ""), new("powershell", "PowerShell", "")]
+    };
+
+    private IReadOnlyList<ConfigFile> Files => BuildFiles();
+
+    private string Description => (Platform, activeClient) switch
+    {
+        ("openai", "claude") => "配置 Claude Code，让 Messages API 请求通过当前 OpenAI 分组发送。",
+        ("openai", _) => "将以下配置文件保存到 Codex CLI 配置目录。",
+        ("gemini", _) => "配置 Gemini CLI 或 OpenCode 通过当前 Gemini 分组访问。",
+        ("antigravity", _) => "为 Antigravity 分组配置 API 访问，请选择对应客户端。",
+        ("grok", "claude") => "配置 Claude Code，让 Messages API 请求通过当前 Grok 分组发送。",
+        ("grok", "codex") => "配置 Codex，让 Responses API 请求通过当前 Grok 分组发送。",
+        ("grok", _) => "配置 Grok CLI、Codex、Claude Code 或 OpenCode 通过当前 Grok 分组发送请求。",
+        _ => "将以下环境变量添加到终端配置，或直接在当前终端执行。"
+    };
+
+    private string Note => (Platform, activeClient, activeShell) switch
+    {
+        ("openai", "codex" or "codex-ws", "windows") => "将文件保存到 %USERPROFILE%\\.codex。完整密钥属于敏感信息，请勿提交到仓库。",
+        ("openai", "codex" or "codex-ws", _) => "请确保 ~/.codex 目录存在；完整密钥属于敏感信息，请勿提交到仓库。",
+        ("grok", "grok", "windows") => "将配置保存到 %USERPROFILE%\\.grok\\config.toml，随后运行 grok inspect。",
+        ("grok", "grok", _) => "将配置保存到 ~/.grok/config.toml，随后运行 grok inspect。",
+        _ => "终端环境变量仅在当前会话生效；持久配置文件包含 API 密钥，请勿提交到项目仓库。"
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (!Open || Key is null || Key.Id == lastKeyId) return;
+        lastKeyId = Key.Id;
+        activeClient = Platform switch { "openai" => "codex", "gemini" => "gemini", "grok" => "grok", _ => "claude" };
+        activeShell = "unix";
+        codexAuthMode = "legacy";
+        copiedPath = null;
+    }
+
+    private IReadOnlyList<TabItem> BuildOpenAiTabs()
+    {
+        var result = new List<TabItem> { new("codex", "Codex CLI", "terminal"), new("codex-ws", "Codex CLI (WebSocket)", "terminal") };
+        if (Key?.GroupAllowsMessagesDispatch == true) result.Add(new("claude", "Claude Code", "terminal"));
+        result.Add(new("opencode", "OpenCode", "terminal"));
+        return result;
+    }
+
+    private void SelectClient(string value)
+    {
+        activeClient = value;
+        activeShell = "unix";
+    }
+
+    private async Task CopyAsync(ConfigFile file)
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", file.Content);
+        copiedPath = file.Path;
+        Toasts.Success("配置已复制");
+        StateHasChanged();
+        await Task.Delay(1400);
+        if (copiedPath == file.Path) { copiedPath = null; await InvokeAsync(StateHasChanged); }
+    }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+
+    private IReadOnlyList<ConfigFile> BuildFiles()
+    {
+        if (Key is null) return [];
+        var root = StripApiVersion(EffectiveBaseUrl);
+        var v1 = EnsureSuffix(root, "/v1");
+        if (activeClient == "opencode") return [OpenCodeFile(Platform, root, v1)];
+        return (Platform, activeClient) switch
+        {
+            ("openai", "claude") => AnthropicFiles(root),
+            ("openai", "codex-ws") => CodexFiles(root, true),
+            ("openai", _) => CodexFiles(root, false),
+            ("gemini", _) => [GeminiFile(root)],
+            ("antigravity", "gemini") => [GeminiFile(root + "/antigravity")],
+            ("antigravity", _) => AnthropicFiles(root + "/antigravity"),
+            ("grok", "claude") => GrokClaudeFiles(root),
+            ("grok", "codex") => GrokCodexFiles(v1),
+            ("grok", _) => GrokCliFiles(v1),
+            _ => AnthropicFiles(root)
+        };
+    }
+
+    private IReadOnlyList<ConfigFile> AnthropicFiles(string url)
+    {
+        var key = Key?.Key ?? string.Empty;
+        var env = activeShell switch
+        {
+            "cmd" => $"set ANTHROPIC_BASE_URL={url}\nset ANTHROPIC_AUTH_TOKEN={key}\nset CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\nset CLAUDE_CODE_ATTRIBUTION_HEADER=0",
+            "powershell" => $"$env:ANTHROPIC_BASE_URL=\"{url}\"\n$env:ANTHROPIC_AUTH_TOKEN=\"{key}\"\n$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n$env:CLAUDE_CODE_ATTRIBUTION_HEADER=0",
+            _ => $"export ANTHROPIC_BASE_URL=\"{url}\"\nexport ANTHROPIC_AUTH_TOKEN=\"{key}\"\nexport CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\nexport CLAUDE_CODE_ATTRIBUTION_HEADER=0"
+        };
+        var path = activeShell switch { "cmd" => "Command Prompt", "powershell" => "PowerShell", _ => "Terminal" };
+        var settingsPath = activeShell == "unix" ? "~/.claude/settings.json" : "%USERPROFILE%\\.claude\\settings.json";
+        var settings = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["$schema"] = "https://json.schemastore.org/claude-code-settings.json",
+            ["env"] = new Dictionary<string, string>
+            {
+                ["ANTHROPIC_BASE_URL"] = url, ["ANTHROPIC_AUTH_TOKEN"] = key,
+                ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1", ["CLAUDE_CODE_ATTRIBUTION_HEADER"] = "0"
+            }
+        }, PrettyJson);
+        return [new(path, env), new(settingsPath, settings, "用户级持久配置，包含 API 密钥，请勿提交到仓库。")];
+    }
+
+    private ConfigFile GeminiFile(string url)
+    {
+        var key = Key?.Key ?? string.Empty;
+        var content = activeShell switch
+        {
+            "cmd" => $"set GOOGLE_GEMINI_BASE_URL={url}\nset GEMINI_API_KEY={key}\nset GEMINI_MODEL=gemini-2.0-flash",
+            "powershell" => $"$env:GOOGLE_GEMINI_BASE_URL=\"{url}\"\n$env:GEMINI_API_KEY=\"{key}\"\n$env:GEMINI_MODEL=\"gemini-2.0-flash\"",
+            _ => $"export GOOGLE_GEMINI_BASE_URL=\"{url}\"\nexport GEMINI_API_KEY=\"{key}\"\nexport GEMINI_MODEL=\"gemini-2.0-flash\"  # 有 Gemini 3 权限时可改为 gemini-3-pro-preview"
+        };
+        return new(activeShell switch { "cmd" => "Command Prompt", "powershell" => "PowerShell", _ => "Terminal" }, content);
+    }
+
+    private IReadOnlyList<ConfigFile> CodexFiles(string url, bool websocket)
+    {
+        var windows = activeShell == "windows";
+        var dir = windows ? "%USERPROFILE%\\.codex" : "~/.codex";
+        var auth = codexAuthMode == "api-key"
+            ? "requires_openai_auth = false\nhttp_headers = { \"x-openai-actor-authorization\" = \"local-image-extension\" }"
+            : "requires_openai_auth = true";
+        var ws = websocket ? "\nsupports_websockets = true" : string.Empty;
+        var feature = websocket ? "responses_websockets_v2 = true\n" : string.Empty;
+        var config = $"model_provider = \"ParaGateway\"\nmodel = \"gpt-5.5\"\nreview_model = \"gpt-5.5\"\nmodel_reasoning_effort = \"xhigh\"\ndisable_response_storage = true\nnetwork_access = \"enabled\"\nwindows_wsl_setup_acknowledged = true\n\n[model_providers.ParaGateway]\nname = \"ParaGateway\"\nbase_url = \"{url}\"\nwire_api = \"responses\"{ws}\n{auth}\n\n[features]\n{feature}goals = true";
+        var authJson = JsonSerializer.Serialize(new Dictionary<string, string> { ["OPENAI_API_KEY"] = Key?.Key ?? string.Empty }, PrettyJson);
+        return [new(JoinPath(dir, "config.toml", windows), config, "请确保此内容位于 config.toml 的开头部分。"), new(JoinPath(dir, "auth.json", windows), authJson)];
+    }
+
+    private IReadOnlyList<ConfigFile> GrokClaudeFiles(string root)
+    {
+        var url = root;
+        var key = Key?.Key ?? string.Empty;
+        var variables = new Dictionary<string, string>
+        {
+            ["ANTHROPIC_BASE_URL"] = url, ["ANTHROPIC_AUTH_TOKEN"] = key, ["ANTHROPIC_MODEL"] = "grok-4.5",
+            ["ANTHROPIC_DEFAULT_OPUS_MODEL"] = "grok-4.5", ["ANTHROPIC_DEFAULT_SONNET_MODEL"] = "grok-4.5",
+            ["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "grok-4.5", ["CLAUDE_CODE_SUBAGENT_MODEL"] = "grok-4.5",
+            ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1", ["CLAUDE_CODE_ATTRIBUTION_HEADER"] = "0"
+        };
+        var env = string.Join('\n', variables.Select(item => activeShell switch { "cmd" => $"set {item.Key}={item.Value}", "powershell" => $"$env:{item.Key}=\"{item.Value}\"", _ => $"export {item.Key}=\"{item.Value}\"" }));
+        var settings = JsonSerializer.Serialize(new Dictionary<string, object> { ["$schema"] = "https://json.schemastore.org/claude-code-settings.json", ["env"] = variables }, PrettyJson);
+        return [new(activeShell switch { "cmd" => "Command Prompt", "powershell" => "PowerShell", _ => "Terminal" }, env), new(activeShell == "unix" ? "~/.claude/settings.json" : "%USERPROFILE%\\.claude\\settings.json", settings, "用户级持久配置，包含 API 密钥。")];
+    }
+
+    private IReadOnlyList<ConfigFile> GrokCodexFiles(string baseUrl)
+    {
+        var windows = activeShell == "windows";
+        var env = windows ? $"$env:PARAGATEWAY_API_KEY=\"{Key?.Key}\"" : $"export PARAGATEWAY_API_KEY=\"{Key?.Key}\"";
+        var config = $"model_provider = \"paragateway\"\nmodel = \"grok-4.5\"\n\n[model_providers.paragateway]\nname = \"ParaGateway Grok\"\nbase_url = \"{baseUrl}\"\nenv_key = \"PARAGATEWAY_API_KEY\"\nwire_api = \"responses\"\nrequires_openai_auth = false\nsupports_websockets = false";
+        return [new(windows ? "PowerShell" : "Terminal", env), new(JoinPath(windows ? "%USERPROFILE%\\.codex" : "~/.codex", "config.toml", windows), config, "优先使用 env_key，勿把密钥直接提交到配置仓库。")];
+    }
+
+    private IReadOnlyList<ConfigFile> GrokCliFiles(string baseUrl)
+    {
+        var windows = activeShell == "windows";
+        var env = windows ? $"$env:GROK_MODELS_BASE_URL=\"{baseUrl}\"\n$env:XAI_API_KEY=\"{Key?.Key}\"" : $"export GROK_MODELS_BASE_URL=\"{baseUrl}\"\nexport XAI_API_KEY=\"{Key?.Key}\"";
+        var modelsUrl = baseUrl.TrimEnd('/') + "/models";
+        var config = $"[endpoints]\nmodels_base_url = \"{baseUrl}\"\nmodels_list_url = \"{modelsUrl}\"\nxai_api_base_url = \"{baseUrl}\"\ncli_chat_proxy_base_url = \"{baseUrl}\"\n\n[auth]\npreferred_method = \"api_key\"\n\n[model.\"grok-4.5\"]\nmodel = \"grok-4.5\"\nname = \"Grok 4.5\"\nenv_key = \"XAI_API_KEY\"\napi_backend = \"responses\"\ncontext_window = 500000\nsupports_backend_search = true\n\n[model.\"grok-build-0.1\"]\nmodel = \"grok-build-0.1\"\nname = \"Grok Build\"\nenv_key = \"XAI_API_KEY\"\napi_backend = \"responses\"\ncontext_window = 256000\n\n[models]\ndefault = \"grok-4.5\"\nweb_search = \"grok-4.5\"\n\n[session]\nauto_compact_threshold_percent = 80\n\n[features]\nimage_gen = true\nvideo_gen = true\nimage_gen_model_override = \"grok-imagine-image-quality\"\nimage_edit_model_override = \"grok-imagine-edit\"";
+        return [new(windows ? "PowerShell" : "Terminal", env), new(JoinPath(windows ? "%USERPROFILE%\\.grok" : "~/.grok", "config.toml", windows), config, "保存后运行 grok inspect 检查配置。")];
+    }
+
+    private ConfigFile OpenCodeFile(string platform, string root, string v1)
+    {
+        var providerId = platform switch { "anthropic" => "anthropic", "gemini" => "google", _ => "paragateway" };
+        var baseUrl = platform switch
+        {
+            "gemini" => EnsureSuffix(root, "/v1beta"),
+            "antigravity" => EnsureSuffix(root + "/antigravity", "/v1"),
+            _ => v1
+        };
+        var model = platform switch { "gemini" or "antigravity" => "gemini-2.5-pro", "grok" => "grok-4.5", "anthropic" => "claude-sonnet-4-5", _ => "gpt-5.6" };
+        var content = "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"provider\": {\n    \"" + providerId + "\": {\n      \"name\": \"ParaGateway\",\n      \"options\": {\n        \"baseURL\": " + JsonString(baseUrl) + ",\n        \"apiKey\": " + JsonString(Key?.Key ?? string.Empty) + "\n      },\n      \"models\": {\n        \"" + model + "\": { \"name\": \"" + model + "\" }\n      }\n    }\n  }\n}";
+        return new("~/.config/opencode/opencode.json", content, "可按需调整模型与 provider；配置中包含密钥。") ;
+    }
+
+    private static string StripApiVersion(string value)
+    {
+        var result = value.TrimEnd('/');
+        if (result.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) result = result[..^3];
+        else if (result.EndsWith("/v1beta", StringComparison.OrdinalIgnoreCase)) result = result[..^7];
+        return result.TrimEnd('/');
+    }
+    private static string EnsureSuffix(string root, string suffix) => root.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) ? root : root.TrimEnd('/') + suffix;
+    private static string JoinPath(string directory, string file, bool windows) => windows ? $"{directory}\\{file}" : $"{directory}/{file}";
+    private static string JsonString(string value) => JsonSerializer.Serialize(value);
+    private static readonly JsonSerializerOptions PrettyJson = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private sealed record TabItem(string Id, string Label, string Icon);
+    private sealed record ConfigFile(string Path, string Content, string Hint = "");
+}

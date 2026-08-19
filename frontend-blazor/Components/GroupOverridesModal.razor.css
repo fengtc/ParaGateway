@@ -1,0 +1,39 @@
+.override-summary { display: flex; margin-bottom: 14px; padding: 11px 13px; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--muted); background: var(--surface-muted); border-radius: 10px; }
+.override-summary strong { color: var(--ink); }
+.platform-pill { display: inline-flex; padding: 4px 8px; color: #276d9c; background: rgba(39,109,156,.12); border-radius: 999px; font-size: .68rem; font-weight: 680; }
+.platform-pill.openai { color: #197452; background: rgba(25,116,82,.12); }
+.platform-pill.anthropic { color: #b36a2e; background: rgba(179,106,46,.13); }
+.platform-pill.antigravity { color: #7c55b5; background: rgba(124,85,181,.12); }
+.platform-pill.grok { color: var(--ink); background: var(--line); }
+.override-add-panel { display: grid; position: relative; z-index: 4; gap: 10px; margin-bottom: 14px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; }
+.override-section-title { color: var(--ink); font-size: .76rem; font-weight: 660; }
+.override-add-row { display: grid; grid-template-columns: minmax(250px, 1fr) 112px auto; align-items: center; gap: 8px; }
+.override-user-search { position: relative; }
+.override-user-search .search-box { width: 100%; }
+.override-search-results { display: grid; position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; left: 0; max-height: 210px; padding: 4px; overflow-y: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 14px 32px rgba(0,0,0,.2); }
+.override-search-results button { display: grid; grid-template-columns: auto minmax(80px, auto) minmax(100px, 1fr); padding: 7px 8px; align-items: center; gap: 8px; color: var(--ink); background: transparent; border: 0; border-radius: 6px; text-align: left; }
+.override-search-results button:hover { background: var(--surface-muted); }
+.override-search-results span, .override-search-results small { color: var(--muted); font-size: .65rem; }
+.override-value-input, .batch-rate-row input, .row-value-input { min-height: 36px; padding: 7px 8px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; }
+.selected-user-chip { display: inline-flex; width: fit-content; padding: 4px 7px; align-items: center; gap: 5px; color: var(--primary-strong); background: var(--primary-soft); border-radius: 7px; font-size: .67rem; }
+.selected-user-chip button { display: inline-flex; padding: 0; color: inherit; background: transparent; border: 0; }
+.batch-rate-row { display: flex; padding-top: 10px; align-items: center; gap: 7px; color: var(--muted); border-top: 1px solid var(--line); font-size: .68rem; }
+.batch-rate-row input { width: 90px; min-height: 31px; }
+.push-right { margin-left: auto; }
+.danger-text { color: var(--danger) !important; }
+.override-list-heading { display: flex; margin-bottom: 7px; align-items: center; justify-content: space-between; color: var(--muted); font-size: .7rem; }
+.override-list-heading strong { color: var(--ink); }
+.override-empty { padding: 28px; color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; text-align: center; }
+.override-table-scroll { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+.override-table { width: 100%; min-width: 780px; border-collapse: collapse; font-size: .7rem; }
+.override-table th, .override-table td { padding: 8px 9px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.override-table th { position: sticky; z-index: 1; top: 0; color: var(--muted); background: var(--surface-muted); font-size: .64rem; }
+.override-table tr:last-child td { border-bottom: 0; }
+.muted-cell { color: var(--muted); }
+.notes-cell { max-width: 160px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; }
+.row-value-input { width: 92px; min-height: 31px; text-align: center; }
+.final-rate { color: var(--primary); font-weight: 680; }
+.override-pager { display: flex; margin-top: 10px; align-items: center; justify-content: center; gap: 9px; color: var(--muted); font-size: .7rem; }
+.unsaved-copy { color: #b77716; font-size: .7rem; }
+.modal-footer-spacer { flex: 1 1 auto; }
+@media (max-width: 700px) { .override-add-row { grid-template-columns: 1fr; } .override-value-input { width: 100%; } .batch-rate-row { flex-wrap: wrap; } .push-right { margin-left: 0; } }

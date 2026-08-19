@@ -1,0 +1,584 @@
+@implements IAsyncDisposable
+@using System.Globalization
+
+@inject ApiClient Api
+@inject NavigationManager Navigation
+
+<div class="monitor-v2-shell">
+    <section class="content-section monitor-v2-header">
+        <header>
+            <div class="monitor-v2-title">
+                <span><Icon Name="activity" Size="18" /></span>
+                <div>
+                    <h1>渠道状态</h1>
+                    <p>
+                        <i class="@(refreshing ? "updating" : "ready")"></i>
+                        @if (refreshing) { <span>正在更新...</span> }
+                        else if (snapshot.Coverage.DataThrough.HasValue) { <span>数据更新至 @FormatDateTime(snapshot.Coverage.DataThrough)</span> }
+                        else { <span>正在载入</span> }
+                        @if (HasSnapshot && !snapshot.Coverage.CoverageComplete && !BootstrapActive) { <span class="coverage-badge warning">部分覆盖</span> }
+                        @if (BootstrapActive) { <span class="coverage-badge">历史数据回填 @BootstrapPercent%</span> }
+                    </p>
+                </div>
+            </div>
+            <button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="ManualRefreshAsync"><Icon Name="refresh" Size="17" /></button>
+        </header>
+
+        @if (BootstrapActive)
+        {
+            <div class="bootstrap-banner" role="status" aria-live="polite">
+                <div><strong>正在补齐历史监控数据</strong><span>首次启用后会逐步覆盖 90 分钟、24 小时、7 天与 30 天窗口。</span></div>
+                <b>@BootstrapPercent%</b>
+                <span class="bootstrap-track" role="progressbar" aria-valuenow="@BootstrapPercent" aria-valuemin="0" aria-valuemax="100"><i style="width:@BootstrapPercent%"></i></span>
+            </div>
+        }
+
+        <div class="monitor-v2-toolbar">
+            <div class="segmented-control" role="group" aria-label="时间范围">
+                @foreach (var range in Ranges)
+                {
+                    <button type="button" class="@(filter.Range == range.Value ? "active" : null)" @onclick="() => SetRangeAsync(range.Value)">@range.Label</button>
+                }
+            </div>
+
+            <details class="monitor-filter-menu">
+                <summary>@FilterLabel("平台", filter.Platforms.Count)</summary>
+                <div>
+                    @if (dimensions.Platforms.Count == 0) { <span>暂无选项</span> }
+                    @foreach (var item in dimensions.Platforms)
+                    {
+                        <label><input type="checkbox" checked="@filter.Platforms.Contains(item.Value, StringComparer.OrdinalIgnoreCase)" @onchange="args => TogglePlatformAsync(item.Value, args)" /><span>@item.Label</span><small>@FormatInteger(item.RequestCount)</small></label>
+                    }
+                </div>
+            </details>
+            <details class="monitor-filter-menu">
+                <summary>@FilterLabel("分组", filter.GroupIds.Count)</summary>
+                <div>
+                    @if (GroupOptions.Count == 0) { <span>暂无选项</span> }
+                    @foreach (var item in GroupOptions)
+                    {
+                        <label><input type="checkbox" checked="@filter.GroupIds.Contains(item.Id)" @onchange="args => ToggleGroupAsync(item.Id, args)" /><span>@DimensionGroupLabel(item)</span><small>@FormatInteger(item.RequestCount)</small></label>
+                    }
+                </div>
+            </details>
+            <details class="monitor-filter-menu">
+                <summary>@FilterLabel("模型", filter.Models.Count)</summary>
+                <div>
+                    @if (ModelOptions.Count == 0) { <span>暂无选项</span> }
+                    @foreach (var item in ModelOptions)
+                    {
+                        <label><input type="checkbox" checked="@filter.Models.Contains(item.Value, StringComparer.OrdinalIgnoreCase)" @onchange="args => ToggleModelAsync(item.Value, args)" /><span>@DimensionModelLabel(item)</span><small>@FormatInteger(item.RequestCount)</small></label>
+                    }
+                </div>
+            </details>
+            <button type="button" class="text-button clear-filter" disabled="@(!HasDimensionFilter)" @onclick="ClearFiltersAsync">清除筛选</button>
+
+            <select class="monitor-group-select" value="@matrixGroupBy" aria-label="聚合维度" @onchange="ChangeMatrixGroupAsync">
+                <option value="platform">按平台</option>
+                <option value="platform_group">按平台与分组</option>
+                <option value="platform_model">按平台与模型</option>
+                <option value="platform_group_model">按平台、分组与模型</option>
+            </select>
+
+            <div class="segmented-control" role="group" aria-label="趋势视图">
+                <button type="button" class="@(trendView == "pulse" ? "active" : null)" @onclick='() => SetTrendView("pulse")'>色块</button>
+                <button type="button" class="@(trendView == "line" ? "active" : null)" @onclick='() => SetTrendView("line")'>折线</button>
+            </div>
+            @if (trendView == "pulse")
+            {
+                <div class="segmented-control health-mode-tabs" role="group" aria-label="健康维度">
+                    @foreach (var mode in HealthModes)
+                    {
+                        <button type="button" class="@(healthMode == mode.Value ? "active" : null)" @onclick="() => SetHealthMode(mode.Value)">@mode.Label</button>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+
+    @if (loading && !HasSnapshot)
+    {
+        <LoadingState Text="正在载入渠道状态" />
+    }
+    else if (error is not null && !HasSnapshot)
+    {
+        <ErrorState Message="@error" OnRetry="ManualRefreshAsync" />
+    }
+    else
+    {
+        @if (error is not null) { <div class="inline-alert warning" role="status"><Icon Name="alert" Size="17" /><span>@error</span></div> }
+
+        <section class="monitor-kpi-grid @(ShowThroughput ? "with-throughput" : null)" aria-label="渠道监控概览">
+            @Kpi("成功率", FormatPercent(1 - snapshot.Metrics.ErrorRate), $"错误率 {FormatPercent(snapshot.Metrics.ErrorRate)}", snapshot.Health.ErrorRate)
+            @Kpi("TTFT P50", FormatMs(snapshot.Metrics.Ttft.P50Ms), LatencySecondary(snapshot.Metrics.Ttft), snapshot.Health.Ttft)
+            @if (ShowThroughput) { @Kpi("每秒 Token", FormatTps(snapshot.Metrics.Tpm), "TPM 换算", null) }
+            @Kpi("缓存率", FormatPercent(snapshot.Metrics.CacheRate), $"{FormatInteger(snapshot.Metrics.CacheRateNumerator)} / {FormatInteger(snapshot.Metrics.CacheRateDenominator)}", snapshot.Health.Cache)
+            @if (ShowThroughput) { @Kpi("RPM", FormatRate(snapshot.Metrics.Rpm), "每分钟请求", null) }
+        </section>
+
+        <section class="content-section monitor-trend-card">
+            @if (trendView == "line")
+            {
+                <header class="monitor-card-heading"><div><h2>趋势图</h2><p>错误率、缓存率与 TTFT P50 随时间变化</p></div><div class="trend-legend"><span class="error">错误率</span><span class="cache">缓存率</span><span class="ttft">TTFT</span></div></header>
+                @if (snapshot.Trend.Count == 0)
+                {
+                    <EmptyState Title="暂无趋势数据" Description="当前筛选范围内尚未产生请求。" />
+                }
+                else
+                {
+                    <div class="trend-svg-wrap">
+                        <svg class="monitor-trend-svg" viewBox="0 0 920 240" preserveAspectRatio="none" role="img" aria-label="渠道健康趋势折线图">
+                            <line x1="10" y1="20" x2="10" y2="218" /><line x1="10" y1="218" x2="910" y2="218" />
+                            <polyline class="error-line" points="@TrendPoints(point => point.Metrics.ErrorRate, 1)" />
+                            <polyline class="cache-line" points="@TrendPoints(point => point.Metrics.CacheRate, 1)" />
+                            <polyline class="ttft-line" points="@TrendPoints(point => point.Metrics.Ttft.P50Ms ?? 0, TrendTtftMaximum)" />
+                        </svg>
+                    </div>
+                }
+            }
+            else
+            {
+                <header class="monitor-card-heading"><div><h2>健康色块矩阵</h2><p>每个色块代表一个时间桶，颜色由当前健康维度决定。</p></div><span class="matrix-dimension">@GroupByLabel(matrixGroupBy)</span></header>
+                @if (MatrixRows.Count == 0)
+                {
+                    <EmptyState Title="暂无监控数据" Description="当前筛选范围内尚未产生请求。" />
+                }
+                else
+                {
+                    <div class="pulse-matrix">
+                        @foreach (var row in MatrixRows)
+                        {
+                            <div class="pulse-row" @key="row">
+                                <button type="button" class="pulse-label" @onclick="() => DrillMatrixRowAsync(row)">
+                                    <strong>@MatrixRowTitle(row)</strong><small>@MatrixRowSubtitle(row)</small>
+                                </button>
+                                <div class="pulse-buckets">
+                                    @foreach (var bucket in row.Buckets)
+                                    {
+                                        <i class="@HealthScoreTone(bucket.Health, healthMode)" title="@BucketTitle(bucket)"></i>
+                                    }
+                                </div>
+                                <div class="pulse-summary"><strong>@FormatPercent(1 - row.Metrics.ErrorRate)</strong><small>@FormatMs(row.Metrics.Ttft.P50Ms)</small></div>
+                            </div>
+                        }
+                    </div>
+                    <div class="matrix-legend"><span class="healthy">健康</span><span class="warning">警告</span><span class="critical">严重</span><span class="unknown">无数据</span></div>
+                }
+            }
+        </section>
+
+        <section class="content-section monitor-detail-card">
+            <div class="monitor-tabs" role="tablist" aria-label="监控明细">
+                <button type="button" role="tab" aria-selected="@(activeTab == "models")" class="@(activeTab == "models" ? "active" : null)" @onclick='() => SelectTabAsync("models")'>模型</button>
+                <button type="button" role="tab" aria-selected="@(activeTab == "errors")" class="@(activeTab == "errors" ? "active" : null)" @onclick='() => SelectTabAsync("errors")'>错误</button>
+                <button type="button" role="tab" aria-selected="@(activeTab == "users")" class="@(activeTab == "users" ? "active" : null)" @onclick='() => SelectTabAsync("users")'>用户</button>
+            </div>
+            <div class="monitor-tab-body">
+                @if (tabLoading)
+                {
+                    <LoadingState Text="正在载入明细" />
+                }
+                else if (activeTab == "models")
+                {
+                    @if (modelRows.Count == 0) { <EmptyState Title="暂无模型数据" Description="当前筛选范围内尚未产生请求。" /> }
+                    else
+                    {
+                        <div class="data-table-wrap"><table class="data-table monitor-v2-table"><thead><tr><th>平台 / 模型</th><th>成功率</th><th>TTFT P50</th>@if (ShowThroughput) { <th>TPS</th> }<th>缓存率</th>@if (ShowThroughput) { <th>RPM</th> }</tr></thead><tbody>
+                        @foreach (var row in modelRows)
+                        {
+                            <tr class="clickable-row" @onclick="() => DrillModelAsync(row)" @key="row"><td data-label="平台 / 模型"><span class="health-dot @HealthScoreTone(row.Health, "overall")"></span><small>@row.Platform</small><strong class="primary-cell">@(row.Model == "__other__" ? "其他模型" : row.Model)</strong></td><td data-label="成功率"><strong>@FormatPercent(1 - row.Metrics.ErrorRate)</strong><small>错误 @FormatPercent(row.Metrics.ErrorRate)</small></td><td data-label="TTFT P50"><strong>@FormatMs(row.Metrics.Ttft.P50Ms)</strong><small>@LatencySecondary(row.Metrics.Ttft)</small></td>@if (ShowThroughput) { <td data-label="TPS">@FormatTps(row.Metrics.Tpm)</td> }<td data-label="缓存率">@FormatPercent(row.Metrics.CacheRate)</td>@if (ShowThroughput) { <td data-label="RPM">@FormatRate(row.Metrics.Rpm)</td> }</tr>
+                        }
+                        </tbody></table></div>
+                    }
+                }
+                else if (activeTab == "errors")
+                {
+                    @if (errorRows.Count == 0) { <EmptyState Title="暂无错误数据" Description="当前筛选范围内没有错误请求。" /> }
+                    else
+                    {
+                        <div class="monitor-error-list">
+                            @foreach (var row in errorRows)
+                            {
+                                <article class="@(row.Ignored ? "ignored" : null)" @key="row.Category">
+                                    <button type="button" @onclick="() => ToggleError(row.Category)"><span>@ErrorCategoryLabel(row.Category) @if (row.Ignored) { <small>已忽略</small> }</span><i><b style="width:@ErrorWidth(row.Rate)%"></b></i><strong>@FormatPercent(row.Rate)</strong><Icon Name="chevron-down" Size="14" /></button>
+                                    @if (expandedErrors.Contains(row.Category))
+                                    {
+                                        <div class="error-details">
+                                            @if (IsAdmin && row.Details.Count > 0)
+                                            {
+                                                @foreach (var detail in row.Details) { <div><span>@detail.Platform · @detail.Model</span><strong>HTTP @detail.StatusCode @if (detail.UpstreamStatusCode > 0) { <span>· 上游 @detail.UpstreamStatusCode</span> }</strong><p>@(string.IsNullOrWhiteSpace(detail.Message) ? detail.ErrorType : detail.Message)</p><small>×@detail.Count</small></div> }
+                                            }
+                                            else
+                                            {
+                                                <p>当前视图没有可显示的错误请求明细。</p>
+                                            }
+                                        </div>
+                                    }
+                                </article>
+                            }
+                        </div>
+                    }
+                }
+                else
+                {
+                    @if (userRows.Count == 0) { <EmptyState Title="暂无用户数据" Description="当前筛选范围内尚未产生请求。" /> }
+                    else
+                    {
+                        <div class="data-table-wrap"><table class="data-table monitor-v2-table"><thead><tr><th>排名</th><th>用户</th><th>成功率</th><th>TTFT P50</th>@if (ShowThroughput) { <th>TPS</th> }<th>缓存率</th>@if (ShowThroughput) { <th>RPM</th> }</tr></thead><tbody>
+                        @foreach (var row in userRows)
+                        {
+                            <tr class="@(row.IsSelf ? "current-user-row" : null)" @key="row"><td data-label="排名"><span class="rank-badge rank-@Math.Min(row.Rank, 4)">#@row.Rank</span></td><td data-label="用户"><strong class="primary-cell">@row.DisplayLabel @if (row.IsSelf) { <span class="self-badge">当前用户</span> }</strong></td><td data-label="成功率"><strong>@FormatPercent(1 - row.Metrics.ErrorRate)</strong><small>错误 @FormatPercent(row.Metrics.ErrorRate)</small></td><td data-label="TTFT P50"><strong>@FormatMs(row.Metrics.Ttft.P50Ms)</strong><small>@LatencySecondary(row.Metrics.Ttft)</small></td>@if (ShowThroughput) { <td data-label="TPS">@FormatTps(row.Metrics.Tpm)</td> }<td data-label="缓存率">@FormatPercent(row.Metrics.CacheRate)</td>@if (ShowThroughput) { <td data-label="RPM">@FormatRate(row.Metrics.Rpm)</td> }</tr>
+                        }
+                        </tbody></table></div>
+                    }
+                }
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    private static readonly (string Value, string Label)[] Ranges = [("90m", "90 分钟"), ("24h", "24 小时"), ("7d", "7 天"), ("30d", "30 天")];
+    private static readonly (string Value, string Label)[] HealthModes = [("overall", "综合"), ("success", "成功率"), ("ttft", "TTFT"), ("cache", "缓存")];
+    private CancellationTokenSource? refreshCancellation;
+    private ChannelMonitorV2FilterDto filter = new();
+    private ChannelMonitorV2DimensionsDto dimensions = new();
+    private ChannelMonitorV2SnapshotDto snapshot = new();
+    private ChannelMonitorV2MatrixDto matrix = new();
+    private List<ChannelMonitorV2ModelRowDto> modelRows = [];
+    private List<ChannelMonitorV2ErrorRowDto> errorRows = [];
+    private List<ChannelMonitorV2UserRowDto> userRows = [];
+    private readonly HashSet<string> expandedErrors = new(StringComparer.OrdinalIgnoreCase);
+    private bool loading = true;
+    private bool refreshing;
+    private bool tabLoading;
+    private bool hasLoadedSnapshot;
+    private string? error;
+    private string matrixGroupBy = "platform_group";
+    private string trendView = "pulse";
+    private string healthMode = "overall";
+    private string activeTab = "models";
+
+    [Parameter]
+    public bool HideThroughput { get; set; }
+
+    [Parameter]
+    public bool IsAdmin { get; set; }
+
+    private bool ShowThroughput => IsAdmin || !HideThroughput;
+    private bool HasSnapshot => hasLoadedSnapshot;
+    private bool BootstrapActive => snapshot.Coverage.Bootstrap?.Active == true;
+    private int BootstrapPercent => Math.Clamp(snapshot.Coverage.Bootstrap?.ProgressPercent ?? 0, 0, 100);
+    private bool HasDimensionFilter => filter.Platforms.Count + filter.GroupIds.Count + filter.Models.Count > 0;
+    private double TrendTtftMaximum => Math.Max(1, snapshot.Trend.Select(point => (double)(point.Metrics.Ttft.P50Ms ?? 0)).DefaultIfEmpty(1).Max());
+    private List<ChannelMonitorV2GroupDimensionDto> GroupOptions => dimensions.Groups.Where(item => filter.Platforms.Count == 0 || string.IsNullOrWhiteSpace(item.Platform) || filter.Platforms.Contains(item.Platform, StringComparer.OrdinalIgnoreCase)).ToList();
+    private List<ChannelMonitorV2DimensionDto> ModelOptions => dimensions.Models.Where(item => filter.Platforms.Count == 0 || string.IsNullOrWhiteSpace(item.Platform) || filter.Platforms.Contains(item.Platform, StringComparer.OrdinalIgnoreCase)).ToList();
+    private List<ChannelMonitorV2MatrixRowDto> MatrixRows => matrix.Items.Where(row => matrixGroupBy is not ("platform_group" or "platform_group_model") || row.GroupId is > 0).ToList();
+
+    protected override Task OnInitializedAsync()
+    {
+        RestoreQueryState();
+        return LoadAsync(fullDimensions: true, silent: false);
+    }
+
+    private Task ManualRefreshAsync() => LoadAsync(fullDimensions: true, silent: false);
+
+    private async Task LoadAsync(bool fullDimensions, bool silent)
+    {
+        refreshing = true;
+        if (!silent) loading = true;
+        error = null;
+        try
+        {
+            var dimensionFilter = new ChannelMonitorV2FilterDto { Range = filter.Range };
+            var dimensionsTask = fullDimensions ? GetDimensionsAsync(dimensionFilter) : Task.FromResult(dimensions);
+            var snapshotTask = GetSnapshotAsync(filter);
+            var matrixTask = GetMatrixAsync(filter, matrixGroupBy);
+            await Task.WhenAll(dimensionsTask, snapshotTask, matrixTask);
+            dimensions = await dimensionsTask;
+            snapshot = await snapshotTask;
+            matrix = await matrixTask;
+            hasLoadedSnapshot = true;
+            await LoadActiveTabAsync();
+            RestartAutoRefresh();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; refreshing = false; }
+    }
+
+    private async Task LoadActiveTabAsync()
+    {
+        tabLoading = true;
+        try
+        {
+            if (activeTab == "models") modelRows = (await GetModelsAsync(filter)).Items;
+            else if (activeTab == "errors") errorRows = (await GetErrorsAsync(filter)).Items;
+            else userRows = (await GetUsersAsync(filter)).Items;
+        }
+        finally { tabLoading = false; }
+    }
+
+    private async Task SetRangeAsync(string value)
+    {
+        if (filter.Range == value) return;
+        filter.Range = value;
+        SyncQueryState();
+        await LoadAsync(fullDimensions: true, silent: true);
+    }
+
+    private async Task TogglePlatformAsync(string value, ChangeEventArgs args)
+    {
+        Toggle(filter.Platforms, value, IsChecked(args.Value));
+        PruneDependentFilters();
+        SyncQueryState();
+        await LoadAsync(fullDimensions: false, silent: true);
+    }
+
+    private async Task ToggleGroupAsync(long value, ChangeEventArgs args)
+    {
+        if (IsChecked(args.Value)) { if (!filter.GroupIds.Contains(value)) filter.GroupIds.Add(value); }
+        else filter.GroupIds.Remove(value);
+        SyncQueryState();
+        await LoadAsync(fullDimensions: false, silent: true);
+    }
+
+    private async Task ToggleModelAsync(string value, ChangeEventArgs args)
+    {
+        Toggle(filter.Models, value, IsChecked(args.Value));
+        SyncQueryState();
+        await LoadAsync(fullDimensions: false, silent: true);
+    }
+
+    private async Task ClearFiltersAsync()
+    {
+        filter.Platforms.Clear(); filter.GroupIds.Clear(); filter.Models.Clear();
+        SyncQueryState();
+        await LoadAsync(fullDimensions: false, silent: true);
+    }
+
+    private async Task ChangeMatrixGroupAsync(ChangeEventArgs args)
+    {
+        matrixGroupBy = args.Value?.ToString() ?? "platform_group";
+        SyncQueryState();
+        await LoadAsync(fullDimensions: false, silent: true);
+    }
+
+    private async Task SelectTabAsync(string value)
+    {
+        if (activeTab == value) return;
+        activeTab = value;
+        SyncQueryState();
+        try { await LoadActiveTabAsync(); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task DrillModelAsync(ChannelMonitorV2ModelRowDto row)
+    {
+        filter.Platforms = [row.Platform];
+        filter.Models = [row.Model];
+        filter.GroupIds.Clear();
+        SyncQueryState();
+        await LoadAsync(fullDimensions: false, silent: true);
+    }
+
+    private async Task DrillMatrixRowAsync(ChannelMonitorV2MatrixRowDto row)
+    {
+        filter.Platforms = string.IsNullOrWhiteSpace(row.Platform) ? [] : [row.Platform];
+        filter.GroupIds = row.GroupId is > 0 ? [row.GroupId.Value] : [];
+        filter.Models = string.IsNullOrWhiteSpace(row.Model) || row.Model == "__other__" ? [] : [row.Model];
+        SyncQueryState();
+        await LoadAsync(fullDimensions: false, silent: true);
+    }
+
+    private void PruneDependentFilters()
+    {
+        var groups = GroupOptions.Select(item => item.Id).ToHashSet();
+        var models = ModelOptions.Select(item => item.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        filter.GroupIds = filter.GroupIds.Where(groups.Contains).ToList();
+        filter.Models = filter.Models.Where(models.Contains).ToList();
+    }
+
+    private Task<ChannelMonitorV2DimensionsDto> GetDimensionsAsync(ChannelMonitorV2FilterDto value) => IsAdmin
+        ? Api.GetChannelMonitorV2DimensionsAsync(value)
+        : Api.GetUserChannelMonitorV2DimensionsAsync(value);
+
+    private Task<ChannelMonitorV2SnapshotDto> GetSnapshotAsync(ChannelMonitorV2FilterDto value) => IsAdmin
+        ? Api.GetChannelMonitorV2SnapshotAsync(value)
+        : Api.GetUserChannelMonitorV2SnapshotAsync(value);
+
+    private Task<ChannelMonitorV2MatrixDto> GetMatrixAsync(ChannelMonitorV2FilterDto value, string groupBy) => IsAdmin
+        ? Api.GetChannelMonitorV2MatrixAsync(value, groupBy)
+        : Api.GetUserChannelMonitorV2MatrixAsync(value, groupBy);
+
+    private Task<ChannelMonitorV2ListDto<ChannelMonitorV2ModelRowDto>> GetModelsAsync(ChannelMonitorV2FilterDto value) => IsAdmin
+        ? Api.GetChannelMonitorV2ModelsAsync(value)
+        : Api.GetUserChannelMonitorV2ModelsAsync(value);
+
+    private Task<ChannelMonitorV2ListDto<ChannelMonitorV2ErrorRowDto>> GetErrorsAsync(ChannelMonitorV2FilterDto value) => IsAdmin
+        ? Api.GetChannelMonitorV2ErrorsAsync(value)
+        : Api.GetUserChannelMonitorV2ErrorsAsync(value);
+
+    private Task<ChannelMonitorV2ListDto<ChannelMonitorV2UserRowDto>> GetUsersAsync(ChannelMonitorV2FilterDto value) => IsAdmin
+        ? Api.GetChannelMonitorV2UsersAsync(value)
+        : Api.GetUserChannelMonitorV2UsersAsync(value);
+
+    private void SetTrendView(string value)
+    {
+        trendView = value == "line" ? "line" : "pulse";
+        SyncQueryState();
+    }
+
+    private void SetHealthMode(string value)
+    {
+        healthMode = HealthModes.Any(item => item.Value == value) ? value : "overall";
+        SyncQueryState();
+    }
+
+    private void RestoreQueryState()
+    {
+        var query = ParseQuery(Navigation.ToAbsoluteUri(Navigation.Uri).Query);
+        if (query.TryGetValue("range", out var range) && Ranges.Any(item => item.Value == range)) filter.Range = range;
+        filter.Platforms = Csv(query.GetValueOrDefault("platform"));
+        filter.Models = Csv(query.GetValueOrDefault("model"));
+        filter.GroupIds = Csv(query.GetValueOrDefault("group"))
+            .Select(value => long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) ? id : 0)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+        var groupBy = query.GetValueOrDefault("group_by");
+        if (groupBy is "platform" or "platform_group" or "platform_model" or "platform_group_model") matrixGroupBy = groupBy;
+        var mode = query.GetValueOrDefault("health_mode");
+        if (mode is "overall" or "success" or "ttft" or "cache") healthMode = mode;
+        trendView = query.GetValueOrDefault("trend_view") == "line" ? "line" : "pulse";
+        var tab = query.GetValueOrDefault("tab");
+        if (tab is "models" or "errors" or "users") activeTab = tab;
+    }
+
+    private void SyncQueryState()
+    {
+        var query = new List<string>
+        {
+            $"range={Uri.EscapeDataString(filter.Range)}",
+            $"group_by={Uri.EscapeDataString(matrixGroupBy)}",
+            $"health_mode={Uri.EscapeDataString(healthMode)}",
+            $"tab={Uri.EscapeDataString(activeTab)}"
+        };
+        AddCsvQuery(query, "platform", filter.Platforms);
+        AddCsvQuery(query, "group", filter.GroupIds.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+        AddCsvQuery(query, "model", filter.Models);
+        if (trendView == "line") query.Add("trend_view=line");
+
+        var current = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var target = $"{current.GetLeftPart(UriPartial.Path)}?{string.Join("&", query)}";
+        if (!string.Equals(target, Navigation.Uri, StringComparison.Ordinal)) Navigation.NavigateTo(target, replace: true);
+    }
+
+    private static void AddCsvQuery(List<string> query, string key, IEnumerable<string> values)
+    {
+        var value = string.Join(",", values.Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(value)) query.Add($"{key}={Uri.EscapeDataString(value)}");
+    }
+
+    private static List<string> Csv(string? value) => string.IsNullOrWhiteSpace(value)
+        ? []
+        : value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private static Dictionary<string, string> ParseQuery(string query)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            var key = Uri.UnescapeDataString(parts[0].Replace('+', ' '));
+            var value = parts.Length == 2 ? Uri.UnescapeDataString(parts[1].Replace('+', ' ')) : string.Empty;
+            result[key] = value;
+        }
+        return result;
+    }
+
+    private void RestartAutoRefresh()
+    {
+        refreshCancellation?.Cancel(); refreshCancellation?.Dispose();
+        refreshCancellation = new CancellationTokenSource();
+        _ = RunAutoRefreshAsync(refreshCancellation.Token);
+    }
+
+    private async Task RunAutoRefreshAsync(CancellationToken token)
+    {
+        var seconds = BootstrapActive ? 10 : Math.Max(60, snapshot.Config.RefreshIntervalSeconds);
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(seconds));
+            while (await timer.WaitForNextTickAsync(token)) await InvokeAsync(() => LoadAsync(fullDimensions: false, silent: true));
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private RenderFragment Kpi(string label, string value, string detail, string? state) => builder =>
+    {
+        var seq = 0;
+        builder.OpenElement(seq++, "article"); builder.AddAttribute(seq++, "class", $"monitor-kpi health-{HealthTone(state)}");
+        builder.OpenElement(seq++, "span"); builder.AddContent(seq++, label); builder.CloseElement();
+        builder.OpenElement(seq++, "strong"); builder.AddContent(seq++, value); builder.CloseElement();
+        builder.OpenElement(seq++, "small"); builder.AddContent(seq++, detail); builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private string TrendPoints(Func<ChannelMonitorV2TrendDto, double> selector, double maximum)
+    {
+        if (snapshot.Trend.Count == 0) return string.Empty;
+        maximum = Math.Max(maximum, .000001);
+        return string.Join(" ", snapshot.Trend.Select((point, index) =>
+        {
+            var x = snapshot.Trend.Count == 1 ? 460 : 10 + index * 900d / (snapshot.Trend.Count - 1);
+            var normalized = Math.Clamp(selector(point) / maximum, 0, 1);
+            var y = 218 - normalized * 198;
+            return $"{x.ToString("0.#", CultureInfo.InvariantCulture)},{y.ToString("0.#", CultureInfo.InvariantCulture)}";
+        }));
+    }
+
+    private static string HealthScoreTone(ChannelMonitorV2HealthDto health, string mode)
+    {
+        var score = mode switch { "success" => health.ErrorRateScore, "ttft" => health.TtftScore, "cache" => health.CacheScore, _ => health.Score };
+        if (score.HasValue) return $"score-{Math.Clamp((int)Math.Round(score.Value / 10, MidpointRounding.AwayFromZero), 0, 10)}";
+        var state = mode switch { "success" => health.ErrorRate, "ttft" => health.Ttft, "cache" => health.Cache, _ => health.Overall };
+        return $"health-{HealthTone(state)}";
+    }
+
+    private static string HealthTone(string? state) => state switch { "healthy" => "healthy", "warning" => "warning", "critical" => "critical", _ => "unknown" };
+    private static string FilterLabel(string label, int count) => count == 0 ? $"{label}：全部" : $"{label}：已选 {count}";
+    private static string DimensionGroupLabel(ChannelMonitorV2GroupDimensionDto item) => string.IsNullOrWhiteSpace(item.Platform) ? item.Name : $"{item.Platform} / {item.Name}";
+    private static string DimensionModelLabel(ChannelMonitorV2DimensionDto item) => string.IsNullOrWhiteSpace(item.Platform) || item.Label.Contains(item.Platform, StringComparison.OrdinalIgnoreCase) ? item.Label : $"{item.Platform} / {item.Label}";
+    private static string MatrixRowTitle(ChannelMonitorV2MatrixRowDto row) => !string.IsNullOrWhiteSpace(row.Model) ? (row.Model == "__other__" ? "其他模型" : row.Model) : !string.IsNullOrWhiteSpace(row.GroupName) ? row.GroupName : row.Platform;
+    private static string MatrixRowSubtitle(ChannelMonitorV2MatrixRowDto row) => string.Join(" · ", new[] { row.Platform, row.GroupName }.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase));
+    private static string GroupByLabel(string value) => value switch { "platform" => "平台", "platform_model" => "平台 / 模型", "platform_group_model" => "平台 / 分组 / 模型", _ => "平台 / 分组" };
+    private static string BucketTitle(ChannelMonitorV2TrendDto bucket) => $"{FormatDateTime(bucket.BucketStart)} · 成功率 {FormatPercent(1 - bucket.Metrics.ErrorRate)} · TTFT {FormatMs(bucket.Metrics.Ttft.P50Ms)} · 缓存率 {FormatPercent(bucket.Metrics.CacheRate)}";
+    private static string LatencySecondary(ChannelMonitorV2LatencyDto value) => $"AVG {FormatMs(value.AvgMs)} · P90 {FormatMs(value.P90Ms ?? value.P95Ms)}";
+    private static string FormatMs(long? value) => value.HasValue ? $"{value.Value:N0} ms" : "-";
+    private static string FormatMs(double? value) => value.HasValue ? $"{value.Value:N0} ms" : "-";
+    private static string FormatPercent(double value) => $"{Math.Clamp(value, 0, 1).ToString("P1", CultureInfo.CurrentCulture)}";
+    private static string FormatRate(double value) => Compact(value);
+    private static string FormatTps(double tpm) => Compact(tpm / 60d);
+    private static string FormatInteger(long value) => value.ToString("N0", CultureInfo.CurrentCulture);
+    private static string Compact(double value) => Math.Abs(value) switch { >= 1_000_000 => $"{value / 1_000_000:0.##}M", >= 1_000 => $"{value / 1_000:0.##}K", _ => value.ToString("0.##", CultureInfo.CurrentCulture) };
+    private static string FormatDateTime(DateTimeOffset? value) => value?.ToLocalTime().ToString("MM-dd HH:mm", CultureInfo.CurrentCulture) ?? "-";
+    private static double ErrorWidth(double rate) => Math.Clamp(rate * 100, 2, 100);
+    private static bool IsChecked(object? value) => value is bool flag ? flag : bool.TryParse(value?.ToString(), out var parsed) && parsed;
+    private static void Toggle(List<string> values, string value, bool selected) { if (selected) { if (!values.Contains(value, StringComparer.OrdinalIgnoreCase)) values.Add(value); } else values.RemoveAll(item => string.Equals(item, value, StringComparison.OrdinalIgnoreCase)); }
+
+    private void ToggleError(string category) { if (!expandedErrors.Add(category)) expandedErrors.Remove(category); }
+
+    private static string ErrorCategoryLabel(string category) => category switch
+    {
+        "content_policy" => "内容策略", "authentication" => "认证失败", "context_limit" => "上下文超限", "invalid_request" => "请求参数错误",
+        "model_unsupported" => "模型不支持", "group_access" => "分组访问", "quota_or_balance" => "配额或余额", "account_pool_unavailable" => "账号池不可用",
+        "rate_or_capacity" => "限流或容量", "timeout" => "超时", "transport_or_stream" => "传输或流式错误", "upstream_forbidden" => "上游拒绝",
+        "not_found" => "资源不存在", "client_cancelled" => "客户端取消", "upstream_5xx" => "上游 5xx", "internal" => "内部错误", "other" => "其他", _ => category
+    };
+
+    public ValueTask DisposeAsync()
+    {
+        refreshCancellation?.Cancel(); refreshCancellation?.Dispose(); refreshCancellation = null;
+        return ValueTask.CompletedTask;
+    }
+}

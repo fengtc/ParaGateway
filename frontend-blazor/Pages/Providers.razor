@@ -1,0 +1,770 @@
+@page "/providers"
+@page "/admin/accounts"
+@implements IAsyncDisposable
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>账号管理 · ParaGateway</PageTitle>
+
+<div class="accounts-page">
+    <section class="accounts-toolbar" aria-label="账号筛选与操作">
+        <div class="account-filter-row">
+            <div class="account-search">
+                <Icon Name="search" Size="17" />
+                <input value="@search" @oninput="SearchChanged" placeholder="搜索账号名称..." aria-label="搜索账号" />
+            </div>
+            <select value="@platformFilter" @onchange="PlatformChangedAsync" aria-label="平台筛选">
+                <option value="">全部平台</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+                <option value="gemini">Gemini</option>
+                <option value="antigravity">Antigravity</option>
+                <option value="grok">Grok</option>
+            </select>
+            <select value="@typeFilter" @onchange="TypeChangedAsync" aria-label="认证类型筛选">
+                <option value="">全部类型</option>
+                <option value="oauth">OAuth</option>
+                <option value="setup-token">Setup Token</option>
+                <option value="apikey">API Key / 自定义上游</option>
+                <option value="upstream">旧版 Upstream（兼容）</option>
+                <option value="bedrock">AWS Bedrock</option>
+                <option value="service_account">Service Account</option>
+            </select>
+            <select value="@statusFilter" @onchange="StatusChangedAsync" aria-label="账号状态筛选">
+                <option value="">全部状态</option>
+                <option value="active">正常</option>
+                <option value="inactive">未启用</option>
+                <option value="error">错误</option>
+                <option value="rate_limited">速率限制</option>
+                <option value="temp_unschedulable">临时不可调度</option>
+                <option value="unschedulable">不可调度</option>
+            </select>
+            <select value="@privacyFilter" @onchange="PrivacyChangedAsync" aria-label="Privacy 状态筛选">
+                <option value="">全部Privacy状态</option>
+                <option value="__unset__">未设置</option>
+                <option value="training_off">Privacy</option>
+                <option value="training_set_cf_blocked">CF</option>
+                <option value="training_set_failed">Fail</option>
+            </select>
+            <select value="@groupFilter" @onchange="GroupChangedAsync" aria-label="账号分组筛选">
+                <option value="">全部分组</option>
+                <option value="ungrouped">未分配分组</option>
+                @foreach (var group in groups)
+                {
+                    <option value="@group.Id">@group.Name</option>
+                }
+            </select>
+            <span class="account-result-count">@(loading ? "正在加载…" : $"{total} 个账号")</span>
+        </div>
+        <div class="account-toolbar-actions">
+            <button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="ManualRefreshAsync"><Icon Name="refresh" Size="17" /></button>
+            <div class="toolbar-popover-wrap">
+                <button type="button" class="button secondary compact" aria-expanded="@autoRefreshMenuOpen" @onclick="ToggleAutoRefreshMenu">
+                    <Icon Name="refresh" Size="16" /> @(autoRefreshEnabled ? $"自动刷新：{autoRefreshCountdown}s" : "自动刷新")
+                </button>
+                @if (autoRefreshMenuOpen)
+                {
+                    <div class="toolbar-popover auto-refresh-menu">
+                        <button type="button" class="menu-check-row" @onclick="ToggleAutoRefreshAsync"><span>启用自动刷新</span>@if (autoRefreshEnabled) { <Icon Name="check" Size="15" /> }</button>
+                        <div class="menu-divider"></div>
+                        @foreach (var seconds in AutoRefreshIntervals)
+                        {
+                            <button type="button" class="menu-check-row" @onclick="() => SetAutoRefreshIntervalAsync(seconds)"><span>@seconds 秒</span>@if (autoRefreshIntervalSeconds == seconds) { <Icon Name="check" Size="15" /> }</button>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="toolbar-popover-wrap">
+                <button type="button" class="button secondary compact" aria-expanded="@toolsMenuOpen" @onclick="ToggleToolsMenu"><Icon Name="more" Size="16" /> 更多操作 <Icon Name="chevron-down" Size="14" /></button>
+                @if (toolsMenuOpen)
+                {
+                    <div class="toolbar-popover account-tools-menu">
+                        <p class="menu-section-title">数据操作</p>
+                        <button type="button" class="tool-menu-row" @onclick="OpenCrsSync"><Icon Name="refresh" Size="16" /><span>从 CRS 同步</span></button>
+                        <label class="tool-menu-row file-menu-row" for="account-data-import"><Icon Name="arrow-right" Size="16" /><span>导入</span><InputFile id="account-data-import" class="visually-hidden" accept=".json,application/json" OnChange="ImportAccountsAsync" /></label>
+                        <button type="button" class="tool-menu-row" disabled="@exporting" @onclick="ExportAccountsAsync"><Icon Name="download" Size="16" /><span>@(selectedIds.Count > 0 ? "导出选中" : "导出")</span>@if (selectedIds.Count > 0) { <small>@selectedIds.Count</small> }</button>
+                        <label class="menu-toggle-row"><input type="checkbox" @bind="includeProxiesOnExport" /><span>导出关联代理</span></label>
+                        <div class="menu-divider"></div>
+                        <p class="menu-section-title">工具</p>
+                        <a class="tool-menu-row" href="/provider-oauth"><Icon Name="shield" Size="16" /><span>官方 OAuth 接入</span></a>
+                        <a class="tool-menu-row" href="/admin/error-passthrough"><Icon Name="alert" Size="16" /><span>错误透传规则</span></a>
+                        <a class="tool-menu-row" href="/admin/tls-fingerprints"><Icon Name="key" Size="16" /><span>TLS 指纹模板</span></a>
+                        <div class="menu-divider"></div>
+                        <p class="menu-section-title">列显示</p>
+                        @foreach (var column in ToggleableColumns)
+                        {
+                            <button type="button" class="menu-check-row" @onclick="() => ToggleColumnAsync(column.Key)"><span>@column.Label</span>@if (IsColumnVisible(column.Key)) { <Icon Name="check" Size="15" /> }</button>
+                        }
+                    </div>
+                }
+            </div>
+            <button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> 新建账号</button>
+        </div>
+    </section>
+
+    @if (selectedIds.Count > 0)
+    {
+        <section class="account-bulk-bar" aria-label="账号批量操作">
+            <strong>已选 @selectedIds.Count 个</strong>
+            <button type="button" class="text-button" @onclick="SelectCurrentPage">选择当前页</button>
+            @if (total > accounts.Count)
+            {
+                <button type="button" class="text-button" disabled="@selectingAll" @onclick="SelectAllFilteredAsync">@(selectingAll ? "选择中…" : $"选择全部 {total} 个结果")</button>
+            }
+            <span class="bulk-spacer"></span>
+            <button type="button" class="button secondary small" disabled="@busy" @onclick="() => BulkSchedulableAsync(true)">开启调度</button>
+            <button type="button" class="button secondary small" disabled="@busy" @onclick="() => BulkSchedulableAsync(false)">暂停调度</button>
+            <button type="button" class="button secondary small" disabled="@busy" @onclick="BulkClearErrorsAsync">重置状态</button>
+            <button type="button" class="button secondary small" disabled="@(busy || !CanBulkRefresh)" title="仅当当前页所选账号全部为 OAuth/Setup Token 主账号时可用" @onclick="BulkRefreshAsync">刷新 OAuth 令牌</button>
+            <button type="button" class="button danger small" disabled="@busy" @onclick="BulkDeleteAsync">删除</button>
+            <button type="button" class="icon-button" title="清除选择" aria-label="清除选择" @onclick="ClearSelection"><Icon Name="x" Size="16" /></button>
+        </section>
+    }
+
+    @if (error is not null)
+    {
+        <ErrorState Message="@error" OnRetry="ManualRefreshAsync" />
+    }
+    else if (loading && accounts.Count == 0)
+    {
+        <LoadingState Text="正在载入账号" />
+    }
+    else
+    {
+        <section class="accounts-table-shell" aria-busy="@loading">
+            <div class="accounts-table-scroll">
+                <table class="accounts-data-table">
+                    <thead>
+                        <tr>
+                            <th class="select-column"><input type="checkbox" aria-label="选择当前页账号" checked="@AllCurrentPageSelected" @onchange="ToggleCurrentPage" /></th>
+                            <th><button type="button" class="table-sort" @onclick='() => SortAsync("name")'>名称 @SortGlyph("name")</button></th>
+                            @if (IsColumnVisible("id")) { <th><button type="button" class="table-sort" @onclick='() => SortAsync("id")'>账号ID @SortGlyph("id")</button></th> }
+                            @if (IsColumnVisible("platform")) { <th>平台/类型</th> }
+                            @if (IsColumnVisible("endpoint")) { <th>API 地址</th> }
+                            @if (IsColumnVisible("auth")) { <th>认证</th> }
+                            @if (IsColumnVisible("capacity")) { <th>容量</th> }
+                            @if (IsColumnVisible("status")) { <th><button type="button" class="table-sort" @onclick='() => SortAsync("status")'>状态 @SortGlyph("status")</button></th> }
+                            @if (IsColumnVisible("schedulable")) { <th><button type="button" class="table-sort" @onclick='() => SortAsync("schedulable")'>调度 @SortGlyph("schedulable")</button></th> }
+                            @if (IsColumnVisible("today")) { <th>今日统计</th> }
+                            @if (IsColumnVisible("groups")) { <th>分组</th> }
+                            @if (IsColumnVisible("usage")) { <th title="显示后端返回的日、周和总配额用量；具体窗口由上游账号决定。">用量窗口</th> }
+                            @if (IsColumnVisible("proxy")) { <th>代理</th> }
+                            @if (IsColumnVisible("priority")) { <th><button type="button" class="table-sort" @onclick='() => SortAsync("priority")'>优先级 @SortGlyph("priority")</button></th> }
+                            @if (IsColumnVisible("score")) { <th title="由后端根据优先级、粘性和实时负载计算，并非固定概率权重。">实时调度评分</th> }
+                            @if (IsColumnVisible("rate")) { <th><button type="button" class="table-sort" @onclick='() => SortAsync("rate_multiplier")'>计费倍率 @SortGlyph("rate_multiplier")</button></th> }
+                            @if (IsColumnVisible("upstream-rate")) { <th title="该值由上游站点自行声明，请结合实际账单核验。">上游声明倍率</th> }
+                            @if (IsColumnVisible("last")) { <th><button type="button" class="table-sort" @onclick='() => SortAsync("last_used_at")'>最近使用 @SortGlyph("last_used_at")</button></th> }
+                            @if (IsColumnVisible("created")) { <th><button type="button" class="table-sort" @onclick='() => SortAsync("created_at")'>创建时间 @SortGlyph("created_at")</button></th> }
+                            @if (IsColumnVisible("expires")) { <th><button type="button" class="table-sort" @onclick='() => SortAsync("expires_at")'>过期时间 @SortGlyph("expires_at")</button></th> }
+                            @if (IsColumnVisible("notes")) { <th>备注</th> }
+                            <th class="actions-column">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (accounts.Count == 0)
+                        {
+                            <tr><td colspan="@VisibleColumnCount">
+                                <div class="account-empty-state"><Icon Name="server" Size="30" /><strong>暂无账号</strong><span>新建 API Key 账号，或通过官方 OAuth 接入平台账号。</span><button type="button" class="button primary small" @onclick="OpenCreate">新建账号</button></div>
+                            </td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var row in accounts)
+                            {
+                                <tr class="@(selectedIds.Contains(row.Id) ? "selected" : null)">
+                                    <td class="select-column"><input type="checkbox" aria-label="选择账号 @row.Name" checked="@selectedIds.Contains(row.Id)" @onchange="e => ToggleRow(row.Id, e.Value is true)" /></td>
+                                    <td><div class="account-name-cell"><strong>@row.Name</strong>@if (!string.IsNullOrWhiteSpace(AccountEmail(row))) { <small title="@AccountEmail(row)">@AccountEmail(row)</small> }</div></td>
+                                    @if (IsColumnVisible("id")) { <td><code>#@row.Id</code></td> }
+                                    @if (IsColumnVisible("platform")) { <td><div class="platform-stack"><span class="platform-badge @(IsCopilot(row) ? "platform-copilot" : $"platform-{row.Platform}")">@AccountPlatformLabel(row)</span><small>@AccountTypeLabel(row)</small>@if (row.ParentAccountId.HasValue) { <span class="shadow-badge">@row.QuotaDimension 影子</span> }</div></td> }
+                                    @if (IsColumnVisible("endpoint")) { <td><div class="endpoint-cell"><code title="@AccountBaseUrl(row)">@AccountBaseUrl(row)</code></div></td> }
+                                    @if (IsColumnVisible("auth")) { <td><div class="auth-cell"><strong>@AuthenticationLabel(row)</strong><small class="@(CredentialConfigured(row) ? "configured" : "missing")">@(CredentialConfigured(row) ? "凭据已配置" : "凭据待补充")</small></div></td> }
+                                    @if (IsColumnVisible("capacity")) { <td><div class="capacity-cell" title="并发上限与负载因子由原账号调度器使用；实时评分由后端动态计算。"><strong>@row.CurrentConcurrency / @row.Concurrency</strong><small>当前 / 并发上限</small>@if (row.LoadFactor.HasValue) { <small>负载因子 @row.LoadFactor</small> }@if (row.ActiveSessions.HasValue) { <small>会话 @row.ActiveSessions</small> }@if (row.CurrentRpm.HasValue) { <small>当前 RPM @row.CurrentRpm</small> }</div></td> }
+                                    @if (IsColumnVisible("status")) { <td><span class="status-badge @StatusClass(row)" title="@StatusTitle(row)">@StatusLabel(row)</span></td> }
+                                    @if (IsColumnVisible("schedulable")) { <td><button type="button" class="schedule-switch @(row.Schedulable ? "on" : null)" role="switch" aria-checked="@row.Schedulable.ToString().ToLowerInvariant()" aria-label="切换 @row.Name 调度" title="@(row.Schedulable ? "暂停调度" : "恢复调度")" disabled="@busy" @onclick="() => ToggleSchedulingAsync(row)"><span></span></button></td> }
+                                    @if (IsColumnVisible("today")) { <td>@if (todayStats.TryGetValue(row.Id, out var stats)) { <div class="today-stats"><strong>$@stats.StandardCost.ToString("0.####")</strong><small>@stats.Requests 次 · @stats.Tokens token</small></div> } else { <span class="muted-cell">-</span> }</td> }
+                                    @if (IsColumnVisible("groups")) { <td><div class="group-badges">@if (row.Groups.Count == 0) { <span class="muted-cell">未分组</span> } else { @foreach (var group in row.Groups.Take(4)) { <span>@group.Name</span> } @if (row.Groups.Count > 4) { <small>+@(row.Groups.Count - 4)</small> } }</div></td> }
+                                    @if (IsColumnVisible("usage")) { <td><div class="usage-windows">@if (!HasQuota(row)) { <span class="muted-cell">-</span> } else { @UsageWindow("日", row.QuotaDailyUsed, row.QuotaDailyLimit) @UsageWindow("周", row.QuotaWeeklyUsed, row.QuotaWeeklyLimit) @UsageWindow("总", row.QuotaUsed, row.QuotaLimit) }</div></td> }
+                                    @if (IsColumnVisible("proxy")) { <td>@if (row.Proxy is null) { <span class="muted-cell">-</span> } else { <div class="proxy-cell"><strong>@row.Proxy.Name</strong><small>@row.Proxy.Protocol://@row.Proxy.Host:@row.Proxy.Port</small></div> }</td> }
+                                    @if (IsColumnVisible("priority")) { <td>@row.Priority</td> }
+                                    @if (IsColumnVisible("score")) { <td><code>@SchedulerScore(row)</code></td> }
+                                    @if (IsColumnVisible("rate")) { <td><code>@row.RateMultiplier.ToString("0.###")x</code></td> }
+                                    @if (IsColumnVisible("upstream-rate")) { <td><span class="muted-cell">@UpstreamRate(row)</span></td> }
+                                    @if (IsColumnVisible("last")) { <td>@RelativeTime(row.LastUsedAt)</td> }
+                                    @if (IsColumnVisible("created")) { <td>@FormatDate(row.CreatedAt)</td> }
+                                    @if (IsColumnVisible("expires")) { <td><div class="expiry-cell"><span>@FormatExpiry(row.ExpiresAt)</span>@if (IsExpired(row.ExpiresAt)) { <small class="danger-text">已过期</small> } else if (row.AutoPauseOnExpired && row.ExpiresAt.HasValue) { <small>到期自动暂停</small> }</div></td> }
+                                    @if (IsColumnVisible("notes")) { <td><span class="notes-cell" title="@row.Notes">@(string.IsNullOrWhiteSpace(row.Notes) ? "-" : row.Notes)</span></td> }
+                                    <td class="actions-column"><div class="row-actions"><button type="button" class="row-action" title="测试连接" aria-label="测试 @row.Name" disabled="@busy" @onclick="() => TestAsync(row)"><Icon Name="pulse" Size="15" /><span>测试</span></button><button type="button" class="row-action" title="编辑" aria-label="编辑 @row.Name" @onclick="() => OpenEdit(row)"><Icon Name="pencil" Size="15" /><span>编辑</span></button><button type="button" class="row-action danger" title="删除" aria-label="删除 @row.Name" @onclick="() => OpenDelete(row)"><Icon Name="trash" Size="15" /><span>删除</span></button><div class="row-more-wrap"><button type="button" class="row-action" title="更多" aria-label="更多 @row.Name" @onclick="() => ToggleRowMenu(row.Id)"><Icon Name="more" Size="15" /><span>更多</span></button>@if (rowMenuId == row.Id) { <div class="row-action-menu"><button type="button" @onclick="() => ShowStatsAsync(row)">查看统计</button><button type="button" @onclick="() => DuplicateAsync(row)">复制账号</button>@if (CanRefreshToken(row)) { <button type="button" @onclick="() => RefreshTokenAsync(row)">刷新 OAuth 令牌</button> }<button type="button" @onclick="() => RecoverStateAsync(row)">恢复状态</button><button type="button" @onclick="() => ClearRateLimitAsync(row)">清除速率限制</button><button type="button" @onclick="() => ResetQuotaAsync(row)">重置配额</button><a href="/admin/models?account=@row.Id">查看模型</a></div> }</div></div></td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        @if (total > 0)
+        {
+            <footer class="accounts-pagination">
+                <span>第 @StartRow-@EndRow 条，共 @total 条</span>
+                <div class="pagination-controls">
+                    <label>每页 <select value="@pageSize" @onchange="PageSizeChangedAsync" aria-label="每页账号数"><option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label>
+                    <button type="button" class="icon-button" aria-label="上一页" disabled="@(page <= 1 || loading)" @onclick="PreviousPageAsync"><Icon Name="chevron-left" Size="16" /></button>
+                    <span>@(page) / @Math.Max(1, totalPages)</span>
+                    <button type="button" class="icon-button" aria-label="下一页" disabled="@(page >= totalPages || loading)" @onclick="NextPageAsync"><Icon Name="chevron-right" Size="16" /></button>
+                </div>
+            </footer>
+        }
+    }
+</div>
+
+<NativeAccountCreateModal Open="@createOpen" Groups="@groups" Proxies="@proxies" OnClose="CloseCreate" OnCreated="HandleCreatedAsync" />
+
+<AppModal Open="editorOpen" Title="编辑账号" MaxWidth="820px" OnClose="CloseEditor">
+    <ChildContent>
+        <EditForm id="account-editor" EditContext="editorContext" OnValidSubmit="SaveAsync" FormName="account-editor">
+            <DataAnnotationsValidator />
+            @if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }
+            @if (editorTestMessage is not null && editorTestFingerprint == EditorConnectionFingerprint()) { <div class="inline-alert success" role="status"><Icon Name="check" Size="18" /><span>@editorTestMessage</span></div> }
+            <div class="form-grid account-editor-grid">
+                <div class="form-field full"><label for="account-name">账号名称</label><InputText id="account-name" @bind-Value="form.Name" /><ValidationMessage For="() => form.Name" /></div>
+                <div class="form-field"><label for="account-platform">平台</label><select id="account-platform" value="@form.Platform" @onchange="PlatformEditorChanged" disabled="@(editingId is not null)"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option></select></div>
+                <div class="form-field"><label for="account-type">认证类型</label><select id="account-type" value="@form.Type" @onchange="AuthenticationTypeEditorChanged" disabled="@(editingId is not null)"><option value="apikey">API Key / 自定义 Base URL</option><option value="oauth">OAuth</option>@if (form.Platform == "anthropic") { <option value="setup-token">Setup Token</option><option value="bedrock">AWS Bedrock</option> }@if (form.Platform is "anthropic" or "gemini") { <option value="service_account">Vertex Service Account</option> }@if (editingId is not null && form.Type == "upstream") { <option value="upstream">旧版 Upstream（仅兼容）</option> }</select><small class="form-hint">编辑已有账号时不可更改平台或认证类型；如需迁移，请新建账号。</small></div>
+                @if (form.Type is "oauth" or "setup-token")
+                {
+                    <div class="inline-alert info full"><Icon Name="shield" Size="18" /><span>推荐通过“官方 OAuth 接入”完成授权，凭据只保存在 Go 服务端。</span><a class="button secondary small" href="/provider-oauth">前往授权</a></div>
+                    <div class="form-field"><label for="account-access-token">Access Token</label><InputText id="account-access-token" @bind-Value="form.AccessToken" type="password" autocomplete="new-password" /></div>
+                    <div class="form-field"><label for="account-refresh-token">Refresh Token</label><InputText id="account-refresh-token" @bind-Value="form.RefreshToken" type="password" autocomplete="new-password" /></div>
+                }
+                else if (form.Type is "apikey" or "upstream")
+                {
+                    @if (form.Type == "apikey")
+                    {
+                        <div class="inline-alert info full"><Icon Name="info" Size="18" /><span>“账号管理”保留原平台账号与官方 OAuth 接入。Worker 风格的兼容上游、WIF、权重、RPM 和熔断策略请在独立的“上游账号”页面配置。</span><a class="button secondary small" href="/admin/upstream-accounts">前往上游账号</a></div>
+                    }
+                    <div class="form-field full"><label for="account-api-key">API Key（编辑时留空表示不修改）</label><InputText id="account-api-key" @bind-Value="form.ApiKey" type="password" autocomplete="new-password" /><ValidationMessage For="() => form.ApiKey" /></div>
+                    <div class="form-field full"><label for="account-base-url">Base URL（可选）</label><InputText id="account-base-url" @bind-Value="form.BaseUrl" type="url" placeholder="https://api.openai.com" /><ValidationMessage For="() => form.BaseUrl" /></div>
+                }
+                else if (form.Type == "bedrock")
+                {
+                    <div class="form-field full"><label for="account-credentials-json">AWS Bedrock 凭据 JSON</label><InputTextArea id="account-credentials-json" @bind-Value="form.CredentialsJson" rows="7" /><ValidationMessage For="() => form.CredentialsJson" /></div>
+                }
+                else if (form.Type == "service_account")
+                {
+                    <div class="form-field full"><label for="account-credentials-json">Vertex Service Account JSON</label><InputTextArea id="account-credentials-json" @bind-Value="form.CredentialsJson" rows="7" /><ValidationMessage For="() => form.CredentialsJson" /></div>
+                }
+                else
+                {
+                    <div class="form-field full"><label for="account-credentials-json">凭据 JSON</label><InputTextArea id="account-credentials-json" @bind-Value="form.CredentialsJson" rows="7" /><ValidationMessage For="() => form.CredentialsJson" /></div>
+                }
+                <div class="form-field"><label for="account-notes">备注</label><InputText id="account-notes" @bind-Value="form.Notes" /></div>
+                <div class="form-field"><label for="account-proxy">代理 ID（可选）</label><InputNumber id="account-proxy" @bind-Value="form.ProxyId" /></div>
+                <div class="form-field"><label for="account-concurrency">并发上限</label><InputNumber id="account-concurrency" @bind-Value="form.Concurrency" /><ValidationMessage For="() => form.Concurrency" /></div>
+                <div class="form-field"><label for="account-load-factor">调度负载因子（可选）</label><InputNumber id="account-load-factor" @bind-Value="form.LoadFactor" placeholder="默认沿用并发上限" /><small class="form-hint">仅影响负载率计算；留空时使用并发上限，不是概率权重。</small><ValidationMessage For="() => form.LoadFactor" /></div>
+                <div class="form-field"><label for="account-priority">优先级</label><InputNumber id="account-priority" @bind-Value="form.Priority" /><small class="form-hint">数值越小越优先。</small><ValidationMessage For="() => form.Priority" /></div>
+                <div class="form-field"><label for="account-rate">计费倍率</label><InputNumber id="account-rate" @bind-Value="form.RateMultiplier" step="0.001" /><ValidationMessage For="() => form.RateMultiplier" /></div>
+                <div class="form-field"><label for="account-expiry">过期时间（可选）</label><input id="account-expiry" type="datetime-local" value="@formExpiryLocal" @onchange="ExpiryChanged" /></div>
+                <div class="form-field full">
+                    <label>所属分组</label>
+                    <div class="editor-group-picker">
+                        @if (!AvailableEditorGroups.Any())
+                        {
+                            <span class="muted-text">当前平台暂无可用分组</span>
+                        }
+                        else
+                        {
+                            @foreach (var group in AvailableEditorGroups)
+                            {
+                                var groupId = long.Parse(group.Id);
+                                <label><input type="checkbox" checked="@form.GroupIds.Contains(groupId)" @onchange="e => ToggleEditorGroup(groupId, e.Value is true)" /><span>@group.Name</span><small>@group.Platform</small></label>
+                            }
+                        }
+                    </div>
+                    <small class="form-hint">仅显示与账号平台兼容的分组；复合分组可接收任意平台账号。</small>
+                </div>
+                <label class="toggle-row"><InputCheckbox @bind-Value="form.Schedulable" /><span><strong>启用账号调度</strong><small>关闭后不会把新请求调度到此账号。</small></span></label>
+                <label class="toggle-row"><InputCheckbox @bind-Value="form.AutoPauseOnExpired" /><span><strong>到期自动暂停</strong><small>超过过期时间后不再参与调度。</small></span></label>
+                @if (ApiClient.IsUpstreamBillingProbeAccount(form.Platform, form.Type))
+                {
+                    <label class="toggle-row"><InputCheckbox @bind-Value="form.ProbeEnabled" /><span><strong>启用上游计费探测</strong><small>自动探测上游公开的计费倍率。</small></span></label>
+                    <label class="toggle-row"><InputCheckbox @bind-Value="form.RateSyncEnabled" disabled="@(!form.ProbeEnabled)" /><span><strong>同步上游声明倍率</strong><small>探测成功后更新账号倍率。</small></span></label>
+                }
+                <div class="form-field full"><label for="account-extra-json">扩展配置 JSON</label><InputTextArea id="account-extra-json" @bind-Value="form.ExtraJson" rows="5" placeholder="{}" /></div>
+            </div>
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseEditor">取消</button>@if (CanTestEditor) { <button type="button" class="button secondary" disabled="@(saving || editorTesting)" @onclick="TestEditorAsync">@(editorTesting ? "测试中…" : EditorTestLabel)</button> }<button type="button" class="button primary" disabled="@(saving || editorTesting)" @onclick="SubmitEditorAsync">@(saving ? "保存中…" : "保存账号")</button></Footer>
+</AppModal>
+
+<AppModal Open="deleteOpen" Title="删除账号" MaxWidth="520px" OnClose="CloseDelete">
+    <ChildContent><p>确定要删除账号“<strong>@deletingAccount?.Name</strong>”吗？此操作无法撤销。</p></ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseDelete">取消</button><button type="button" class="button danger" disabled="@busy" @onclick="ConfirmDeleteAsync">删除</button></Footer>
+</AppModal>
+
+<AppModal Open="statsOpen" Title="@(statsAccount is null ? "账号统计" : $"账号统计 · {statsAccount.Name}")" MaxWidth="760px" OnClose="CloseStats">
+    <ChildContent>@if (statsLoading) { <LoadingState Text="正在载入账号统计" /> } else if (!string.IsNullOrWhiteSpace(statsJson)) { <pre class="json-preview">@statsJson</pre> } else { <EmptyState Title="暂无统计" Description="后端未返回可展示的统计数据。" /> }</ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseStats">关闭</button></Footer>
+</AppModal>
+
+<AppModal Open="crsOpen" Title="从 CRS 同步账号" MaxWidth="720px" OnClose="CloseCrsSync">
+    <ChildContent>
+        <EditForm id="crs-sync-form" Model="crsForm" OnValidSubmit="PreviewCrsAsync" FormName="crs-sync-form"><DataAnnotationsValidator />
+            <p class="muted-text">将 claude-relay-service（CRS）中的账号同步到当前系统；请求由 Go 后端发起。</p>
+            <div class="inline-alert warning"><Icon Name="alert" Size="18" /><span>CRS 版本必须 ≥ v1.1.240。</span></div>
+            <div class="form-grid"><div class="form-field full"><label for="crs-url">CRS 服务地址</label><InputText id="crs-url" @bind-Value="crsForm.BaseUrl" placeholder="http://127.0.0.1:3000" /><ValidationMessage For="() => crsForm.BaseUrl" /></div><div class="form-field"><label for="crs-user">用户名</label><InputText id="crs-user" @bind-Value="crsForm.Username" /><ValidationMessage For="() => crsForm.Username" /></div><div class="form-field"><label for="crs-password">密码</label><InputText id="crs-password" @bind-Value="crsForm.Password" type="password" autocomplete="new-password" /><ValidationMessage For="() => crsForm.Password" /></div><label class="toggle-row full"><InputCheckbox @bind-Value="crsForm.SyncProxies" /><span><strong>同时同步代理</strong><small>按 host、port 和账号匹配或自动创建。</small></span></label></div>
+            @if (!string.IsNullOrWhiteSpace(crsResultJson)) { <pre class="json-preview compact-json">@crsResultJson</pre> }
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseCrsSync">取消</button><button type="submit" form="crs-sync-form" class="button secondary" disabled="@crsBusy">@(crsBusy ? "预览中…" : "预览")</button><button type="button" class="button primary" disabled="@(crsBusy || !crsPreviewReady)" @onclick="SyncCrsAsync">开始同步</button></Footer>
+</AppModal>
+
+@code {
+    private static readonly int[] AutoRefreshIntervals = [5, 10, 15, 30];
+    private static readonly (string Key, string Label)[] ToggleableColumns =
+    [
+        ("id", "账号ID"), ("platform", "平台/类型"), ("endpoint", "API 地址"), ("auth", "认证"),
+        ("capacity", "容量"), ("status", "状态"),
+        ("schedulable", "调度"), ("today", "今日统计"), ("groups", "分组"), ("usage", "用量窗口"),
+        ("proxy", "代理"), ("priority", "优先级"), ("score", "实时调度评分"), ("rate", "计费倍率"),
+        ("upstream-rate", "上游声明倍率"), ("last", "最近使用"), ("created", "创建时间"),
+        ("expires", "过期时间"), ("notes", "备注")
+    ];
+    private static readonly JsonSerializerOptions PrettyJson = new() { WriteIndented = true };
+    private const string HiddenColumnsKey = "account-hidden-columns";
+    private const string AutoRefreshKey = "account-auto-refresh";
+    private const string SortKey = "account-table-sort";
+    private const string PageSizeKey = "table-page-size";
+
+    private List<AccountDto> accounts = [];
+    private List<GroupDto> groups = [];
+    private List<ProxyDto> proxies = [];
+    private readonly HashSet<string> selectedIds = new(StringComparer.Ordinal);
+    private readonly HashSet<string> hiddenColumns = new(StringComparer.OrdinalIgnoreCase) { "today", "proxy", "notes", "priority", "score", "rate" };
+    private readonly Dictionary<string, AccountTodayStatsDto> todayStats = new(StringComparer.Ordinal);
+    private AccountInput form = new();
+    private EditContext? editorContext;
+    private CrsSyncInput crsForm = new();
+    private CancellationTokenSource? searchCancellation;
+    private readonly CancellationTokenSource disposeCancellation = new();
+    private Task? autoRefreshTask;
+    private string search = string.Empty, platformFilter = string.Empty, typeFilter = string.Empty, statusFilter = string.Empty, privacyFilter = string.Empty, groupFilter = string.Empty;
+    private string sortBy = "name", sortOrder = "asc", formExpiryLocal = string.Empty;
+    private string? editingId, rowMenuId, error, modalError, editorTestMessage, editorTestFingerprint, statsJson, crsResultJson;
+    private AccountDto? deletingAccount, statsAccount;
+    private int page = 1, pageSize = 20, total, totalPages = 1;
+    private bool loading = true, busy, saving, editorTesting, editorOpen, createOpen, deleteOpen, statsOpen, statsLoading, toolsMenuOpen, autoRefreshMenuOpen;
+    private bool autoRefreshEnabled, selectingAll, exporting, includeProxiesOnExport, crsOpen, crsBusy, crsPreviewReady;
+    private int autoRefreshIntervalSeconds = 30, autoRefreshCountdown = 30;
+
+    private int StartRow => total == 0 ? 0 : ((page - 1) * pageSize) + 1;
+    private int EndRow => Math.Min(total, page * pageSize);
+    private bool AllCurrentPageSelected => accounts.Count > 0 && accounts.All(x => selectedIds.Contains(x.Id));
+    private bool CanBulkRefresh => selectedIds.Count > 0 && selectedIds.All(id => accounts.FirstOrDefault(row => row.Id == id) is { } row && CanRefreshToken(row));
+    private int VisibleColumnCount => 3 + ToggleableColumns.Count(x => IsColumnVisible(x.Key));
+    private bool CanTestEditor => editingId is not null || form.Type == "apikey";
+    private string EditorTestLabel => form.Type == "apikey" && (editingId is null || !string.IsNullOrWhiteSpace(form.ApiKey)) ? "读取平台模型" : "测试已保存连接";
+    private IEnumerable<GroupDto> AvailableEditorGroups
+    {
+        get
+        {
+            var mixedScheduling = IsEditorMixedSchedulingEnabled();
+            return groups.Where(group => AccountGroupSelectionPolicy.IsSelectable(group, form.Platform, mixedScheduling));
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var groupsTask = Api.GetGroupsAsync();
+            var proxiesTask = Api.GetProxiesAsync();
+            await Task.WhenAll(groupsTask, proxiesTask);
+            groups = await groupsTask;
+            proxies = await proxiesTask;
+        }
+        catch (ApiException)
+        {
+            groups = [];
+            proxies = [];
+        }
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await LoadPreferencesAsync();
+        await LoadAsync(true);
+        autoRefreshTask = AutoRefreshLoopAsync(disposeCancellation.Token);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private AccountListQuery CurrentQuery(int? targetPage = null, int? targetPageSize = null) => new()
+    {
+        Page = targetPage ?? page, PageSize = targetPageSize ?? pageSize, Search = search, Platform = platformFilter,
+        Type = typeFilter, Status = statusFilter, PrivacyMode = privacyFilter, Group = groupFilter,
+        SortBy = sortBy, SortOrder = sortOrder, IncludeSchedulerScore = IsColumnVisible("score")
+    };
+
+    private async Task LoadAsync(bool silent = false)
+    {
+        if (busy && silent) return;
+        if (!silent) loading = true;
+        error = null;
+        try
+        {
+            var result = await Api.GetAccountsPageAsync(CurrentQuery());
+            accounts = result.Items; total = result.Total; totalPages = Math.Max(1, result.TotalPages); page = Math.Min(Math.Max(1, result.Page), totalPages);
+            await LoadTodayStatsAsync();
+        }
+        catch (ApiException ex) { if (!silent) error = ex.Message; }
+        finally { loading = false; autoRefreshCountdown = autoRefreshIntervalSeconds; }
+    }
+
+    private async Task LoadTodayStatsAsync()
+    {
+        todayStats.Clear();
+        if (!IsColumnVisible("today") || accounts.Count == 0) return;
+        try
+        {
+            var response = await Api.GetAccountTodayStatsBatchAsync(accounts.Select(x => x.Id));
+            foreach (var pair in response.Stats) todayStats[pair.Key] = pair.Value;
+        }
+        catch (ApiException) { }
+    }
+
+    private async Task ManualRefreshAsync() { toolsMenuOpen = false; await LoadAsync(); }
+    private async Task FiltersChangedAsync() { page = 1; ClearSelection(); await LoadAsync(); }
+    private async Task PlatformChangedAsync(ChangeEventArgs e) { platformFilter = e.Value?.ToString() ?? string.Empty; await FiltersChangedAsync(); }
+    private async Task TypeChangedAsync(ChangeEventArgs e) { typeFilter = e.Value?.ToString() ?? string.Empty; await FiltersChangedAsync(); }
+    private async Task StatusChangedAsync(ChangeEventArgs e) { statusFilter = e.Value?.ToString() ?? string.Empty; await FiltersChangedAsync(); }
+    private async Task PrivacyChangedAsync(ChangeEventArgs e) { privacyFilter = e.Value?.ToString() ?? string.Empty; await FiltersChangedAsync(); }
+    private async Task GroupChangedAsync(ChangeEventArgs e) { groupFilter = e.Value?.ToString() ?? string.Empty; await FiltersChangedAsync(); }
+    private void SearchChanged(ChangeEventArgs e)
+    {
+        search = e.Value?.ToString() ?? string.Empty;
+        searchCancellation?.Cancel(); searchCancellation?.Dispose(); searchCancellation = CancellationTokenSource.CreateLinkedTokenSource(disposeCancellation.Token);
+        _ = DebouncedSearchAsync(searchCancellation.Token);
+    }
+    private async Task DebouncedSearchAsync(CancellationToken token) { try { await Task.Delay(350, token); await InvokeAsync(FiltersChangedAsync); } catch (OperationCanceledException) { } }
+
+    private async Task SortAsync(string key)
+    {
+        if (sortBy == key) sortOrder = sortOrder == "asc" ? "desc" : "asc"; else { sortBy = key; sortOrder = "asc"; }
+        page = 1; await SaveSortAsync(); await LoadAsync();
+    }
+    private string SortGlyph(string key) => sortBy == key ? (sortOrder == "asc" ? "↑" : "↓") : string.Empty;
+    private async Task PreviousPageAsync() { if (page <= 1) return; page--; await LoadAsync(); }
+    private async Task NextPageAsync() { if (page >= totalPages) return; page++; await LoadAsync(); }
+    private async Task PageSizeChangedAsync(ChangeEventArgs e) { if (int.TryParse(e.Value?.ToString(), out var next)) pageSize = next; page = 1; await JS.InvokeVoidAsync("localStorage.setItem", PageSizeKey, pageSize.ToString()); await LoadAsync(); }
+
+    private void ToggleCurrentPage(ChangeEventArgs e) { if (e.Value is true) SelectCurrentPage(); else foreach (var row in accounts) selectedIds.Remove(row.Id); }
+    private void SelectCurrentPage() { foreach (var row in accounts) selectedIds.Add(row.Id); }
+    private void ToggleRow(string id, bool selected) { if (selected) selectedIds.Add(id); else selectedIds.Remove(id); }
+    private void ClearSelection() => selectedIds.Clear();
+    private async Task SelectAllFilteredAsync()
+    {
+        selectingAll = true;
+        try
+        {
+            var first = await Api.GetAccountsPageAsync(CurrentQuery(1, 1000));
+            foreach (var row in first.Items) selectedIds.Add(row.Id);
+            for (var current = 2; current <= first.TotalPages; current++)
+            {
+                var next = await Api.GetAccountsPageAsync(CurrentQuery(current, 1000));
+                foreach (var row in next.Items) selectedIds.Add(row.Id);
+            }
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { selectingAll = false; }
+    }
+
+    private void ToggleAutoRefreshMenu() { autoRefreshMenuOpen = !autoRefreshMenuOpen; toolsMenuOpen = false; }
+    private void ToggleToolsMenu() { toolsMenuOpen = !toolsMenuOpen; autoRefreshMenuOpen = false; }
+    private async Task ToggleAutoRefreshAsync() { autoRefreshEnabled = !autoRefreshEnabled; autoRefreshCountdown = autoRefreshIntervalSeconds; await SaveAutoRefreshAsync(); }
+    private async Task SetAutoRefreshIntervalAsync(int seconds) { autoRefreshIntervalSeconds = seconds; autoRefreshCountdown = seconds; await SaveAutoRefreshAsync(); }
+    private async Task AutoRefreshLoopAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Task.Delay(1000, token);
+                if (!autoRefreshEnabled) continue;
+                autoRefreshCountdown--;
+                if (autoRefreshCountdown <= 0) await InvokeAsync(() => LoadAsync(true)); else await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task LoadPreferencesAsync()
+    {
+        try
+        {
+            var savedColumns = await JS.InvokeAsync<string?>("localStorage.getItem", HiddenColumnsKey);
+            if (!string.IsNullOrWhiteSpace(savedColumns)) { hiddenColumns.Clear(); foreach (var key in JsonSerializer.Deserialize<List<string>>(savedColumns) ?? []) hiddenColumns.Add(key); }
+            var savedRefresh = await JS.InvokeAsync<string?>("localStorage.getItem", AutoRefreshKey);
+            if (!string.IsNullOrWhiteSpace(savedRefresh)) { var state = JsonSerializer.Deserialize<AutoRefreshPreference>(savedRefresh); if (state is not null) { autoRefreshEnabled = state.Enabled; if (AutoRefreshIntervals.Contains(state.IntervalSeconds)) autoRefreshIntervalSeconds = state.IntervalSeconds; autoRefreshCountdown = autoRefreshIntervalSeconds; } }
+            var savedSort = await JS.InvokeAsync<string?>("localStorage.getItem", SortKey);
+            if (!string.IsNullOrWhiteSpace(savedSort)) { var state = JsonSerializer.Deserialize<AccountSortPreference>(savedSort); if (state is not null && AllowedSortKeys.Contains(state.Key)) { sortBy = state.Key; sortOrder = state.Order == "desc" ? "desc" : "asc"; } }
+            var savedPageSize = await JS.InvokeAsync<string?>("localStorage.getItem", PageSizeKey); if (int.TryParse(savedPageSize, out var size) && size is 10 or 20 or 50 or 100) pageSize = size;
+        }
+        catch (Exception ex) when (ex is JSException or JsonException) { }
+    }
+    private async Task SaveAutoRefreshAsync() { try { await JS.InvokeVoidAsync("localStorage.setItem", AutoRefreshKey, JsonSerializer.Serialize(new AutoRefreshPreference { Enabled = autoRefreshEnabled, IntervalSeconds = autoRefreshIntervalSeconds })); } catch (JSException) { } }
+    private async Task SaveSortAsync() { try { await JS.InvokeVoidAsync("localStorage.setItem", SortKey, JsonSerializer.Serialize(new AccountSortPreference { Key = sortBy, Order = sortOrder })); } catch (JSException) { } }
+    private async Task ToggleColumnAsync(string key) { if (!hiddenColumns.Add(key)) hiddenColumns.Remove(key); try { await JS.InvokeVoidAsync("localStorage.setItem", HiddenColumnsKey, JsonSerializer.Serialize(hiddenColumns)); } catch (JSException) { } if (key is "today" or "score") await LoadAsync(); }
+    private bool IsColumnVisible(string key) => !hiddenColumns.Contains(key);
+
+    private void OpenCreate() { editingId = null; form = new AccountInput { ExtraJson = "{}" }; formExpiryLocal = string.Empty; modalError = null; editorTestMessage = null; editorTestFingerprint = null; createOpen = true; toolsMenuOpen = false; }
+    private void OpenEdit(AccountDto account)
+    {
+        editingId = account.Id;
+        form = new AccountInput
+        {
+            IsEditing = true, Name = account.Name, Notes = account.Notes ?? string.Empty,
+            Platform = account.Platform, Type = account.Type,
+            BaseUrl = ReadCredential(account, "base_url"), Concurrency = account.Concurrency,
+            LoadFactor = account.LoadFactor, Priority = account.Priority,
+            RateMultiplier = account.RateMultiplier, ProxyId = account.ProxyId, ExpiresAt = account.ExpiresAt,
+            AutoPauseOnExpired = account.AutoPauseOnExpired, Schedulable = account.Schedulable,
+            ProbeEnabled = ReadExtraBool(account, "upstream_billing_probe_enabled"),
+            RateSyncEnabled = ReadExtraBool(account, "upstream_billing_rate_sync_enabled"),
+            ExtraJson = account.Extra is null ? "{}" : JsonSerializer.Serialize(account.Extra, PrettyJson),
+            GroupIds = [.. account.GroupIds]
+        };
+        formExpiryLocal = account.ExpiresAt.HasValue ? FromUnix(account.ExpiresAt.Value).ToLocalTime().ToString("yyyy-MM-ddTHH:mm") : string.Empty;
+        editorContext = new EditContext(form);
+        modalError = null; editorTestMessage = null; editorTestFingerprint = null; editorOpen = true; rowMenuId = null;
+    }
+    private void CloseEditor() { editorOpen = false; editorContext = null; }
+    private void CloseCreate() => createOpen = false;
+    private async Task HandleCreatedAsync() { createOpen = false; await LoadAsync(); }
+    private void PlatformEditorChanged(ChangeEventArgs e)
+    {
+        form.Platform = e.Value?.ToString()?.Trim().ToLowerInvariant() ?? "openai";
+        if (!IsAuthenticationTypeSupported(form.Platform, form.Type)) form.Type = "apikey";
+        InvalidateEditorTest();
+    }
+    private void AuthenticationTypeEditorChanged(ChangeEventArgs e)
+    {
+        var next = e.Value?.ToString()?.Trim().ToLowerInvariant() ?? "apikey";
+        form.Type = IsAuthenticationTypeSupported(form.Platform, next) ? next : "apikey";
+        InvalidateEditorTest();
+    }
+    private static bool IsAuthenticationTypeSupported(string platform, string type) => type switch
+    {
+        "apikey" or "oauth" => true,
+        "setup-token" or "bedrock" => platform == "anthropic",
+        "service_account" => platform is "anthropic" or "gemini",
+        "upstream" => true,
+        _ => false
+    };
+    private void InvalidateEditorTest() { editorTestMessage = null; editorTestFingerprint = null; }
+    private string EditorConnectionFingerprint() => JsonSerializer.Serialize(new
+    {
+        form.Platform, form.Type, form.ApiKey,
+        form.AccessToken, form.RefreshToken, form.CredentialsJson, form.BaseUrl, form.ProxyId, form.ExtraJson
+    });
+    private void ExpiryChanged(ChangeEventArgs e) { formExpiryLocal = e.Value?.ToString() ?? string.Empty; if (DateTime.TryParse(formExpiryLocal, out var value)) form.ExpiresAt = new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Local)).ToUnixTimeSeconds(); else form.ExpiresAt = null; }
+    private void ToggleEditorGroup(long id, bool selected) { if (selected && !form.GroupIds.Contains(id)) form.GroupIds.Add(id); else if (!selected) form.GroupIds.Remove(id); }
+    private bool IsEditorMixedSchedulingEnabled()
+    {
+        if (!form.Platform.Equals("antigravity", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(form.ExtraJson)) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(form.ExtraJson);
+            return document.RootElement.TryGetProperty("mixed_scheduling", out var value)
+                && value.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+    private async Task SubmitEditorAsync()
+    {
+        modalError = null;
+        if (editorContext is null)
+        {
+            modalError = "账号编辑器尚未初始化，请关闭后重新打开。";
+            return;
+        }
+        if (!editorContext.Validate())
+        {
+            var validationMessages = editorContext.GetValidationMessages()
+                .Where(message => !string.IsNullOrWhiteSpace(message))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            modalError = validationMessages.Length > 0
+                ? $"无法保存：{string.Join("；", validationMessages)}"
+                : "请检查账号名称、地址和数值字段后再保存。";
+            return;
+        }
+        await SaveAsync();
+    }
+    private async Task SaveAsync()
+    {
+        saving = true; modalError = null;
+        try
+        {
+            var saved = editingId is null ? await Api.CreateAccountAsync(form) : await Api.UpdateAccountAsync(editingId, form);
+            if (saved.Schedulable != form.Schedulable) saved = await Api.SetAccountSchedulableAsync(saved.Id, form.Schedulable);
+            editorOpen = false; Toasts.Success(editingId is null ? "账号已创建" : "账号已更新"); await LoadAsync(); selectedIds.Add(saved.Id);
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task TestEditorAsync()
+    {
+        editorTesting = true; modalError = null; editorTestMessage = null; editorTestFingerprint = null;
+        try
+        {
+            if (form.Type == "apikey" && (editingId is null || !string.IsNullOrWhiteSpace(form.ApiKey)))
+            {
+                var models = await Api.PreviewAccountModelsAsync(form);
+                editorTestMessage = $"模型目录读取成功，共 {models.Count} 个模型；未验证代理、扩展配置或推理接口。";
+                editorTestFingerprint = EditorConnectionFingerprint();
+            }
+            else if (editingId is not null)
+            {
+                var result = await Api.TestAccountAsync(editingId);
+                if (!result.Success) throw new ApiException(string.IsNullOrWhiteSpace(result.Message) ? "连接测试失败" : result.Message);
+                editorTestMessage = $"已保存配置连接成功{(result.LatencyMs.HasValue ? $"（{result.LatencyMs} ms）" : string.Empty)}；当前尚未保存的字段未参与本次测试。";
+                editorTestFingerprint = EditorConnectionFingerprint();
+            }
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { editorTesting = false; }
+    }
+
+    private void OpenDelete(AccountDto row) { deletingAccount = row; deleteOpen = true; rowMenuId = null; }
+    private void CloseDelete() { deleteOpen = false; deletingAccount = null; }
+    private async Task ConfirmDeleteAsync() { if (deletingAccount is null) return; busy = true; try { await Api.DeleteAccountAsync(deletingAccount.Id); Toasts.Success("账号删除成功"); CloseDelete(); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private void ToggleRowMenu(string id) => rowMenuId = rowMenuId == id ? null : id;
+    private async Task ToggleSchedulingAsync(AccountDto row) { busy = true; try { await Api.SetAccountSchedulableAsync(row.Id, !row.Schedulable); Toasts.Success(row.Schedulable ? "调度已关闭" : "调度已开启"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task TestAsync(AccountDto row) { rowMenuId = null; busy = true; error = null; try { var result = await Api.TestAccountAsync(row.Id); if (result.Success) Toasts.Success($"连接成功{(result.LatencyMs.HasValue ? $"（{result.LatencyMs} ms）" : string.Empty)}"); else error = string.IsNullOrWhiteSpace(result.Message) ? "连接测试失败" : result.Message; } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task DuplicateAsync(AccountDto row) { rowMenuId = null; busy = true; try { await Api.DuplicateAccountAsync(row.Id); Toasts.Success("账号已复制"); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task RefreshTokenAsync(AccountDto row) { rowMenuId = null; busy = true; try { await Api.RefreshAccountAsync(row.Id); Toasts.Success("Token 刷新成功"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task RecoverStateAsync(AccountDto row) { rowMenuId = null; busy = true; try { await Api.RecoverAccountStateAsync(row.Id); Toasts.Success("账号状态已恢复"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task ClearRateLimitAsync(AccountDto row) { rowMenuId = null; if (!await JS.InvokeAsync<bool>("confirm", $"确认清除账号“{row.Name}”的速率限制？")) return; busy = true; try { await Api.ClearAccountRateLimitAsync(row.Id); Toasts.Success("速率限制已清除"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task ResetQuotaAsync(AccountDto row) { rowMenuId = null; if (!await JS.InvokeAsync<bool>("confirm", $"确认重置账号“{row.Name}”的配额用量？")) return; busy = true; try { await Api.ResetAccountQuotaAsync(row.Id); Toasts.Success("账号配额已重置"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task ShowStatsAsync(AccountDto row) { rowMenuId = null; statsAccount = row; statsOpen = true; statsLoading = true; statsJson = null; try { var value = await Api.GetAccountStatsAsync(row.Id); statsJson = JsonSerializer.Serialize(value, PrettyJson); } catch (ApiException ex) { statsJson = JsonSerializer.Serialize(new { error = ex.Message }, PrettyJson); } finally { statsLoading = false; } }
+    private void CloseStats() { statsOpen = false; statsAccount = null; statsJson = null; }
+
+    private async Task BulkDeleteAsync() { if (selectedIds.Count == 0 || !await JS.InvokeAsync<bool>("confirm", $"确认删除选中的 {selectedIds.Count} 个账号？此操作无法撤销。")) return; await RunBulkAsync(() => Api.BatchDeleteAccountsAsync(selectedIds), "账号已批量删除"); }
+    private async Task BulkClearErrorsAsync() { if (selectedIds.Count == 0) return; await RunBulkAsync(() => Api.BatchClearAccountErrorsAsync(selectedIds), "账号状态已重置"); }
+    private async Task BulkRefreshAsync() { if (selectedIds.Count == 0) return; await RunBulkAsync(() => Api.BatchRefreshAccountsAsync(selectedIds), "账号令牌刷新完成"); }
+    private async Task RunBulkAsync(Func<Task<AccountBatchResultDto>> action, string message) { busy = true; try { var result = await action(); Toasts.Success(result.FailedCount > 0 ? $"{message}：成功 {result.SuccessCount}，失败 {result.FailedCount}" : message); ClearSelection(); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task BulkSchedulableAsync(bool value) { if (selectedIds.Count == 0) return; busy = true; try { await Api.BulkSetAccountsSchedulableAsync(selectedIds, value); Toasts.Success(value ? "已批量开启调度" : "已批量暂停调度"); ClearSelection(); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+
+    private async Task ExportAccountsAsync()
+    {
+        toolsMenuOpen = false; if (!await JS.InvokeAsync<bool>("confirm", "导出数据包含账号与代理敏感信息，请确认在安全环境中保存。")) return; exporting = true;
+        try
+        {
+            await RunSensitiveAsync(async () =>
+            {
+                var data = await Api.GetAccountsDataAsync(selectedIds.Count == 0 ? null : selectedIds, includeProxiesOnExport, CurrentQuery());
+                var json = JsonSerializer.Serialize(data, PrettyJson);
+                await JS.InvokeVoidAsync("paraGateway.downloadBytes", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(json)), "application/json", $"paragateway-accounts-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+
+                Toasts.Success("数据导出成功");
+            });
+        }
+        finally { exporting = false; }
+    }
+    private async Task ImportAccountsAsync(InputFileChangeEventArgs e)
+    {
+        toolsMenuOpen = false;
+        try { await using var stream = e.File.OpenReadStream(5 * 1024 * 1024); using var document = await JsonDocument.ParseAsync(stream); await Api.ImportAccountsDataAsync(document.RootElement.Clone()); Toasts.Success("数据导入完成"); await LoadAsync(); }
+        catch (Exception ex) when (ex is ApiException or JsonException or IOException) { error = ex.Message; }
+    }
+    private async Task RunSensitiveAsync(Func<Task> action)
+    {
+        try { await action(); }
+        catch (ApiException ex) when (string.Equals(ex.Code, "STEP_UP_REQUIRED", StringComparison.OrdinalIgnoreCase))
+        {
+            var code = await JS.InvokeAsync<string?>("prompt", "请输入管理员 TOTP 验证码以继续敏感操作"); if (string.IsNullOrWhiteSpace(code)) return;
+            try { await Api.VerifyTotpStepUpAsync(code); await action(); } catch (ApiException retry) { error = retry.Message; }
+        }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private void OpenCrsSync() { toolsMenuOpen = false; crsForm = new CrsSyncInput(); crsResultJson = null; crsPreviewReady = false; crsOpen = true; }
+    private void CloseCrsSync() { crsOpen = false; crsResultJson = null; }
+    private async Task PreviewCrsAsync() { crsBusy = true; try { var result = await Api.PreviewAccountsFromCrsAsync(crsForm); crsResultJson = JsonSerializer.Serialize(result, PrettyJson); crsPreviewReady = true; } catch (ApiException ex) { crsResultJson = JsonSerializer.Serialize(new { error = ex.Message }, PrettyJson); crsPreviewReady = false; } finally { crsBusy = false; } }
+    private async Task SyncCrsAsync() { crsBusy = true; try { var result = await Api.SyncAccountsFromCrsAsync(crsForm); crsResultJson = JsonSerializer.Serialize(result, PrettyJson); Toasts.Success("CRS 同步完成"); await LoadAsync(); } catch (ApiException ex) { crsResultJson = JsonSerializer.Serialize(new { error = ex.Message }, PrettyJson); } finally { crsBusy = false; } }
+
+    private static readonly HashSet<string> AllowedSortKeys = new(StringComparer.OrdinalIgnoreCase) { "id", "name", "status", "schedulable", "priority", "rate_multiplier", "upstream_billing_rate", "last_used_at", "created_at", "expires_at" };
+    private static string PlatformLabel(string value) => value.ToLowerInvariant() switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", _ => value };
+    private static string AccountPlatformLabel(AccountDto row) => IsCopilot(row) ? "GitHub Copilot" : PlatformLabel(row.Platform);
+    private static string OAuthProfile(AccountDto row) => ReadJsonString(row.Credentials, "oauth_profile") ?? ReadJsonString(row.Extra, "oauth_profile") ?? string.Empty;
+    private static bool IsCopilot(AccountDto row) => string.Equals(OAuthProfile(row), "github_copilot", StringComparison.OrdinalIgnoreCase);
+    private static string AccountTypeLabel(AccountDto row) => TypeLabel(row.Type);
+    private static bool CanRefreshToken(AccountDto row) => row.ParentAccountId is null && row.Type is "oauth" or "setup-token";
+    private static string AccountBaseUrl(AccountDto row)
+    {
+        var configured = ReadCredential(row, "base_url");
+        if (!string.IsNullOrWhiteSpace(configured)) return configured;
+        if (IsCopilot(row)) return "https://api.githubcopilot.com";
+        return row.Platform.ToLowerInvariant() switch
+        {
+            "openai" when string.Equals(OAuthProfile(row), "codex_cli", StringComparison.OrdinalIgnoreCase) => "https://chatgpt.com",
+            "openai" => "https://api.openai.com",
+            "anthropic" => "https://api.anthropic.com",
+            "gemini" => "https://generativelanguage.googleapis.com",
+            "grok" => "https://api.x.ai",
+            _ => "官方端点"
+        };
+    }
+    private static string AuthenticationLabel(AccountDto row)
+    {
+        var profile = OAuthProfile(row).ToLowerInvariant();
+        if (profile == "github_copilot") return "GitHub Device OAuth";
+        if (profile == "codex_cli") return "Codex CLI OAuth";
+        if (profile.Contains("claude", StringComparison.Ordinal)) return "Claude Code OAuth";
+        return row.Type.ToLowerInvariant() switch
+        {
+            "oauth" => "官方 OAuth",
+            "setup-token" => "Setup Token",
+            "apikey" => "API Key",
+            "upstream" => "旧版 Upstream",
+            "bedrock" => "AWS 凭据",
+            "service_account" => "Service Account",
+            _ => TypeLabel(row.Type)
+        };
+    }
+    private static bool CredentialConfigured(AccountDto row) => row.HasApiKey || row.CredentialsStatus?.Values.Any(value => value) == true;
+    private static string TypeLabel(string value) => value.ToLowerInvariant() switch { "oauth" => "OAuth", "setup-token" => "Setup Token", "apikey" => "API Key", "upstream" => "旧版 Upstream", "bedrock" => "AWS Bedrock", "service_account" => "Service Account", _ => value };
+    private static string StatusLabel(AccountDto row) => row.TempUnschedulableUntil > DateTimeOffset.UtcNow ? "临时不可调度" : row.Status.ToLowerInvariant() switch { "active" => "正常", "inactive" => "未启用", "error" => "错误", "rate_limited" => "速率限制", "temp_unschedulable" => "临时不可调度", "unschedulable" => "不可调度", _ => row.Status };
+    private static string StatusClass(AccountDto row) => row.TempUnschedulableUntil > DateTimeOffset.UtcNow ? "warning" : row.Status.ToLowerInvariant() switch { "active" => "success", "error" => "danger", "rate_limited" or "temp_unschedulable" => "warning", _ => "neutral" };
+    private static string StatusTitle(AccountDto row) => string.IsNullOrWhiteSpace(row.ErrorMessage) ? (string.IsNullOrWhiteSpace(row.TempUnschedulableReason) ? StatusLabel(row) : row.TempUnschedulableReason) : row.ErrorMessage;
+    private static string AccountEmail(AccountDto row) { if (!string.IsNullOrWhiteSpace(row.ParentEmail)) return row.ParentEmail; return ReadJsonString(row.Credentials, "email") ?? ReadJsonString(row.Credentials, "user_email") ?? string.Empty; }
+    private static string ReadCredential(AccountDto row, string key) => ReadJsonString(row.Credentials, key) ?? string.Empty;
+    private static bool ReadExtraBool(AccountDto row, string key) => row.Extra is not null && row.Extra.TryGetValue(key, out var value) && value.ValueKind is JsonValueKind.True;
+    private static string ReadExtraString(AccountDto row, string key) => ReadJsonString(row.Extra, key) ?? string.Empty;
+    private static string? ReadJsonString(Dictionary<string, JsonElement>? source, string key) => source is not null && source.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    private static bool HasQuota(AccountDto row) => row.QuotaLimit is > 0 || row.QuotaDailyLimit is > 0 || row.QuotaWeeklyLimit is > 0;
+    private static MarkupString UsageWindow(string label, double? used, double? limit) { if (limit is not > 0) return new MarkupString(string.Empty); var percent = Math.Clamp((used ?? 0) / limit.Value * 100, 0, 100); return new MarkupString($"<span><small>{label}</small><b>{used.GetValueOrDefault():0.##}/{limit.Value:0.##}</b><i><em style='width:{percent:0.#}%'></em></i></span>"); }
+    private static string SchedulerScore(AccountDto row) { var score = row.SchedulerScores.FirstOrDefault() ?? row.SchedulerScore; if (score is null) return "-"; return score.StickyScoreInfinity ? $"{score.BaseScore:0.######} / +∞" : $"{score.BaseScore:0.######} / {score.StickyScore:0.######}"; }
+    private static string UpstreamRate(AccountDto row) { if (row.Extra is null || !row.Extra.TryGetValue("upstream_billing_rate", out var value) || value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number)) return "-"; return $"{number:0.###}x"; }
+    private static string RelativeTime(DateTimeOffset? value) { if (!value.HasValue) return "-"; var span = DateTimeOffset.UtcNow - value.Value; if (span.TotalMinutes < 1) return "刚刚"; if (span.TotalHours < 1) return $"{(int)span.TotalMinutes} 分钟前"; if (span.TotalDays < 1) return $"{(int)span.TotalHours} 小时前"; return span.TotalDays < 30 ? $"{(int)span.TotalDays} 天前" : value.Value.ToLocalTime().ToString("yyyy-MM-dd"); }
+    private static string FormatDate(DateTimeOffset value) => value == default ? "-" : value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+    private static DateTimeOffset FromUnix(long value) => value > 10_000_000_000 ? DateTimeOffset.FromUnixTimeMilliseconds(value) : DateTimeOffset.FromUnixTimeSeconds(value);
+    private static string FormatExpiry(long? value) => value.HasValue ? FromUnix(value.Value).ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "永不过期";
+    private static bool IsExpired(long? value) => value.HasValue && FromUnix(value.Value) <= DateTimeOffset.UtcNow;
+
+    public async ValueTask DisposeAsync()
+    {
+        searchCancellation?.Cancel(); searchCancellation?.Dispose(); disposeCancellation.Cancel();
+        if (autoRefreshTask is not null) { try { await autoRefreshTask; } catch (OperationCanceledException) { } }
+        disposeCancellation.Dispose();
+    }
+
+    private sealed class AutoRefreshPreference { public bool Enabled { get; set; } public int IntervalSeconds { get; set; } = 30; }
+    private sealed class AccountSortPreference { public string Key { get; set; } = "name"; public string Order { get; set; } = "asc"; }
+}

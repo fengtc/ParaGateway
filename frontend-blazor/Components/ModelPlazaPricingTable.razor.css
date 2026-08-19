@@ -1,0 +1,273 @@
+.plaza-pricing-table {
+    --paid-title: color-mix(in srgb, var(--plaza-accent) 86%, #111827);
+    --paid-bg: color-mix(in srgb, var(--plaza-accent) 7%, transparent);
+    --paid-hover: color-mix(in srgb, var(--plaza-accent) 13%, transparent);
+    overflow-x: auto;
+}
+
+.plaza-pricing-table table {
+    width: 100%;
+    min-width: 860px;
+    table-layout: fixed;
+    border-collapse: collapse;
+    color: var(--ink);
+    font-size: .83rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.model-column { width: 22%; }
+.price-column { width: 10%; }
+.cache-column { width: 14%; }
+.rate-column { width: 10%; }
+
+th,
+td {
+    vertical-align: middle;
+}
+
+thead th {
+    color: var(--muted);
+    font-size: .7rem;
+    font-weight: 650;
+    letter-spacing: .055em;
+    text-transform: uppercase;
+}
+
+.pricing-heading-row th {
+    padding-top: 10px;
+}
+
+.pricing-heading-row span,
+.pricing-heading-row small {
+    display: inline-block;
+}
+
+.pricing-heading-row small {
+    margin-left: 5px;
+    font-size: .68rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.model-heading {
+    padding: 10px 16px 10px 20px;
+    border-right: 1px solid var(--line);
+    text-align: left;
+}
+
+.paid-heading {
+    color: var(--paid-title);
+    background: var(--paid-bg);
+    text-align: center;
+}
+
+.paid-heading::after,
+.official-heading::after {
+    display: block;
+    height: 1px;
+    margin-top: 8px;
+    background: color-mix(in srgb, var(--paid-title) 25%, transparent);
+    content: "";
+}
+
+.official-heading {
+    border-left: 1px solid var(--line);
+    color: color-mix(in srgb, var(--muted) 76%, transparent);
+    text-align: center;
+}
+
+.official-heading::after {
+    background: var(--line);
+}
+
+.rate-heading {
+    padding: 10px 20px 10px 12px;
+    border-left: 1px solid var(--line);
+    text-align: right;
+}
+
+.pricing-subheading-row {
+    border-bottom: 1px solid var(--line);
+}
+
+.pricing-subheading-row th {
+    padding: 7px 12px;
+    text-align: left;
+}
+
+.paid-cell {
+    background: var(--paid-bg);
+}
+
+.official-first {
+    border-left: 1px solid var(--line);
+}
+
+tbody tr {
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+    transition: background-color 140ms ease;
+}
+
+tbody tr:last-child {
+    border-bottom: 0;
+}
+
+tbody tr:hover {
+    background: var(--surface-hover);
+}
+
+tbody tr:hover .paid-cell {
+    background: var(--paid-hover);
+}
+
+tbody td {
+    padding: 10px 12px;
+}
+
+.model-cell {
+    padding-left: 20px;
+    padding-right: 16px;
+    border-right: 1px solid var(--line);
+}
+
+.model-identity {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.model-identity strong {
+    overflow-wrap: anywhere;
+    font-weight: 650;
+}
+
+.model-platform,
+.billing-mode {
+    display: inline-flex;
+    align-items: center;
+    min-height: 19px;
+    padding: 1px 6px;
+    border-radius: 5px;
+    background: var(--surface-soft);
+    color: var(--muted);
+    font-size: .64rem;
+    font-weight: 650;
+}
+
+.model-platform.anthropic { color: #b45309; background: #fff7ed; }
+.model-platform.openai { color: #047857; background: #ecfdf5; }
+.model-platform.gemini { color: #1d4ed8; background: #eff6ff; }
+.model-platform.antigravity { color: #6d28d9; background: #f5f3ff; }
+.model-platform.grok { color: #334155; background: #f1f5f9; }
+.model-platform.composite { color: #0e7490; background: #ecfeff; }
+
+.numeric-cell,
+.cache-cell,
+.request-price-cell,
+.rate-cell {
+    font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
+.numeric-cell {
+    font-size: .76rem;
+    font-weight: 650;
+}
+
+.tier-price,
+.cache-cell > div {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+    line-height: 1.7;
+}
+
+.tier-price small,
+.cache-cell small {
+    color: var(--muted);
+    font-family: Inter, "Segoe UI", sans-serif;
+    font-size: .66rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.official-cell,
+.official-first {
+    color: var(--muted);
+    font-size: .73rem;
+}
+
+.one-hour {
+    color: var(--muted);
+    font-family: Inter, "Segoe UI", sans-serif;
+    font-size: .64rem;
+    white-space: nowrap;
+}
+
+.request-price-cell strong {
+    font-size: .78rem;
+}
+
+.request-price-cell em,
+.request-tiers em {
+    margin-left: 4px;
+    color: var(--muted);
+    font-family: Inter, "Segoe UI", sans-serif;
+    font-size: .68rem;
+    font-style: normal;
+}
+
+.request-tiers {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.request-tiers > span {
+    display: inline-flex;
+    align-items: baseline;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--ink) 6%, transparent);
+    font-size: .74rem;
+}
+
+.request-tiers small {
+    margin-right: 5px;
+    color: var(--muted);
+    font-family: Inter, "Segoe UI", sans-serif;
+    font-size: .65rem;
+}
+
+.empty-price {
+    color: var(--muted);
+}
+
+.rate-cell {
+    padding-right: 20px;
+    border-left: 1px solid var(--line);
+    text-align: right;
+    white-space: nowrap;
+}
+
+.rate-cell s {
+    margin-right: 5px;
+    color: var(--muted);
+}
+
+.rate-cell strong {
+    font-size: .75rem;
+}
+
+.rate-cell .custom-rate {
+    color: var(--primary);
+}
+
+@media (max-width: 900px) {
+    .plaza-pricing-table table {
+        min-width: 800px;
+    }
+}

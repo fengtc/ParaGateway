@@ -1,0 +1,140 @@
+.supported-model-host {
+    position: relative;
+    display: inline-flex;
+    max-width: 100%;
+}
+
+.supported-model-chip {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    gap: .3rem;
+    padding: .24rem .48rem;
+    color: #40514a;
+    font-size: .72rem;
+    font-weight: 650;
+    line-height: 1.25;
+    background: #f4f7f5;
+    border: 1px solid #dae2de;
+    border-radius: .36rem;
+}
+
+.supported-model-chip > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.supported-model-chip:hover,
+.supported-model-chip:focus-visible {
+    background: #edf5f1;
+    border-color: #bcd3c9;
+    outline: none;
+}
+
+.platform-anthropic .supported-model-chip { color: #8a521f; background: #fff8ef; border-color: #efcfac; }
+.platform-openai .supported-model-chip { color: #17634a; background: #eef9f4; border-color: #b9ddcf; }
+.platform-gemini .supported-model-chip { color: #245d9a; background: #f0f7ff; border-color: #bdd6f0; }
+.platform-antigravity .supported-model-chip { color: #74439a; background: #faf4ff; border-color: #dcc4ec; }
+.platform-grok .supported-model-chip { color: #42484a; background: #f4f5f5; border-color: #d1d5d6; }
+.platform-composite .supported-model-chip { color: #16697a; background: #effbfc; border-color: #b8dde3; }
+
+.supported-model-popover {
+    position: absolute;
+    right: 0;
+    top: calc(100% + .45rem);
+    z-index: 80;
+    display: none;
+    width: min(21rem, calc(100vw - 2.5rem));
+    overflow: hidden;
+    color: var(--ink);
+    text-align: left;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: .55rem;
+    box-shadow: var(--popover-shadow);
+    pointer-events: none;
+}
+
+.supported-model-host:hover .supported-model-popover,
+.supported-model-host:focus-within .supported-model-popover {
+    display: block;
+}
+
+.pricing-popover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .62rem .75rem;
+    background: var(--surface-soft);
+    border-bottom: 1px solid var(--line);
+}
+
+.pricing-popover-header strong {
+    overflow: hidden;
+    font-size: .78rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pricing-popover-header > span {
+    flex: 0 0 auto;
+    padding: .1rem .35rem;
+    color: var(--muted);
+    font-size: .61rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    background: color-mix(in srgb, var(--surface) 80%, transparent);
+    border-radius: .24rem;
+}
+
+.pricing-popover-body {
+    display: grid;
+    gap: .42rem;
+    padding: .72rem .78rem;
+}
+
+.pricing-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    color: var(--muted);
+    font-size: .71rem;
+}
+
+.pricing-row strong {
+    color: var(--ink);
+    font-size: .71rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.pricing-row small {
+    color: var(--muted);
+    font-size: .62rem;
+    font-weight: 500;
+}
+
+.pricing-empty {
+    color: var(--muted);
+    font-size: .73rem;
+}
+
+.pricing-intervals {
+    display: grid;
+    gap: .35rem;
+    margin-top: .15rem;
+    padding-top: .55rem;
+    border-top: 1px solid var(--line);
+}
+
+.pricing-intervals > strong {
+    color: var(--muted);
+    font-size: .69rem;
+}
+
+.interval-row {
+    font-size: .67rem;
+}

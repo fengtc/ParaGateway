@@ -1,0 +1,24 @@
+.metric-toggle {
+    display: inline-flex;
+    padding: 2px;
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+}
+
+.metric-toggle button {
+    min-width: 48px;
+    padding: 4px 8px;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    font-size: .68rem;
+    font-weight: 650;
+}
+
+.metric-toggle button.active {
+    color: #087f5b;
+    background: var(--surface);
+    box-shadow: 0 1px 3px rgba(20, 36, 29, .08);
+}

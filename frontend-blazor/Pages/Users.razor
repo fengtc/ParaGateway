@@ -1,0 +1,1177 @@
+@page "/users"
+@page "/admin/users"
+@implements IDisposable
+@using System.ComponentModel.DataAnnotations
+@using System.Security.Cryptography
+@using System.Text.Json
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>用户管理 · ParaGateway</PageTitle>
+
+<section class="users-workspace">
+    <div class="users-toolbar">
+        <div class="users-toolbar-left">
+            <div class="search-box users-search">
+                <Icon Name="search" Size="17" />
+                <input value="@search" @oninput="SearchChangedAsync" placeholder="搜索用户" aria-label="搜索用户" />
+            </div>
+
+            @if (visibleFilters.Contains("role"))
+            {
+                <select class="compact-select" value="@roleFilter" @onchange="RoleFilterChangedAsync" aria-label="角色筛选">
+                    <option value="">全部角色</option>
+                    <option value="admin">管理员</option>
+                    <option value="user">普通用户</option>
+                </select>
+            }
+            @if (visibleFilters.Contains("status"))
+            {
+                <select class="compact-select" value="@statusFilter" @onchange="StatusFilterChangedAsync" aria-label="状态筛选">
+                    <option value="">全部状态</option>
+                    <option value="active">已启用</option>
+                    <option value="disabled">已禁用</option>
+                </select>
+            }
+            @if (visibleFilters.Contains("group"))
+            {
+                <input class="compact-filter-input group-filter" list="authorized-group-options" value="@groupFilter"
+                       @oninput="GroupFilterChangedAsync" placeholder="全部授权分组" aria-label="授权分组筛选" />
+                <datalist id="authorized-group-options">
+                    @foreach (var group in ActiveExclusiveGroups)
+                    {
+                        <option value="@group.Name">@group.Name</option>
+                    }
+                </datalist>
+            }
+            @if (visibleFilters.Contains("apiKeyGroup"))
+            {
+                <select class="compact-select group-filter" value="@(apiKeyGroupFilter?.ToString() ?? string.Empty)" @onchange="ApiKeyGroupFilterChangedAsync" aria-label="API Key 分组筛选">
+                    <option value="">全部 API Key 分组</option>
+                    @foreach (var group in allGroupsIncludingInactive)
+                    {
+                        <option value="@group.Id">@group.Name@(group.Status == "active" ? string.Empty : "（已停用）")</option>
+                    }
+                </select>
+            }
+            @foreach (var definition in EnabledAttributes.Where(x => visibleFilters.Contains($"attr_{x.Id}")))
+            {
+                @if (definition.Type is "select" or "multi_select")
+                {
+                    <select class="compact-select" value="@GetAttributeFilter(definition.Id)" @onchange="e => AttributeFilterChangedAsync(definition.Id, e)" aria-label="@definition.Name">
+                        <option value="">@definition.Name</option>
+                        @foreach (var option in definition.Options)
+                        {
+                            <option value="@option.Value">@option.Label</option>
+                        }
+                    </select>
+                }
+                else
+                {
+                    <input class="compact-filter-input" type="@(definition.Type == "number" ? "number" : definition.Type == "date" ? "date" : "text")"
+                           value="@GetAttributeFilter(definition.Id)" placeholder="@definition.Name"
+                           @onchange="e => AttributeFilterChangedAsync(definition.Id, e)" />
+                }
+            }
+        </div>
+
+        <div class="users-toolbar-actions">
+            <button type="button" class="button secondary icon-only" title="刷新" aria-label="刷新" disabled="@loading" @onclick="LoadAsync">
+                <Icon Name="refresh" Size="17" />
+            </button>
+
+            <div class="menu-anchor">
+                <button type="button" class="button secondary" aria-expanded="@showFilterMenu" @onclick="ToggleFilterMenu">
+                    <Icon Name="filter" Size="16" /> 筛选设置
+                </button>
+                @if (showFilterMenu)
+                {
+                    <div class="settings-menu filter-menu">
+                        @foreach (var filter in BuiltInFilters)
+                        {
+                            <button type="button" @onclick="() => ToggleFilterAsync(filter.Key)">
+                                <span>@filter.Label</span>
+                                @if (visibleFilters.Contains(filter.Key)) { <Icon Name="check" Size="15" /> }
+                            </button>
+                        }
+                        @if (EnabledAttributes.Count > 0)
+                        {
+                            <div class="menu-divider"></div>
+                            @foreach (var definition in EnabledAttributes)
+                            {
+                                <button type="button" @onclick='() => ToggleFilterAsync($"attr_{definition.Id}")'>
+                                    <span>@definition.Name</span>
+                                    @if (visibleFilters.Contains($"attr_{definition.Id}")) { <Icon Name="check" Size="15" /> }
+                                </button>
+                            }
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="menu-anchor">
+                <button type="button" class="button secondary" aria-expanded="@showColumnMenu" @onclick="ToggleColumnMenu">
+                    <Icon Name="columns" Size="16" /> 列设置
+                </button>
+                @if (showColumnMenu)
+                {
+                    <div class="settings-menu columns-menu">
+                        @foreach (var column in ToggleableColumns)
+                        {
+                            <button type="button" @onclick="() => ToggleColumnAsync(column.Key)">
+                                <span>@column.Label</span>
+                                @if (IsColumnVisible(column.Key)) { <Icon Name="check" Size="15" /> }
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+
+            <button type="button" class="button secondary" @onclick="OpenAttributesConfig">
+                <Icon Name="settings" Size="16" /> 属性配置
+            </button>
+
+            @if (selectedIds.Count > 0)
+            {
+                <button type="button" class="button secondary" @onclick="OpenBulkEdit">
+                    <Icon Name="users" Size="16" /> 批量编辑（@selectedIds.Count）
+                </button>
+            }
+
+            <button type="button" class="button primary" @onclick="OpenCreate">
+                <Icon Name="plus" Size="17" /> 创建用户
+            </button>
+        </div>
+    </div>
+
+    @if (loading)
+    {
+        <LoadingState Text="正在载入用户" />
+    }
+    else if (error is not null)
+    {
+        <ErrorState Message="@error" OnRetry="LoadAsync" />
+    }
+    else if (users.Count == 0)
+    {
+        <EmptyState Title="暂无用户" Description="调整筛选条件，或创建第一个用户。">
+            <Action><button type="button" class="button primary small" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> 创建用户</button></Action>
+        </EmptyState>
+    }
+    else
+    {
+        <div class="users-table-card">
+            <div class="users-table-scroll">
+                <table class="users-data-table">
+                    <thead>
+                        <tr>
+                            <th class="selection-column"><input type="checkbox" checked="@AllCurrentPageSelected" @onchange="ToggleAll" aria-label="选择本页用户" /></th>
+                            <th class="user-column"><button type="button" class="sort-header" @onclick="() => ChangeSortAsync(SortEmail)">用户 @SortIndicator(SortEmail)</button></th>
+                            @if (IsColumnVisible("id")) { <th><button type="button" class="sort-header" @onclick="() => ChangeSortAsync(SortId)">ID @SortIndicator(SortId)</button></th> }
+                            @if (IsColumnVisible("username")) { <th><button type="button" class="sort-header" @onclick="() => ChangeSortAsync(SortUsername)">用户名 @SortIndicator(SortUsername)</button></th> }
+                            @if (IsColumnVisible("notes")) { <th>备注</th> }
+                            @foreach (var definition in EnabledAttributes.Where(x => IsColumnVisible($"attr_{x.Id}"))) { <th>@definition.Name</th> }
+                            @if (IsColumnVisible("role")) { <th><button type="button" class="sort-header" @onclick="() => ChangeSortAsync(SortRole)">角色 @SortIndicator(SortRole)</button></th> }
+                            @if (IsColumnVisible("groups")) { <th>分组</th> }
+                            @if (IsColumnVisible("subscriptions")) { <th>订阅</th> }
+                            @if (IsColumnVisible("balance")) { <th><button type="button" class="sort-header" @onclick="() => ChangeSortAsync(SortBalance)">余额 @SortIndicator(SortBalance)</button></th> }
+                            @if (IsColumnVisible("balance_platform_quota")) { <th>平台限额</th> }
+                            @if (IsColumnVisible("usage")) { <th>@UsageSortHeader("usage", "用量")</th> }
+                            @if (IsColumnVisible("usage_anthropic")) { <th>@UsageSortHeader("usage_anthropic", "Anthropic 用量")</th> }
+                            @if (IsColumnVisible("usage_openai")) { <th>@UsageSortHeader("usage_openai", "OpenAI 用量")</th> }
+                            @if (IsColumnVisible("usage_gemini")) { <th>@UsageSortHeader("usage_gemini", "Gemini 用量")</th> }
+                            @if (IsColumnVisible("usage_antigravity")) { <th>@UsageSortHeader("usage_antigravity", "Antigravity 用量")</th> }
+                            @if (IsColumnVisible("concurrency")) { <th><button type="button" class="sort-header" @onclick="() => ChangeSortAsync(SortConcurrency)">并发 @SortIndicator(SortConcurrency)</button></th> }
+                            @if (IsColumnVisible("status")) { <th><button type="button" class="sort-header" @onclick="() => ChangeSortAsync(SortStatus)">状态 @SortIndicator(SortStatus)</button></th> }
+                            @if (IsColumnVisible("last_active_at")) { <th><button type="button" class="sort-header" @onclick="() => ChangeSortAsync(SortLastActive)">最后活跃 @SortIndicator(SortLastActive)</button></th> }
+                            @if (IsColumnVisible("last_used_at")) { <th><button type="button" class="sort-header" @onclick="() => ChangeSortAsync(SortLastUsed)">最后使用 @SortIndicator(SortLastUsed)</button></th> }
+                            @if (IsColumnVisible("created_at")) { <th><button type="button" class="sort-header" @onclick="() => ChangeSortAsync(SortCreated)">创建时间 @SortIndicator(SortCreated)</button></th> }
+                            <th class="actions-column">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var user in DisplayedUsers)
+                        {
+                            <tr @key="user.Id" class="@(selectedIds.Contains(user.Id) ? "selected-row" : null)">
+                                <td class="selection-column"><input type="checkbox" checked="@selectedIds.Contains(user.Id)" @onchange="e => ToggleSelected(user.Id, e)" aria-label="选择 @user.Email" /></td>
+                                <td class="user-column">
+                                    <div class="user-identity-cell"><span class="user-avatar">@Initial(user.Email)</span><span><strong>@user.Email</strong>@if (!string.IsNullOrWhiteSpace(user.Username)) { <small>@user.Username</small> }</span></div>
+                                </td>
+                                @if (IsColumnVisible("id")) { <td class="numeric-cell">@user.Id</td> }
+                                @if (IsColumnVisible("username")) { <td>@(string.IsNullOrWhiteSpace(user.Username) ? "-" : user.Username)</td> }
+                                @if (IsColumnVisible("notes")) { <td class="truncate-cell" title="@user.Notes">@(string.IsNullOrWhiteSpace(user.Notes) ? "-" : user.Notes)</td> }
+                                @foreach (var definition in EnabledAttributes.Where(x => IsColumnVisible($"attr_{x.Id}"))) { <td class="truncate-cell">@FormatAttributeValue(user.Id, definition)</td> }
+                                @if (IsColumnVisible("role")) { <td><span class="status-badge @(user.Role == "admin" ? "purple" : "neutral")">@(user.Role == "admin" ? "管理员" : "普通用户")</span></td> }
+                                @if (IsColumnVisible("groups"))
+                                {
+                                    var groupSummary = GetUserGroups(user);
+                                    var exclusiveGroups = GetExclusiveUserGroups(user);
+                                    <td>
+                                        <div class="group-cell" title="@groupSummary.Title">
+                                            @if (exclusiveGroups.Count > 0)
+                                            {
+                                                <div class="group-replace-anchor">
+                                                    <button type="button" class="link-cell group-summary exclusive" aria-expanded="@(expandedGroupUserId == user.Id)" @onclick="() => ToggleGroupReplaceMenu(user.Id)">
+                                                        <Icon Name="shield" Size="14" /> @groupSummary.ExclusiveCount 专属
+                                                    </button>
+                                                    @if (expandedGroupUserId == user.Id)
+                                                    {
+                                                        <div class="group-quick-menu">
+                                                            <span>点击要替换的分组</span>
+                                                            @foreach (var group in exclusiveGroups)
+                                                            {
+                                                                <button type="button" @onclick="() => OpenGroupReplace(user, group)"><Icon Name="swap" Size="14" />@group.Name</button>
+                                                            }
+                                                        </div>
+                                                    }
+                                                </div>
+                                            }
+                                            @if (groupSummary.PublicCount > 0)
+                                            {
+                                                <span class="group-summary public"><Icon Name="globe" Size="14" /> @groupSummary.PublicCount 公开</span>
+                                            }
+                                            @if (groupSummary.ExclusiveCount == 0 && groupSummary.PublicCount == 0)
+                                            {
+                                                <span class="muted-text">-</span>
+                                            }
+                                        </div>
+                                    </td>
+                                }
+                                @if (IsColumnVisible("subscriptions"))
+                                {
+                                    <td><div class="chip-list">@if (user.Subscriptions.Count == 0) { <span class="muted-text">无订阅</span> } else { @foreach (var sub in user.Subscriptions) { <span class="mini-chip" title="@(sub.ExpiresAt.HasValue ? $"到期：{FormatDateTime(sub.ExpiresAt)}" : "长期有效")">@(sub.Group?.Name ?? $"分组 {sub.GroupId}")</span> } }</div></td>
+                                }
+                                @if (IsColumnVisible("balance"))
+                                {
+                                    <td><div class="balance-cell"><button type="button" class="link-cell money" title="查看余额历史" @onclick="() => OpenHistoryAsync(user)">@Money(user.Balance)</button><button type="button" class="inline-action success" @onclick='() => OpenBalance(user, "add")'>充值</button></div></td>
+                                }
+                                @if (IsColumnVisible("balance_platform_quota"))
+                                {
+                                    var configuredQuotas = GetConfiguredQuotaRows(user.Id);
+                                    <td>
+                                        <button type="button" class="link-cell quota-cell-button" title="仅展示已设限额的平台" @onclick="() => OpenQuotaAsync(user)">
+                                            @if (!platformQuotaStats.ContainsKey(user.Id))
+                                            {
+                                                <span class="muted-text">…</span>
+                                            }
+                                            else if (configuredQuotas.Count == 0)
+                                            {
+                                                <span class="muted-text">未配置</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="quota-cell-lines">
+                                                    @foreach (var quota in configuredQuotas)
+                                                    {
+                                                        <span class="quota-cell-line">
+                                                            <strong>@quota.Platform</strong>
+                                                            <span>日 <b>@FormatQuotaNumber(quota.DailyUsageUsd)/@FormatQuotaLimit(quota.DailyLimitUsd)</b></span>
+                                                            <span>周 <b>@FormatQuotaNumber(quota.WeeklyUsageUsd)/@FormatQuotaLimit(quota.WeeklyLimitUsd)</b></span>
+                                                            <span>月 <b>@FormatQuotaNumber(quota.MonthlyUsageUsd)/@FormatQuotaLimit(quota.MonthlyLimitUsd)</b></span>
+                                                        </span>
+                                                    }
+                                                </span>
+                                            }
+                                        </button>
+                                    </td>
+                                }
+                                @if (IsColumnVisible("usage")) { <td>@UsageCell(user.Id, null)</td> }
+                                @if (IsColumnVisible("usage_anthropic")) { <td>@UsageCell(user.Id, "anthropic")</td> }
+                                @if (IsColumnVisible("usage_openai")) { <td>@UsageCell(user.Id, "openai")</td> }
+                                @if (IsColumnVisible("usage_gemini")) { <td>@UsageCell(user.Id, "gemini")</td> }
+                                @if (IsColumnVisible("usage_antigravity")) { <td>@UsageCell(user.Id, "antigravity")</td> }
+                                @if (IsColumnVisible("concurrency"))
+                                {
+                                    <td><div class="concurrency-cell"><span>@user.CurrentConcurrency / @user.Concurrency</span><span class="usage-bar"><i style="width:@ConcurrencyPercent(user)%"></i></span><small>@(user.RpmLimit == 0 ? "RPM 不限" : $"{user.RpmLimit} RPM")</small></div></td>
+                                }
+                                @if (IsColumnVisible("status")) { <td><span class="state-dot @(user.Status == "active" ? "active" : "disabled")"></span>@(user.Status == "active" ? "已启用" : "已禁用")</td> }
+                                @if (IsColumnVisible("last_active_at")) { <td class="date-cell">@FormatDateTime(user.LastActiveAt)</td> }
+                                @if (IsColumnVisible("last_used_at")) { <td class="date-cell">@FormatDateTime(user.LastUsedAt)</td> }
+                                @if (IsColumnVisible("created_at")) { <td class="date-cell">@FormatDateTime(user.CreatedAt)</td> }
+                                <td class="actions-cell">
+                                    <div class="row-actions">
+                                        <button type="button" class="text-action" title="编辑" @onclick="() => OpenEditAsync(user)"><Icon Name="pencil" Size="15" /><span>编辑</span></button>
+                                        @if (user.Role != "admin")
+                                        {
+                                            <button type="button" class="text-action @(user.Status == "active" ? "warning" : "success")" title="@(user.Status == "active" ? "禁用" : "启用")" @onclick="() => ToggleStatusAsync(user)"><Icon Name="@(user.Status == "active" ? "ban" : "circle-check")" Size="15" /><span>@(user.Status == "active" ? "禁用" : "启用")</span></button>
+                                        }
+                                        <div class="row-menu-anchor">
+                                            <button type="button" class="text-action" title="更多" aria-expanded="@(activeActionId == user.Id)" @onclick="() => ToggleActionMenu(user.Id)"><Icon Name="more" Size="15" /><span>更多</span></button>
+                                            @if (activeActionId == user.Id)
+                                            {
+                                                <div class="row-action-menu">
+                                                    <button type="button" @onclick="() => OpenKeysAsync(user)"><Icon Name="key" Size="15" />API 密钥</button>
+                                                    <button type="button" @onclick="() => OpenGroupsAsync(user)"><Icon Name="users" Size="15" />授权分组</button>
+                                                    <div class="menu-divider"></div>
+                                                    <button type="button" @onclick='() => OpenBalance(user, "add")'><Icon Name="plus" Size="15" />充值</button>
+                                                    <button type="button" @onclick='() => OpenBalance(user, "subtract")'><Icon Name="minus" Size="15" />扣款</button>
+                                                    <button type="button" @onclick="() => OpenQuotaAsync(user)"><Icon Name="activity" Size="15" />平台限额</button>
+                                                    <button type="button" @onclick="() => OpenHistoryAsync(user)"><Icon Name="dollar" Size="15" />余额历史</button>
+                                                    @if (user.Role != "admin")
+                                                    {
+                                                        <div class="menu-divider"></div>
+                                                        <button type="button" class="danger-text" @onclick="() => DeleteAsync(user)"><Icon Name="trash" Size="15" />删除</button>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="table-pagination">
+                <span>共 @total 条</span>
+                <div class="pagination-controls">
+                    <select value="@pageSize" @onchange="PageSizeChangedAsync" aria-label="每页条数">
+                        <option value="10">10 条/页</option>
+                        <option value="20">20 条/页</option>
+                        <option value="50">50 条/页</option>
+                        <option value="100">100 条/页</option>
+                    </select>
+                    <button type="button" class="icon-button" disabled="@(page <= 1)" title="上一页" @onclick="PreviousPageAsync"><Icon Name="chevron-left" Size="16" /></button>
+                    <span>@(page) / @Math.Max(1, pages)</span>
+                    <button type="button" class="icon-button" disabled="@(page >= pages)" title="下一页" @onclick="NextPageAsync"><Icon Name="chevron-right" Size="16" /></button>
+                </div>
+            </div>
+        </div>
+    }
+</section>
+
+<AppModal Open="editorOpen" Title="@(editingUser is null ? "创建用户" : "编辑用户")" MaxWidth="620px" OnClose="CloseEditor">
+    <ChildContent>
+        <EditForm id="user-editor" Model="editor" OnValidSubmit="SaveUserAsync" FormName="user-editor">
+            <DataAnnotationsValidator />
+            @if (modalError is not null) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@modalError</span></div> }
+            <div class="form-grid user-form-grid">
+                <div class="form-field full"><label for="user-email">邮箱</label><InputText id="user-email" @bind-Value="editor.Email" type="email" /><ValidationMessage For="() => editor.Email" /></div>
+                <div class="form-field full">
+                    <label for="user-password">@(editingUser is null ? "密码" : "新密码（留空不修改）")</label>
+                    <div class="input-action-row"><InputText id="user-password" @bind-Value="editor.Password" /><button type="button" class="button secondary icon-only" title="生成随机密码" @onclick="GeneratePassword"><Icon Name="refresh" Size="16" /></button></div>
+                    <small class="field-hint">密码至少 6 个字符；生成后可直接复制保存。</small>
+                </div>
+                <div class="form-field full"><label for="user-name">用户名</label><InputText id="user-name" @bind-Value="editor.Username" /></div>
+                <div class="form-field"><label for="user-role">角色</label><InputSelect id="user-role" @bind-Value="editor.Role" disabled="@IsEditingSelf"><option value="user">普通用户</option><option value="admin">管理员</option></InputSelect></div>
+                @if (editingUser is null)
+                {
+                    <div class="form-field"><label for="user-balance">初始余额（USD）</label><InputNumber id="user-balance" @bind-Value="editor.Balance" step="any" /></div>
+                }
+                else
+                {
+                    <div class="form-field full"><label for="user-notes">备注</label><InputTextArea id="user-notes" @bind-Value="editor.Notes" rows="3" /></div>
+                }
+                <div class="form-field"><label for="user-concurrency">并发上限</label><InputNumber id="user-concurrency" @bind-Value="editor.Concurrency" min="0" /></div>
+                <div class="form-field"><label for="user-rpm">RPM 上限</label><InputNumber id="user-rpm" @bind-Value="editor.RpmLimit" min="0" /><small class="field-hint">0 表示不限制</small></div>
+                @if (editingUser is not null && EnabledAttributes.Count > 0)
+                {
+                    <div class="form-subsection full"><strong>用户属性</strong><span>按已启用的属性定义维护该用户信息。</span></div>
+                    @foreach (var definition in EnabledAttributes)
+                    {
+                        <div class="form-field @(definition.Type == "textarea" ? "full" : null)">
+                            <label>@definition.Name</label>
+                            @if (definition.Type is "select" or "multi_select")
+                            {
+                                <select value="@GetEditorAttribute(definition.Id)" @onchange="e => SetEditorAttribute(definition.Id, e.Value?.ToString())"><option value="">请选择</option>@foreach (var option in definition.Options) { <option value="@option.Value">@option.Label</option> }</select>
+                            }
+                            else if (definition.Type == "textarea")
+                            {
+                                <textarea rows="3" value="@GetEditorAttribute(definition.Id)" @onchange="e => SetEditorAttribute(definition.Id, e.Value?.ToString())"></textarea>
+                            }
+                            else
+                            {
+                                <input type="@(definition.Type is "number" or "date" or "email" or "url" ? definition.Type : "text")" value="@GetEditorAttribute(definition.Id)" placeholder="@definition.Placeholder" @onchange="e => SetEditorAttribute(definition.Id, e.Value?.ToString())" />
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" disabled="@saving" @onclick="CloseEditor">取消</button><button type="submit" form="user-editor" class="button primary" disabled="@saving">@(saving ? "保存中…" : editingUser is null ? "创建" : "更新")</button></Footer>
+</AppModal>
+
+<AppModal Open="bulkOpen" Title="批量编辑用户限制" MaxWidth="520px" OnClose="CloseBulk">
+    <ChildContent>
+        <div class="bulk-form"><p>已选择 <strong>@selectedIds.Count</strong> 个用户。</p><label class="toggle-row"><InputCheckbox @bind-Value="bulkConcurrencyEnabled" /><span><strong>更新并发上限</strong><small>覆盖所选用户的当前配置</small></span></label>@if (bulkConcurrencyEnabled) { <div class="form-field"><label>并发上限</label><InputNumber @bind-Value="bulkConcurrency" min="0" /></div> }<label class="toggle-row"><InputCheckbox @bind-Value="bulkRpmEnabled" /><span><strong>更新 RPM 上限</strong><small>0 表示不限制</small></span></label>@if (bulkRpmEnabled) { <div class="form-field"><label>RPM 上限</label><InputNumber @bind-Value="bulkRpm" min="0" /></div> }@if (modalError is not null) { <div class="inline-alert danger">@modalError</div> }</div>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseBulk">取消</button><button type="button" class="button primary" disabled="@(saving || (!bulkConcurrencyEnabled && !bulkRpmEnabled))" @onclick="SaveBulkAsync">@(saving ? "应用中…" : "应用")</button></Footer>
+</AppModal>
+
+<AppModal Open="keysOpen" Title="用户 API 密钥" MaxWidth="780px" OnClose="CloseKeys">
+    <ChildContent>
+        @if (actionUser is not null) { <div class="modal-user-summary"><span class="user-avatar">@Initial(actionUser.Email)</span><span><strong>@actionUser.Email</strong><small>@actionUser.Username</small></span></div> }
+        @if (actionLoading) { <LoadingState Text="正在载入 API 密钥" /> }
+        else if (userKeys.Count == 0) { <EmptyState Title="暂无 API 密钥" Description="该用户尚未创建 API 密钥。" /> }
+        else { <div class="stack-list key-stack">@foreach (var key in userKeys) { <div class="stack-row key-row"><div><strong>@key.Name</strong><span class="status-badge @(key.IsActive ? "success" : "danger")">@key.Status</span><small class="mono-text">@(string.IsNullOrWhiteSpace(key.Prefix) ? "-" : $"{key.Prefix}••••••••")</small></div><div class="key-meta"><label>所属分组<select value="@(key.GroupId?.ToString() ?? string.Empty)" disabled="@keyGroupUpdating.Contains(key.Id)" @onchange="e => ChangeKeyGroupAsync(key, e)"><option value="">不绑定</option>@foreach (var group in groups) { <option value="@group.Id">@group.Name</option> }</select></label><small>创建于 @FormatDateTime(key.CreatedAt)</small></div></div> }</div> }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseKeys">关闭</button></Footer>
+</AppModal>
+
+<AppModal Open="groupsOpen" Title="授权分组配置" MaxWidth="820px" OnClose="CloseGroups">
+    <ChildContent>
+        @if (actionUser is not null) { <div class="modal-user-summary"><span class="user-avatar">@Initial(actionUser.Email)</span><span><strong>@actionUser.Email</strong><small>配置专属分组访问权与用户专属倍率</small></span></div> }
+        <div class="group-access-list">@foreach (var row in groupAccessRows) { <div class="group-access-row @(row.Selected || !row.Group.IsExclusive ? "selected" : null)"><label class="group-access-main"><input type="checkbox" checked="@(row.Selected || !row.Group.IsExclusive)" disabled="@(!row.Group.IsExclusive)" @onchange="e => row.Selected = e.Value is true" /><span><strong>@row.Group.Name</strong><small>@row.Group.Platform · 默认 @row.Group.RateMultiplier.ToString("0.###")x · @(row.Group.IsExclusive ? "专属分组" : "公开分组")</small></span></label><label class="rate-input">专属倍率<input type="number" min="0.001" step="0.001" value="@row.CustomRate" placeholder='@row.Group.RateMultiplier.ToString("0.###")' @onchange="e => UpdateGroupRate(row, e)" /></label></div> }</div>
+        @if (modalError is not null) { <div class="inline-alert danger">@modalError</div> }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseGroups">取消</button><button type="button" class="button primary" disabled="@saving" @onclick="SaveGroupsAsync">@(saving ? "保存中…" : "保存配置")</button></Footer>
+</AppModal>
+
+<AppModal Open="groupReplaceOpen" Title="替换专属分组" MaxWidth="520px" OnClose="CloseGroupReplace">
+    <ChildContent>
+        @if (actionUser is not null && replaceOldGroup is not null)
+        {
+            <div class="replace-group-content">
+                <p>将用户 <strong>@actionUser.Email</strong> 的“@replaceOldGroup.Name”替换为另一个专属标准分组，并同步迁移该用户绑定到原分组的 API 密钥。</p>
+                <div class="replace-group-preview">
+                    <span><Icon Name="shield" Size="16" /> @replaceOldGroup.Name</span>
+                    <Icon Name="arrow-right" Size="16" />
+                    <strong>@(SelectedReplacementGroup?.Name ?? "请选择")</strong>
+                </div>
+                @if (ReplacementGroups.Count == 0)
+                {
+                    <EmptyState Title="没有其他可用分组" Description="请先创建并启用另一个专属标准分组。" />
+                }
+                else
+                {
+                    <div class="replacement-group-list">
+                        @foreach (var group in ReplacementGroups)
+                        {
+                            <label class="replacement-group-option @(replaceSelectedGroupId == group.Id ? "selected" : null)">
+                                <input type="radio" name="replacement-group" value="@group.Id" checked="@(replaceSelectedGroupId == group.Id)" @onchange="() => replaceSelectedGroupId = group.Id" />
+                                <span><strong>@group.Name</strong><small>@PlatformLabel(group.Platform) · @group.RateMultiplier.ToString("0.###")x</small></span>
+                            </label>
+                        }
+                    </div>
+                }
+                @if (modalError is not null) { <div class="inline-alert danger">@modalError</div> }
+            </div>
+        }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseGroupReplace">取消</button><button type="button" class="button primary" disabled="@(saving || replaceSelectedGroupId is null)" @onclick="SaveGroupReplaceAsync">@(saving ? "替换中…" : "确认替换")</button></Footer>
+</AppModal>
+
+<AppModal Open="balanceOpen" Title="@(balanceOperation == "add" ? "充值" : "扣款")" MaxWidth="480px" OnClose="CloseBalance">
+    <ChildContent>
+        @if (actionUser is not null)
+        {
+            <div class="modal-user-summary"><span class="user-avatar">@Initial(actionUser.Email)</span><span><strong>@actionUser.Email</strong><small>当前余额：@Money(actionUser.Balance)</small></span></div>
+            <div class="form-grid"><div class="form-field full"><label>金额（USD）</label><div class="input-action-row"><InputNumber @bind-Value="balanceAmount" min="0" step="any" />@if (balanceOperation == "subtract") { <button type="button" class="button secondary" @onclick="FillAllBalance">全部扣除</button> }</div></div><div class="form-field full"><label>备注</label><InputTextArea @bind-Value="balanceNotes" rows="3" /></div>@if (balanceAmount > 0) { <div class="balance-preview full"><span>操作后余额</span><strong>@Money(PreviewBalance)</strong></div> }</div>
+        }
+        @if (modalError is not null) { <div class="inline-alert danger">@modalError</div> }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseBalance">取消</button><button type="button" class="button @(balanceOperation == "add" ? "primary" : "danger")" disabled="@(saving || balanceAmount <= 0)" @onclick="SaveBalanceAsync">@(saving ? "处理中…" : "确认")</button></Footer>
+</AppModal>
+
+<AppModal Open="historyOpen" Title="余额与权益历史" MaxWidth="820px" OnClose="CloseHistory">
+    <ChildContent>
+        @if (actionUser is not null) { <div class="history-user-summary"><div class="modal-user-summary"><span class="user-avatar">@Initial(actionUser.Email)</span><span><strong>@actionUser.Email</strong><small>创建于 @FormatDateTime(actionUser.CreatedAt)</small></span></div><div><small>当前余额</small><strong>@Money(actionUser.Balance)</strong></div></div> }
+        <div class="history-toolbar"><select value="@historyType" @onchange="HistoryTypeChangedAsync"><option value="">全部类型</option><option value="balance">兑换充值</option><option value="affiliate_balance">邀请返利</option><option value="admin_balance">管理员调整余额</option><option value="concurrency">兑换并发</option><option value="admin_concurrency">管理员调整并发</option><option value="subscription">订阅分配</option></select><button type="button" class="button secondary small" @onclick='() => OpenBalanceFromHistory("add")'><Icon Name="plus" Size="14" />充值</button><button type="button" class="button secondary small" @onclick='() => OpenBalanceFromHistory("subtract")'><Icon Name="minus" Size="14" />扣款</button><span>累计充值 <strong>@Money(balanceHistory.TotalRecharged)</strong></span></div>
+        @if (actionLoading) { <LoadingState Text="正在载入历史" /> }
+        else if (balanceHistory.Items.Count == 0) { <EmptyState Title="暂无余额历史" Description="余额、并发或订阅发生变更后会显示在这里。" /> }
+        else { <div class="history-list">@foreach (var item in balanceHistory.Items) { <div class="history-row"><span class="history-icon @HistoryTone(item)"><Icon Name="@HistoryIcon(item)" Size="16" /></span><div><strong>@HistoryTitle(item)</strong>@if (!string.IsNullOrWhiteSpace(item.Notes)) { <small>@item.Notes</small> }<small>@FormatDateTime(item.UsedAt ?? item.CreatedAt)</small></div><strong class="history-value @HistoryTone(item)">@HistoryValue(item)</strong></div> }</div> }
+        @if (balanceHistory.Pages > 1) { <div class="modal-pagination"><button type="button" class="button secondary small" disabled="@(balanceHistory.Page <= 1)" @onclick="() => LoadHistoryAsync(balanceHistory.Page - 1)">上一页</button><span>@balanceHistory.Page / @balanceHistory.Pages</span><button type="button" class="button secondary small" disabled="@(balanceHistory.Page >= balanceHistory.Pages)" @onclick="() => LoadHistoryAsync(balanceHistory.Page + 1)">下一页</button></div> }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseHistory">关闭</button></Footer>
+</AppModal>
+
+<AppModal Open="quotaOpen" Title="平台限额" MaxWidth="920px" OnClose="CloseQuota">
+    <ChildContent>
+        @if (actionUser is not null)
+        {
+            @if (HasActiveSubscription(actionUser))
+            {
+                <div class="inline-alert warning quota-subscription-warning"><Icon Name="alert" Size="17" /><span>此用户有活跃订阅，平台限额仅在余额（标准）模式下生效，订阅模式请求不受此限额约束。</span></div>
+            }
+            <p class="quota-subtitle">为用户 <strong>@actionUser.Email</strong> 配置各上游平台的日 / 周 / 月用量上限</p>
+        }
+        @if (actionLoading)
+        {
+            <LoadingState Text="正在载入平台限额" />
+        }
+        else
+        {
+            <div class="quota-table-wrap">
+                <table class="quota-table">
+                    <thead><tr><th>平台</th><th>日 (USD)</th><th>周 (USD)</th><th>月 (USD, 30天滚动)</th><th>当前用量</th></tr></thead>
+                    <tbody>
+                        @foreach (var quota in quotaRows)
+                        {
+                            <tr>
+                                <td><strong class="mono-text">@quota.Platform</strong></td>
+                                <td><div class="quota-input-row"><InputNumber @bind-Value="quota.DailyLimitUsd" min="0" step="0.01" placeholder="不限制" /><button type="button" class="reset-link" title="重置该窗口" @onclick='() => ResetQuotaAsync(quota.Platform, "daily")'>↻</button></div></td>
+                                <td><div class="quota-input-row"><InputNumber @bind-Value="quota.WeeklyLimitUsd" min="0" step="0.01" placeholder="不限制" /><button type="button" class="reset-link" title="重置该窗口" @onclick='() => ResetQuotaAsync(quota.Platform, "weekly")'>↻</button></div></td>
+                                <td><div class="quota-input-row"><InputNumber @bind-Value="quota.MonthlyLimitUsd" min="0" step="0.01" placeholder="不限制" /><button type="button" class="reset-link" title="重置该窗口" @onclick='() => ResetQuotaAsync(quota.Platform, "monthly")'>↻</button></div></td>
+                                <td class="quota-usage-cell">@FormatQuotaNumber(quota.DailyUsageUsd) / @FormatQuotaNumber(quota.WeeklyUsageUsd) / @FormatQuotaNumber(quota.MonthlyUsageUsd)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <p class="quota-hint">留空 = 不限制该窗口。</p>
+                <button type="button" class="button secondary small" @onclick="ClearAllQuotasAsync">全部清空（取消所有限额）</button>
+            </div>
+        }
+        @if (modalError is not null) { <div class="inline-alert danger">@modalError</div> }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseQuota">取消</button><button type="button" class="button primary" disabled="@(saving || actionLoading)" @onclick="SaveQuotaAsync">@(saving ? "保存中…" : "保存")</button></Footer>
+</AppModal>
+
+<UserAttributesConfigModal Open="attributesOpen" OnClose="CloseAttributesConfigAsync" />
+
+@code {
+    private const string SortEmail = "email";
+    private const string SortId = "id";
+    private const string SortUsername = "username";
+    private const string SortRole = "role";
+    private const string SortBalance = "balance";
+    private const string SortConcurrency = "concurrency";
+    private const string SortStatus = "status";
+    private const string SortLastActive = "last_active_at";
+    private const string SortLastUsed = "last_used_at";
+    private const string SortCreated = "created_at";
+    private const string UsageSortStorageKey = "admin-users-usage-sort";
+    private static readonly string[] QuotaPlatforms = ["anthropic", "openai", "gemini", "antigravity", "grok"];
+    private static readonly HashSet<string> UsageColumnKeys = ["usage", "usage_anthropic", "usage_openai", "usage_gemini", "usage_antigravity"];
+    private static readonly JsonSerializerOptions PreferenceJson = new() { PropertyNameCaseInsensitive = true };
+
+    private List<GoUser> users = [];
+    private List<GoGroup> groups = [];
+    private List<GoGroup> allGroupsIncludingInactive = [];
+    private List<UserAttributeDefinitionDto> attributeDefinitions = [];
+    private Dictionary<long, Dictionary<long, string>> userAttributeValues = [];
+    private Dictionary<long, AdminBatchUserUsageDto> usageStats = [];
+    private Dictionary<long, List<AdminPlatformQuotaDto>> platformQuotaStats = [];
+    private readonly HashSet<long> selectedIds = [];
+    private readonly HashSet<string> visibleFilters = [];
+    private readonly HashSet<string> hiddenColumns = ["notes", "groups", "subscriptions", "usage", "concurrency", "usage_anthropic", "usage_openai", "usage_gemini", "usage_antigravity", "balance_platform_quota"];
+    private readonly Dictionary<long, string> attributeFilters = [];
+
+    private bool loading = true;
+    private bool saving;
+    private bool actionLoading;
+    private bool showFilterMenu;
+    private bool showColumnMenu;
+    private bool preferencesLoaded;
+    private string? error;
+    private string? modalError;
+    private string search = string.Empty;
+    private string roleFilter = string.Empty;
+    private string statusFilter = string.Empty;
+    private string groupFilter = string.Empty;
+    private long? apiKeyGroupFilter;
+    private string sortBy = SortCreated;
+    private string sortOrder = "desc";
+    private int page = 1;
+    private int pageSize = 20;
+    private int pages = 1;
+    private long total;
+    private long? activeActionId;
+    private long? expandedGroupUserId;
+    private string? openUsageSortMenu;
+    private string? usageSortKey;
+    private string usageSortMetric = "today";
+    private string usageSortOrder = "desc";
+    private CancellationTokenSource? searchDebounce;
+    private CancellationTokenSource? groupFilterDebounce;
+
+    private bool editorOpen;
+    private GoUser? editingUser;
+    private UserEditorForm editor = new();
+    private Dictionary<long, string> editorAttributes = [];
+    private bool bulkOpen;
+    private bool bulkConcurrencyEnabled;
+    private bool bulkRpmEnabled;
+    private int bulkConcurrency;
+    private int bulkRpm;
+    private bool keysOpen;
+    private List<ApiKeyDto> userKeys = [];
+    private readonly HashSet<string> keyGroupUpdating = [];
+    private bool groupsOpen;
+    private List<GroupAccessRow> groupAccessRows = [];
+    private bool groupReplaceOpen;
+    private GoGroup? replaceOldGroup;
+    private long? replaceSelectedGroupId;
+    private bool attributesOpen;
+    private bool balanceOpen;
+    private string balanceOperation = "add";
+    private double balanceAmount;
+    private string balanceNotes = string.Empty;
+    private bool historyOpen;
+    private string historyType = string.Empty;
+    private AdminBalanceHistoryResponseDto balanceHistory = new();
+    private bool quotaOpen;
+    private List<AdminPlatformQuotaDto> quotaRows = [];
+    private GoUser? actionUser;
+
+    private bool IsEditingSelf => editingUser is not null && editingUser.Id.ToString() == Auth.User?.Id;
+    private bool AllCurrentPageSelected => users.Count > 0 && users.All(x => selectedIds.Contains(x.Id));
+    private IReadOnlyList<GoUser> DisplayedUsers
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(usageSortKey) || !UsageColumnKeys.Contains(usageSortKey)) return users;
+            var indexed = users.Select((row, index) => new { Row = row, Index = index });
+            var ordered = usageSortOrder == "asc"
+                ? indexed.OrderBy(x => GetUsageSortValue(x.Row.Id, usageSortKey, usageSortMetric)).ThenBy(x => x.Index)
+                : indexed.OrderByDescending(x => GetUsageSortValue(x.Row.Id, usageSortKey, usageSortMetric)).ThenBy(x => x.Index);
+            return ordered.Select(x => x.Row).ToList();
+        }
+    }
+    private IReadOnlyList<GoGroup> ReplacementGroups => replaceOldGroup is null
+        ? []
+        : groups.Where(x => x.Status == "active" && x.IsExclusive && x.SubscriptionType == "standard" && x.Id != replaceOldGroup.Id).ToList();
+    private GoGroup? SelectedReplacementGroup => ReplacementGroups.FirstOrDefault(x => x.Id == replaceSelectedGroupId);
+    private IReadOnlyList<UserAttributeDefinitionDto> EnabledAttributes => attributeDefinitions.Where(x => x.Enabled).OrderBy(x => x.DisplayOrder).ToList();
+    private IReadOnlyList<GoGroup> ActiveExclusiveGroups => groups.Where(x => x.IsExclusive && x.SubscriptionType == "standard" && x.Status == "active").ToList();
+    private IReadOnlyList<FilterOption> BuiltInFilters => [new("role", "角色"), new("status", "状态"), new("group", "授权分组"), new("apiKeyGroup", "API Key 分组")];
+    private IReadOnlyList<ColumnOption> ToggleableColumns => [
+        new("id", "ID"), new("username", "用户名"), new("notes", "备注"),
+        .. EnabledAttributes.Select(x => new ColumnOption($"attr_{x.Id}", x.Name)),
+        new("role", "角色"), new("groups", "分组"), new("subscriptions", "订阅"), new("balance", "余额"),
+        new("balance_platform_quota", "平台限额"), new("usage", "用量"), new("usage_anthropic", "Anthropic 用量"),
+        new("usage_openai", "OpenAI 用量"), new("usage_gemini", "Gemini 用量"), new("usage_antigravity", "Antigravity 用量"),
+        new("concurrency", "并发"), new("status", "状态"), new("last_active_at", "最后活跃"), new("last_used_at", "最后使用"), new("created_at", "创建时间")
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSupportingDataAsync();
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || preferencesLoaded) return;
+        preferencesLoaded = true;
+        try
+        {
+            var savedColumns = await JS.InvokeAsync<string?>("localStorage.getItem", "user-hidden-columns");
+            if (!string.IsNullOrWhiteSpace(savedColumns))
+            {
+                var values = JsonSerializer.Deserialize<List<string>>(savedColumns, PreferenceJson);
+                if (values is not null) { hiddenColumns.Clear(); foreach (var value in values) hiddenColumns.Add(value); }
+            }
+            var savedVisible = await JS.InvokeAsync<string?>("localStorage.getItem", "user-visible-filters");
+            if (!string.IsNullOrWhiteSpace(savedVisible))
+            {
+                var values = JsonSerializer.Deserialize<List<string>>(savedVisible, PreferenceJson);
+                if (values is not null) foreach (var value in values) visibleFilters.Add(value);
+            }
+            var savedFilters = await JS.InvokeAsync<string?>("localStorage.getItem", "user-filter-values");
+            if (!string.IsNullOrWhiteSpace(savedFilters))
+            {
+                var state = JsonSerializer.Deserialize<UserFilterState>(savedFilters, PreferenceJson);
+                if (state is not null)
+                {
+                    roleFilter = state.Role ?? string.Empty; statusFilter = state.Status ?? string.Empty; groupFilter = state.Group ?? string.Empty; apiKeyGroupFilter = state.ApiKeyGroup;
+                    attributeFilters.Clear(); foreach (var pair in state.Attributes ?? []) attributeFilters[pair.Key] = pair.Value;
+                    await LoadAsync();
+                }
+            }
+            var savedUsageSort = await JS.InvokeAsync<string?>("localStorage.getItem", UsageSortStorageKey);
+            if (!string.IsNullOrWhiteSpace(savedUsageSort))
+            {
+                var state = JsonSerializer.Deserialize<UsageSortPreference>(savedUsageSort, PreferenceJson);
+                if (state is not null && UsageColumnKeys.Contains(state.Key))
+                {
+                    usageSortKey = state.Key;
+                    usageSortMetric = state.Metric == "total" ? "total" : "today";
+                    usageSortOrder = state.Order == "asc" ? "asc" : "desc";
+                }
+            }
+            StateHasChanged();
+        }
+        catch (JSException) { }
+        catch (JsonException) { }
+    }
+
+    private async Task LoadSupportingDataAsync()
+    {
+        try
+        {
+            attributeDefinitions = await Api.GetUserAttributeDefinitionsAsync();
+            groups = await Api.GetAllAdminGroupsAsync();
+            allGroupsIncludingInactive = await Api.GetAllAdminGroupsAsync(true);
+        }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true; error = null; activeActionId = null; expandedGroupUserId = null;
+        try
+        {
+            var result = await Api.GetAdminUsersAsync(page, pageSize, search, roleFilter, statusFilter, groupFilter, apiKeyGroupFilter, attributeFilters, sortBy, sortOrder, true);
+            users = result.Items; total = result.Total; pages = Math.Max(1, result.Pages); page = Math.Clamp(result.Page, 1, pages);
+            selectedIds.RemoveWhere(id => users.All(x => x.Id != id));
+            await LoadSecondaryDataAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task LoadSecondaryDataAsync()
+    {
+        var ids = users.Select(x => x.Id).ToArray();
+        if (ids.Length == 0) { usageStats.Clear(); userAttributeValues.Clear(); return; }
+        var usageTask = Api.GetBatchAdminUsersUsageAsync(ids);
+        var attrsTask = EnabledAttributes.Count > 0 ? Api.GetBatchUserAttributesAsync(ids) : Task.FromResult(new AdminBatchUserAttributesResponseDto());
+        try { usageStats = (await usageTask).Stats; } catch (ApiException) { usageStats = []; }
+        try { userAttributeValues = (await attrsTask).Attributes; } catch (ApiException) { userAttributeValues = []; }
+        if (IsColumnVisible("balance_platform_quota")) await LoadQuotaStatsAsync(ids);
+    }
+
+    private async Task LoadQuotaStatsAsync(IEnumerable<long> ids)
+    {
+        var result = new Dictionary<long, List<AdminPlatformQuotaDto>>();
+        using var gate = new SemaphoreSlim(6);
+        var tasks = ids.Select(async id => { await gate.WaitAsync(); try { result[id] = (await Api.GetAdminUserPlatformQuotasAsync(id)).PlatformQuotas; } catch (ApiException) { result[id] = []; } finally { gate.Release(); } });
+        await Task.WhenAll(tasks); platformQuotaStats = result;
+    }
+
+    private async Task SearchChangedAsync(ChangeEventArgs args)
+    {
+        search = args.Value?.ToString() ?? string.Empty;
+        searchDebounce?.Cancel(); searchDebounce?.Dispose(); searchDebounce = new();
+        try { await Task.Delay(300, searchDebounce.Token); page = 1; await LoadAsync(); }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RoleFilterChangedAsync(ChangeEventArgs e) { roleFilter = e.Value?.ToString() ?? string.Empty; await ApplyFilterAsync(); }
+    private async Task StatusFilterChangedAsync(ChangeEventArgs e) { statusFilter = e.Value?.ToString() ?? string.Empty; await ApplyFilterAsync(); }
+    private async Task GroupFilterChangedAsync(ChangeEventArgs e)
+    {
+        groupFilter = e.Value?.ToString() ?? string.Empty;
+        groupFilterDebounce?.Cancel();
+        groupFilterDebounce?.Dispose();
+        groupFilterDebounce = new();
+        try { await Task.Delay(300, groupFilterDebounce.Token); await ApplyFilterAsync(); }
+        catch (OperationCanceledException) { }
+    }
+    private async Task ApiKeyGroupFilterChangedAsync(ChangeEventArgs e) { apiKeyGroupFilter = long.TryParse(e.Value?.ToString(), out var id) ? id : null; await ApplyFilterAsync(); }
+    private async Task AttributeFilterChangedAsync(long id, ChangeEventArgs e) { attributeFilters[id] = e.Value?.ToString() ?? string.Empty; await ApplyFilterAsync(); }
+    private string GetAttributeFilter(long id) => attributeFilters.GetValueOrDefault(id, string.Empty);
+
+    private async Task ApplyFilterAsync() { page = 1; await SaveFilterPreferencesAsync(); await LoadAsync(); }
+    private void ToggleFilterMenu() { showFilterMenu = !showFilterMenu; showColumnMenu = false; }
+    private void ToggleColumnMenu() { showColumnMenu = !showColumnMenu; showFilterMenu = false; }
+    private async Task ToggleFilterAsync(string key)
+    {
+        if (!visibleFilters.Add(key))
+        {
+            visibleFilters.Remove(key);
+            switch (key) { case "role": roleFilter = string.Empty; break; case "status": statusFilter = string.Empty; break; case "group": groupFilter = string.Empty; break; case "apiKeyGroup": apiKeyGroupFilter = null; break; default: if (key.StartsWith("attr_") && long.TryParse(key[5..], out var id)) attributeFilters.Remove(id); break; }
+        }
+        await SaveFilterPreferencesAsync(); page = 1; await LoadAsync();
+    }
+
+    private async Task SaveFilterPreferencesAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", "user-visible-filters", JsonSerializer.Serialize(visibleFilters));
+            await JS.InvokeVoidAsync("localStorage.setItem", "user-filter-values", JsonSerializer.Serialize(new UserFilterState { Role = roleFilter, Status = statusFilter, Group = groupFilter, ApiKeyGroup = apiKeyGroupFilter, Attributes = new(attributeFilters) }));
+        }
+        catch (JSException) { }
+    }
+
+    private bool IsColumnVisible(string key) => !hiddenColumns.Contains(key);
+    private async Task ToggleColumnAsync(string key)
+    {
+        var nowVisible = hiddenColumns.Remove(key);
+        if (!nowVisible) hiddenColumns.Add(key);
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "user-hidden-columns", JsonSerializer.Serialize(hiddenColumns)); } catch (JSException) { }
+        if (nowVisible && key == "balance_platform_quota") await LoadQuotaStatsAsync(users.Select(x => x.Id));
+    }
+
+    private async Task ChangeSortAsync(string key) { await ClearUsageSortAsync(); if (sortBy == key) sortOrder = sortOrder == "asc" ? "desc" : "asc"; else { sortBy = key; sortOrder = "asc"; } page = 1; await LoadAsync(); }
+    private string SortIndicator(string key) => sortBy == key ? sortOrder == "asc" ? "↑" : "↓" : string.Empty;
+    private async Task PreviousPageAsync() { if (page <= 1) return; page--; await LoadAsync(); }
+    private async Task NextPageAsync() { if (page >= pages) return; page++; await LoadAsync(); }
+    private async Task PageSizeChangedAsync(ChangeEventArgs e) { if (int.TryParse(e.Value?.ToString(), out var size)) pageSize = size; page = 1; await LoadAsync(); }
+
+    private void ToggleSelected(long id, ChangeEventArgs e) { if (e.Value is true) selectedIds.Add(id); else selectedIds.Remove(id); }
+    private void ToggleAll(ChangeEventArgs e) { if (e.Value is true) foreach (var user in users) selectedIds.Add(user.Id); else foreach (var user in users) selectedIds.Remove(user.Id); }
+    private void ToggleActionMenu(long id) { activeActionId = activeActionId == id ? null : id; expandedGroupUserId = null; openUsageSortMenu = null; }
+    private void OpenAttributesConfig() { showFilterMenu = false; showColumnMenu = false; attributesOpen = true; }
+    private async Task CloseAttributesConfigAsync()
+    {
+        attributesOpen = false;
+        await LoadSupportingDataAsync();
+        await LoadAsync();
+    }
+
+    private void OpenCreate()
+    {
+        editingUser = null; editor = new() { Role = "user", Concurrency = 1, RpmLimit = 0 }; editorAttributes = []; modalError = null; editorOpen = true; GeneratePassword();
+    }
+
+    private async Task OpenEditAsync(GoUser user)
+    {
+        activeActionId = null; editingUser = user; editor = new() { Email = user.Email, Username = user.Username, Notes = user.Notes, Role = user.Role, Concurrency = user.Concurrency, RpmLimit = user.RpmLimit }; editorAttributes = []; modalError = null; editorOpen = true;
+        try { editorAttributes = (await Api.GetUserAttributeValuesAsync(user.Id.ToString())).ToDictionary(x => x.AttributeId, x => x.Value); }
+        catch (ApiException ex) { modalError = ex.Message; }
+    }
+
+    private void CloseEditor() { if (!saving) editorOpen = false; }
+    private void GeneratePassword()
+    {
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%^&*";
+        editor.Password = new string(Enumerable.Range(0, 16).Select(_ => chars[RandomNumberGenerator.GetInt32(chars.Length)]).ToArray());
+    }
+
+    private string GetEditorAttribute(long id) => editorAttributes.GetValueOrDefault(id, string.Empty);
+    private void SetEditorAttribute(long id, string? value) => editorAttributes[id] = value ?? string.Empty;
+
+    private async Task SaveUserAsync()
+    {
+        modalError = null;
+        if (editingUser is null && string.IsNullOrWhiteSpace(editor.Password)) { modalError = "请输入初始密码"; return; }
+        if (!string.IsNullOrWhiteSpace(editor.Password) && editor.Password.Length < 6) { modalError = "密码至少需要 6 个字符"; return; }
+        if (editor.Concurrency < 0 || editor.RpmLimit < 0) { modalError = "并发和 RPM 不能为负数"; return; }
+        saving = true;
+        var editing = editingUser;
+        var succeeded = await RunSensitiveAsync(async () =>
+        {
+            if (editing is null)
+            {
+                var payload = new Dictionary<string, object?> { ["email"] = editor.Email.Trim(), ["password"] = editor.Password, ["username"] = editor.Username.Trim(), ["role"] = editor.Role, ["concurrency"] = editor.Concurrency, ["rpm_limit"] = editor.RpmLimit };
+                if (editor.Balance.HasValue) payload["balance"] = editor.Balance.Value;
+                await Api.CreateAdminUserAsync(payload);
+            }
+            else
+            {
+                var payload = new Dictionary<string, object?> { ["email"] = editor.Email.Trim(), ["username"] = editor.Username.Trim(), ["notes"] = editor.Notes.Trim(), ["role"] = editor.Role, ["concurrency"] = editor.Concurrency, ["rpm_limit"] = editor.RpmLimit };
+                if (!string.IsNullOrWhiteSpace(editor.Password)) payload["password"] = editor.Password.Trim();
+                await Api.UpdateAdminUserAsync(editing.Id, payload);
+                if (EnabledAttributes.Count > 0) await Api.UpdateUserAttributeValuesAsync(editing.Id.ToString(), editorAttributes);
+            }
+        });
+        saving = false;
+        if (!succeeded) return;
+        editorOpen = false; Toasts.Success(editing is null ? "用户已创建" : "用户已更新");
+        if (editing is not null && editing.Id.ToString() == Auth.User?.Id) await Auth.RefreshAsync();
+        await LoadAsync();
+    }
+
+    private async Task<bool> RunSensitiveAsync(Func<Task> operation)
+    {
+        try { await operation(); return true; }
+        catch (ApiException ex) when (string.Equals(ex.Code, "STEP_UP_REQUIRED", StringComparison.OrdinalIgnoreCase))
+        {
+            var code = await JS.InvokeAsync<string?>("prompt", "请输入管理员 TOTP 验证码以继续");
+            if (string.IsNullOrWhiteSpace(code)) return false;
+            try { await Api.VerifyTotpStepUpAsync(code); await operation(); return true; }
+            catch (ApiException retry) { modalError = retry.Message; return false; }
+        }
+        catch (ApiException ex) { modalError = ex.Message; return false; }
+    }
+
+    private async Task ToggleStatusAsync(GoUser user)
+    {
+        try { await Api.UpdateAdminUserAsync(user.Id, new { status = user.Status == "active" ? "disabled" : "active" }); Toasts.Success(user.Status == "active" ? "用户已禁用" : "用户已启用"); await LoadAsync(); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task DeleteAsync(GoUser user)
+    {
+        activeActionId = null;
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认删除用户 {user.Email}？此操作不可撤销。")) return;
+        try { await Api.DeleteAdminUserAsync(user.Id); Toasts.Success("用户已删除"); await LoadAsync(); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private void OpenBulkEdit() { bulkOpen = true; bulkConcurrencyEnabled = false; bulkRpmEnabled = false; bulkConcurrency = 0; bulkRpm = 0; modalError = null; }
+    private void CloseBulk() { if (!saving) bulkOpen = false; }
+    private async Task SaveBulkAsync()
+    {
+        modalError = null; if (bulkConcurrency < 0 || bulkRpm < 0) { modalError = "限制值不能为负数"; return; }
+        var fields = string.Join("、", new[] { bulkConcurrencyEnabled ? $"并发={bulkConcurrency}" : null, bulkRpmEnabled ? $"RPM={bulkRpm}" : null }.Where(x => x is not null));
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认将 {selectedIds.Count} 个用户的{fields}？")) return;
+        saving = true;
+        try { var result = await Api.BatchUpdateAdminUserLimitsAsync(selectedIds, bulkConcurrencyEnabled ? bulkConcurrency : null, bulkRpmEnabled ? bulkRpm : null); Toasts.Success($"已更新 {result.Affected} 个用户"); bulkOpen = false; selectedIds.Clear(); await LoadAsync(); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task OpenKeysAsync(GoUser user) { activeActionId = null; actionUser = user; keysOpen = true; await LoadKeysAsync(); }
+    private async Task LoadKeysAsync() { if (actionUser is null) return; actionLoading = true; try { userKeys = await Api.GetApiKeysAsync(actionUser.Id.ToString()); } catch (ApiException ex) { modalError = ex.Message; userKeys = []; } finally { actionLoading = false; } }
+    private void CloseKeys() { keysOpen = false; userKeys = []; }
+    private async Task ChangeKeyGroupAsync(ApiKeyDto key, ChangeEventArgs e)
+    {
+        var groupId = long.TryParse(e.Value?.ToString(), out var id) ? id : (long?)null; keyGroupUpdating.Add(key.Id);
+        try { await Api.UpdateApiKeyGroupAsync(key.Id, groupId); Toasts.Success("API 密钥分组已更新"); await LoadKeysAsync(); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { keyGroupUpdating.Remove(key.Id); }
+    }
+
+    private Task OpenGroupsAsync(GoUser user)
+    {
+        activeActionId = null; actionUser = user; modalError = null;
+        groupAccessRows = groups.Where(x => x.Status == "active" && x.SubscriptionType == "standard").Select(x => new GroupAccessRow { Group = x, Selected = !x.IsExclusive || user.AllowedGroups.Contains(x.Id), CustomRate = user.GroupRates.TryGetValue(x.Id, out var rate) ? rate : null, OriginalCustomRate = user.GroupRates.TryGetValue(x.Id, out var original) ? original : null }).ToList();
+        groupsOpen = true; return Task.CompletedTask;
+    }
+    private void CloseGroups() { if (!saving) groupsOpen = false; }
+    private void UpdateGroupRate(GroupAccessRow row, ChangeEventArgs e) => row.CustomRate = double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value) && value > 0 ? value : null;
+    private async Task SaveGroupsAsync()
+    {
+        if (actionUser is null) return; saving = true; modalError = null;
+        var rates = new Dictionary<long, double?>();
+        foreach (var row in groupAccessRows) { if (row.CustomRate.HasValue) rates[row.Group.Id] = row.CustomRate; else if (row.OriginalCustomRate.HasValue) rates[row.Group.Id] = null; }
+        try { await Api.UpdateAdminUserAsync(actionUser.Id, new { allowed_groups = groupAccessRows.Where(x => x.Group.IsExclusive && x.Selected).Select(x => x.Group.Id).ToArray(), group_rates = rates.Count == 0 ? null : rates }); Toasts.Success("授权分组已更新"); groupsOpen = false; await LoadAsync(); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private void ToggleGroupReplaceMenu(long userId)
+    {
+        activeActionId = null;
+        expandedGroupUserId = expandedGroupUserId == userId ? null : userId;
+    }
+
+    private void OpenGroupReplace(GoUser user, GoGroup oldGroup)
+    {
+        expandedGroupUserId = null;
+        actionUser = user;
+        replaceOldGroup = oldGroup;
+        replaceSelectedGroupId = null;
+        modalError = null;
+        groupReplaceOpen = true;
+    }
+
+    private void CloseGroupReplace()
+    {
+        if (saving) return;
+        groupReplaceOpen = false;
+        replaceOldGroup = null;
+        replaceSelectedGroupId = null;
+    }
+
+    private async Task SaveGroupReplaceAsync()
+    {
+        if (actionUser is null || replaceOldGroup is null || replaceSelectedGroupId is null) return;
+        saving = true;
+        modalError = null;
+        try
+        {
+            var result = await Api.ReplaceAdminUserGroupAsync(actionUser.Id, replaceOldGroup.Id, replaceSelectedGroupId.Value);
+            var migrated = result.GetValueOrDefault("migrated_keys");
+            Toasts.Success($"专属分组已替换，并迁移 {migrated} 个 API 密钥");
+            groupReplaceOpen = false;
+            replaceOldGroup = null;
+            replaceSelectedGroupId = null;
+            await LoadAsync();
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private void OpenBalance(GoUser user, string operation) { activeActionId = null; actionUser = user; balanceOperation = operation; balanceAmount = 0; balanceNotes = string.Empty; modalError = null; balanceOpen = true; }
+    private void CloseBalance() { if (!saving) balanceOpen = false; }
+    private void FillAllBalance() { if (actionUser is not null) balanceAmount = Math.Max(0, (double)actionUser.Balance); }
+    private double PreviewBalance => actionUser is null ? 0 : (double)actionUser.Balance + (balanceOperation == "add" ? balanceAmount : -balanceAmount);
+    private async Task SaveBalanceAsync()
+    {
+        if (actionUser is null || balanceAmount <= 0) return; modalError = null;
+        if (balanceOperation == "subtract" && balanceAmount > (double)actionUser.Balance) { modalError = "扣款金额不能超过当前余额"; return; }
+        saving = true;
+        try { await Api.UpdateAdminUserBalanceAsync(actionUser.Id, balanceAmount, balanceOperation, balanceNotes); Toasts.Success(balanceOperation == "add" ? "充值成功" : "扣款成功"); balanceOpen = false; await LoadAsync(); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task OpenHistoryAsync(GoUser user) { activeActionId = null; actionUser = user; historyType = string.Empty; historyOpen = true; await LoadHistoryAsync(1); }
+    private void CloseHistory() { historyOpen = false; balanceHistory = new(); }
+    private async Task LoadHistoryAsync(int requestedPage) { if (actionUser is null) return; actionLoading = true; try { balanceHistory = await Api.GetAdminUserBalanceHistoryAsync(actionUser.Id, requestedPage, 15, historyType); } catch (ApiException ex) { modalError = ex.Message; balanceHistory = new(); } finally { actionLoading = false; } }
+    private async Task HistoryTypeChangedAsync(ChangeEventArgs e) { historyType = e.Value?.ToString() ?? string.Empty; await LoadHistoryAsync(1); }
+    private void OpenBalanceFromHistory(string operation) { if (actionUser is null) return; var user = actionUser; historyOpen = false; OpenBalance(user, operation); }
+
+    private async Task OpenQuotaAsync(GoUser user)
+    {
+        activeActionId = null; actionUser = user; quotaOpen = true; modalError = null; actionLoading = true;
+        try { SetQuotaRows((await Api.GetAdminUserPlatformQuotasAsync(user.Id)).PlatformQuotas); }
+        catch (ApiException ex) { modalError = ex.Message; SetQuotaRows([]); }
+        finally { actionLoading = false; }
+    }
+    private void SetQuotaRows(IEnumerable<AdminPlatformQuotaDto> source) { var map = source.ToDictionary(x => x.Platform, StringComparer.OrdinalIgnoreCase); quotaRows = QuotaPlatforms.Select(platform => map.TryGetValue(platform, out var row) ? row : new AdminPlatformQuotaDto { Platform = platform }).ToList(); }
+    private void CloseQuota() { if (!saving) quotaOpen = false; }
+    private async Task ClearAllQuotasAsync()
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", "确认清空全部平台的日 / 周 / 月限额？所有平台将变为\"无限额\"，本地无法撤销，需要在保存前手动重填。");
+        if (!confirmed) return;
+        foreach (var quota in quotaRows)
+        {
+            quota.DailyLimitUsd = null;
+            quota.WeeklyLimitUsd = null;
+            quota.MonthlyLimitUsd = null;
+        }
+    }
+    private async Task SaveQuotaAsync()
+    {
+        if (actionUser is null) return;
+        modalError = null;
+        var invalidFields = quotaRows
+            .SelectMany(row => new[]
+            {
+                (Name: $"{row.Platform}.daily", Value: row.DailyLimitUsd),
+                (Name: $"{row.Platform}.weekly", Value: row.WeeklyLimitUsd),
+                (Name: $"{row.Platform}.monthly", Value: row.MonthlyLimitUsd)
+            })
+            .Where(field => field.Value.HasValue && (!double.IsFinite(field.Value.Value) || field.Value.Value < 0))
+            .Select(field => field.Name)
+            .ToList();
+        if (invalidFields.Count > 0)
+        {
+            modalError = $"以下字段填写不是合法数字，请修正后再保存：{string.Join(", ", invalidFields)}";
+            return;
+        }
+        saving = true;
+        try { var payload = quotaRows.Select(x => (object)new { platform = x.Platform, daily_limit_usd = x.DailyLimitUsd, weekly_limit_usd = x.WeeklyLimitUsd, monthly_limit_usd = x.MonthlyLimitUsd }); SetQuotaRows((await Api.UpdateAdminUserPlatformQuotasAsync(actionUser.Id, payload)).PlatformQuotas); Toasts.Success("平台限额已更新"); platformQuotaStats[actionUser.Id] = quotaRows; quotaOpen = false; }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+    private async Task ResetQuotaAsync(string platform, string window) { if (actionUser is null || !await JS.InvokeAsync<bool>("confirm", $"确认重置该用户 {platform} 平台的 {WindowLabel(window)} 用量？此操作立即生效。")) return; try { SetQuotaRows((await Api.ResetAdminUserPlatformQuotaAsync(actionUser.Id, platform, window)).PlatformQuotas); Toasts.Success($"已重置 {platform} {WindowLabel(window)}用量"); } catch (ApiException ex) { modalError = ex.Message; } }
+
+    private GroupSummary GetUserGroups(GoUser user)
+    {
+        var exclusive = groups.Where(x => x.IsExclusive && x.Status == "active" && x.SubscriptionType == "standard" && user.AllowedGroups.Contains(x.Id)).ToList();
+        var publicGroups = groups.Where(x => !x.IsExclusive && x.Status == "active" && x.SubscriptionType == "standard").ToList();
+        return new(exclusive.Count, publicGroups.Count, $"专属：{(exclusive.Count == 0 ? "无" : string.Join("、", exclusive.Select(x => x.Name)))}；公开：{(publicGroups.Count == 0 ? "无" : string.Join("、", publicGroups.Select(x => x.Name)))}");
+    }
+
+    private IReadOnlyList<GoGroup> GetExclusiveUserGroups(GoUser user) => groups
+        .Where(x => x.IsExclusive && x.Status == "active" && x.SubscriptionType == "standard" && user.AllowedGroups.Contains(x.Id))
+        .ToList();
+
+    private string FormatAttributeValue(long userId, UserAttributeDefinitionDto definition)
+    {
+        if (!userAttributeValues.TryGetValue(userId, out var values) || !values.TryGetValue(definition.Id, out var value) || string.IsNullOrWhiteSpace(value)) return "-";
+        if (definition.Type == "select") return definition.Options.FirstOrDefault(x => x.Value == value)?.Label ?? value;
+        if (definition.Type == "multi_select") { try { var items = JsonSerializer.Deserialize<List<string>>(value) ?? []; return string.Join("、", items.Select(item => definition.Options.FirstOrDefault(x => x.Value == item)?.Label ?? item)); } catch (JsonException) { } }
+        return value;
+    }
+    private string UsageCell(long userId, string? platform)
+    {
+        if (!usageStats.TryGetValue(userId, out var stats)) return "今日 $0.00 / 累计 $0.00";
+        if (platform is null) return $"今日 {Money(stats.TodayActualCost)} / 累计 {Money(stats.TotalActualCost)}";
+        var row = stats.ByPlatform.FirstOrDefault(x => string.Equals(x.Platform, platform, StringComparison.OrdinalIgnoreCase));
+        return row is null ? "今日 $0.00 / 累计 $0.00" : $"今日 {Money(row.TodayActualCost)} / 累计 {Money(row.TotalActualCost)}";
+    }
+    private RenderFragment UsageSortHeader(string key, string label) => @<div class="usage-sort-heading">
+        <span>@label</span>
+        <div class="usage-sort-anchor">
+            <button type="button" class="usage-sort-trigger @(usageSortKey == key ? "active" : null)" title="排序" data-test="usage-sort-trigger-@key" @onclick="() => ToggleUsageSortMenu(key)">
+                @if (usageSortKey == key)
+                {
+                    <small>@(usageSortMetric == "today" ? "今日" : "近30天")</small>
+                    <span class="usage-sort-arrow @(usageSortOrder == "desc" ? "descending" : null)">↑</span>
+                }
+                else
+                {
+                    <Icon Name="chevrons-up-down" Size="14" />
+                }
+            </button>
+            @if (openUsageSortMenu == key)
+            {
+                <button type="button" class="usage-sort-backdrop" aria-label="关闭用量排序菜单" @onclick="CloseUsageSortMenu"></button>
+                <div class="usage-sort-menu">
+                    <button type="button" class="@(IsUsageSortActive(key, "today") ? "active" : null)" data-test="usage-sort-@key-today" @onclick='() => ToggleUsageSortAsync(key, "today")'>
+                        <span>今日</span><strong>@UsageSortIndicator(key, "today")</strong>
+                    </button>
+                    <button type="button" class="@(IsUsageSortActive(key, "total") ? "active" : null)" data-test="usage-sort-@key-total" @onclick='() => ToggleUsageSortAsync(key, "total")'>
+                        <span>近30天</span><strong>@UsageSortIndicator(key, "total")</strong>
+                    </button>
+                    <small>仅排序当前页</small>
+                </div>
+            }
+        </div>
+    </div>;
+    private void ToggleUsageSortMenu(string key) { activeActionId = null; expandedGroupUserId = null; openUsageSortMenu = openUsageSortMenu == key ? null : key; }
+    private void CloseUsageSortMenu() => openUsageSortMenu = null;
+    private bool IsUsageSortActive(string key, string metric) => usageSortKey == key && usageSortMetric == metric;
+    private string UsageSortIndicator(string key, string metric) => IsUsageSortActive(key, metric) ? usageSortOrder == "asc" ? "↑" : "↓" : string.Empty;
+    private async Task ToggleUsageSortAsync(string key, string metric)
+    {
+        if (IsUsageSortActive(key, metric))
+        {
+            if (usageSortOrder == "desc") usageSortOrder = "asc";
+            else { usageSortKey = null; usageSortMetric = "today"; usageSortOrder = "desc"; }
+        }
+        else
+        {
+            usageSortKey = key;
+            usageSortMetric = metric == "total" ? "total" : "today";
+            usageSortOrder = "desc";
+        }
+        openUsageSortMenu = null;
+        await PersistUsageSortAsync();
+    }
+    private async Task ClearUsageSortAsync()
+    {
+        usageSortKey = null;
+        usageSortMetric = "today";
+        usageSortOrder = "desc";
+        openUsageSortMenu = null;
+        try { await JS.InvokeVoidAsync("localStorage.removeItem", UsageSortStorageKey); } catch (JSException) { }
+    }
+    private async Task PersistUsageSortAsync()
+    {
+        try
+        {
+            if (usageSortKey is null) await JS.InvokeVoidAsync("localStorage.removeItem", UsageSortStorageKey);
+            else await JS.InvokeVoidAsync("localStorage.setItem", UsageSortStorageKey, JsonSerializer.Serialize(new UsageSortPreference { Key = usageSortKey, Metric = usageSortMetric, Order = usageSortOrder }));
+        }
+        catch (JSException) { }
+    }
+    private double GetUsageSortValue(long userId, string key, string metric)
+    {
+        if (!usageStats.TryGetValue(userId, out var stats)) return 0;
+        if (key == "usage") return metric == "today" ? stats.TodayActualCost : stats.TotalActualCost;
+        var platform = key switch { "usage_anthropic" => "anthropic", "usage_openai" => "openai", "usage_gemini" => "gemini", "usage_antigravity" => "antigravity", _ => string.Empty };
+        var row = stats.ByPlatform.FirstOrDefault(x => string.Equals(x.Platform, platform, StringComparison.OrdinalIgnoreCase));
+        if (row is null) return 0;
+        return metric == "today" ? row.TodayActualCost : row.TotalActualCost;
+    }
+    private IReadOnlyList<AdminPlatformQuotaDto> GetConfiguredQuotaRows(long userId) => platformQuotaStats.TryGetValue(userId, out var values)
+        ? values.Where(x => x.DailyLimitUsd.HasValue || x.WeeklyLimitUsd.HasValue || x.MonthlyLimitUsd.HasValue).OrderBy(x => Array.IndexOf(QuotaPlatforms, x.Platform)).ToList()
+        : [];
+    private static bool HasActiveSubscription(GoUser user) => user.Subscriptions.Any(x => string.Equals(x.Status, "active", StringComparison.OrdinalIgnoreCase));
+    private static string FormatQuotaNumber(double value) => Math.Round(value, 2).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    private static string FormatQuotaLimit(double? value) => value.HasValue ? FormatQuotaNumber(value.Value) : "—";
+    private static string Initial(string email) => string.IsNullOrWhiteSpace(email) ? "?" : char.ToUpperInvariant(email[0]).ToString();
+    private static string Money(decimal value) => $"${value.ToString("0.00######", System.Globalization.CultureInfo.InvariantCulture)}";
+    private static string Money(double value) => $"${value.ToString("0.00######", System.Globalization.CultureInfo.InvariantCulture)}";
+    private static string FormatDateTime(DateTimeOffset? value) => value.HasValue ? value.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "-";
+    private static int ConcurrencyPercent(GoUser user) => user.Concurrency <= 0 ? 0 : Math.Clamp((int)Math.Round(user.CurrentConcurrency * 100d / user.Concurrency), 0, 100);
+    private static string PlatformLabel(string value) => value.ToLowerInvariant() switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", _ => value };
+    private static string WindowLabel(string value) => value switch { "daily" => "每日", "weekly" => "每周", "monthly" => "每月", _ => value };
+    private static bool IsBalanceHistory(AdminBalanceHistoryItemDto item) => item.Type is "balance" or "affiliate_balance" or "admin_balance";
+    private static string HistoryIcon(AdminBalanceHistoryItemDto item) => IsBalanceHistory(item) ? "dollar" : item.Type == "subscription" ? "ticket" : "activity";
+    private static string HistoryTone(AdminBalanceHistoryItemDto item) => item.Type == "subscription" ? "purple" : item.Value >= 0 ? "success" : "danger";
+    private static string HistoryTitle(AdminBalanceHistoryItemDto item) => item.Type switch { "balance" => "兑换码充值", "affiliate_balance" => "邀请返利", "admin_balance" => item.Value >= 0 ? "管理员充值" : "管理员扣款", "concurrency" => "兑换并发", "admin_concurrency" => item.Value >= 0 ? "管理员增加并发" : "管理员减少并发", "subscription" => "分配订阅", _ => "未知变更" };
+    private static string HistoryValue(AdminBalanceHistoryItemDto item) { if (item.Type == "subscription") return $"{(item.ValidityDays > 0 ? item.ValidityDays : Math.Round(item.Value))} 天 · {item.Group?.Name ?? "订阅"}"; var sign = item.Value >= 0 ? "+" : string.Empty; return IsBalanceHistory(item) ? $"{sign}{Money(item.Value)}" : $"{sign}{item.Value:0.##}"; }
+
+    public void Dispose() { searchDebounce?.Cancel(); searchDebounce?.Dispose(); groupFilterDebounce?.Cancel(); groupFilterDebounce?.Dispose(); }
+
+    private sealed class UserEditorForm
+    {
+        [Required(ErrorMessage = "请输入邮箱"), EmailAddress(ErrorMessage = "邮箱格式不正确")] public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+        public string Role { get; set; } = "user";
+        public decimal? Balance { get; set; }
+        public int Concurrency { get; set; } = 1;
+        public int RpmLimit { get; set; }
+    }
+    private sealed class GroupAccessRow { public GoGroup Group { get; set; } = new(); public bool Selected { get; set; } public double? CustomRate { get; set; } public double? OriginalCustomRate { get; set; } }
+    private sealed record FilterOption(string Key, string Label);
+    private sealed record ColumnOption(string Key, string Label);
+    private sealed record GroupSummary(int ExclusiveCount, int PublicCount, string Title);
+    private sealed class UsageSortPreference { public string Key { get; set; } = string.Empty; public string Metric { get; set; } = "today"; public string Order { get; set; } = "desc"; }
+    private sealed class UserFilterState { public string? Role { get; set; } public string? Status { get; set; } public string? Group { get; set; } public long? ApiKeyGroup { get; set; } public Dictionary<long, string>? Attributes { get; set; } }
+}

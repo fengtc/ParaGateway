@@ -1,0 +1,52 @@
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<div class="usage-runtime-settings" data-testid="account-usage-runtime-settings">
+    <section>
+        <header><div><h2>上游计费探测</h2><p>定时读取上游账号的套餐、额度和计费状态，并写入脱敏快照。</p></div><button type="button" class="button primary small" disabled="@(loading || saving)" @onclick="SaveBillingAsync">保存此项</button></header>
+        @if (loading) { <LoadingState Text="正在加载计费探测设置" /> }
+        else { <div class="runtime-grid"><ToggleField Label="启用后台探测" Hint="账号仍需单独开启探测开关"><InputCheckbox @bind-Value="billing.Enabled" /></ToggleField><Field Label="探测间隔（分钟）"><InputNumber @bind-Value="billing.IntervalMinutes" /></Field></div> }
+    </section>
+    <section>
+        <header><div><h2>Ollama Cloud 用量</h2><p>根据模型请求触发用量刷新，使用最大等待与尾随防抖控制频率。</p></div><button type="button" class="button primary small" disabled="@(loading || saving)" @onclick="SaveOllamaAsync">保存此项</button></header>
+        @if (loading) { <LoadingState Text="正在加载 Ollama Cloud 设置" /> }
+        else { <div class="runtime-grid"><ToggleField Label="启用用量刷新" Hint="仅处理已保存 Ollama Cloud 会话的账号"><InputCheckbox @bind-Value="ollama.Enabled" /></ToggleField><Field Label="最大等待（分钟）"><InputNumber @bind-Value="ollama.IntervalMinutes" /></Field><Field Label="尾随防抖（分钟）"><InputNumber @bind-Value="ollama.DebounceMinutes" /></Field></div> }
+    </section>
+    @if (!string.IsNullOrWhiteSpace(error)) { <div class="runtime-alert" role="alert"><Icon Name="alert" Size="16" />@error</div> }
+</div>
+
+@code {
+    private UpstreamBillingProbeSettingsDto billing = new();
+    private OllamaCloudUsageSettingsDto ollama = new();
+    private bool loading = true, saving;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var billingTask = Api.GetUpstreamBillingProbeSettingsAsync();
+            var ollamaTask = Api.GetOllamaCloudUsageSettingsAsync();
+            await Task.WhenAll(billingTask, ollamaTask);
+            billing = await billingTask; ollama = await ollamaTask;
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task SaveBillingAsync()
+    {
+        saving = true; error = null;
+        try { billing = await Api.UpdateUpstreamBillingProbeSettingsAsync(billing); Toasts.Success("上游计费探测设置已保存"); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task SaveOllamaAsync()
+    {
+        saving = true; error = null;
+        try { ollama = await Api.UpdateOllamaCloudUsageSettingsAsync(ollama); Toasts.Success("Ollama Cloud 用量设置已保存"); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { saving = false; }
+    }
+}

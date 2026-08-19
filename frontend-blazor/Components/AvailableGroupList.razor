@@ -1,0 +1,128 @@
+@using System.Globalization
+
+@if (Groups.Count == 0)
+{
+    <span class="group-list-empty">-</span>
+}
+else
+{
+    <span class="available-group-list">
+        @if (ExclusiveGroups.Count > 0)
+        {
+            <span class="group-kind-row exclusive-row">
+                <span class="group-kind-label" title="管理员授权给你的专属分组"><Icon Name="shield" Size="12" />专属</span>
+                <span class="group-items">
+                    @foreach (var group in ExclusiveGroups)
+                    {
+                        @GroupBadge(group)
+                    }
+                </span>
+            </span>
+        }
+        @if (PublicGroups.Count > 0)
+        {
+            <span class="group-kind-row public-row">
+                <span class="group-kind-label" title="对所有用户公开的分组"><Icon Name="globe" Size="12" />公开</span>
+                <span class="group-items">
+                    @foreach (var group in PublicGroups)
+                    {
+                        @GroupBadge(group)
+                    }
+                </span>
+            </span>
+        }
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<UserAvailableGroupDto> Groups { get; set; } = [];
+
+    [Parameter]
+    public IReadOnlyDictionary<long, double> UserGroupRates { get; set; } = new Dictionary<long, double>();
+
+    [Parameter]
+    public string ServerUtcOffset { get; set; } = string.Empty;
+
+    private List<UserAvailableGroupDto> ExclusiveGroups => Groups.Where(group => group.IsExclusive).ToList();
+    private List<UserAvailableGroupDto> PublicGroups => Groups.Where(group => !group.IsExclusive).ToList();
+
+    private RenderFragment GroupBadge(UserAvailableGroupDto group) => builder =>
+    {
+        var sequence = 0;
+        builder.OpenElement(sequence++, "span");
+        builder.AddAttribute(sequence++, "class", "group-with-peak");
+        builder.OpenElement(sequence++, "span");
+        builder.AddAttribute(sequence++, "class", $"available-group-badge platform-{PlatformTone(group.Platform)} {(group.SubscriptionType == "subscription" ? "subscription" : "standard")}");
+
+        builder.OpenElement(sequence++, "span");
+        builder.AddAttribute(sequence++, "class", "group-name");
+        builder.AddContent(sequence++, group.Name);
+        builder.CloseElement();
+
+        builder.OpenElement(sequence++, "span");
+        builder.AddAttribute(sequence++, "class", "group-rate");
+        if (TryGetCustomRate(group, out var userRate))
+        {
+            builder.OpenElement(sequence++, "del");
+            builder.AddContent(sequence++, $"{FormatRate(group.RateMultiplier)}x");
+            builder.CloseElement();
+            builder.OpenElement(sequence++, "strong");
+            builder.AddContent(sequence++, $"{FormatRate(userRate)}x");
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.AddContent(sequence++, $"{FormatRate(group.RateMultiplier)}x");
+        }
+        builder.CloseElement();
+        builder.CloseElement();
+
+        if (HasPeakRate(group))
+        {
+            var peak = PeakRateLabel(group);
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", "peak-rate-badge");
+            builder.AddAttribute(sequence++, "title", $"高峰倍率：{peak}；token 计费的图片 token 同样适用，图片按次计费不受高峰影响");
+            builder.OpenComponent<Icon>(sequence++);
+            builder.AddAttribute(sequence++, "Name", "clock");
+            builder.AddAttribute(sequence++, "Size", 11);
+            builder.CloseComponent();
+            builder.AddContent(sequence++, peak);
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
+
+    private bool TryGetCustomRate(UserAvailableGroupDto group, out double rate)
+    {
+        if (UserGroupRates.TryGetValue(group.Id, out rate))
+        {
+            return Math.Abs(rate - group.RateMultiplier) > 0.0000001;
+        }
+        return false;
+    }
+
+    private static bool HasPeakRate(UserAvailableGroupDto group) =>
+        group.PeakRateEnabled && !string.IsNullOrWhiteSpace(group.PeakStart) && !string.IsNullOrWhiteSpace(group.PeakEnd);
+
+    private string PeakRateLabel(UserAvailableGroupDto group)
+    {
+        var timezone = string.IsNullOrWhiteSpace(ServerUtcOffset) ? string.Empty : $" (UTC{ServerUtcOffset})";
+        return $"{group.PeakStart}-{group.PeakEnd} ×{FormatRate(group.PeakRateMultiplier)}{timezone}";
+    }
+
+    private static string FormatRate(double value) => value.ToString("0.####", CultureInfo.InvariantCulture);
+
+    private static string PlatformTone(string? platform) => platform?.Trim().ToLowerInvariant() switch
+    {
+        "anthropic" => "anthropic",
+        "openai" => "openai",
+        "gemini" => "gemini",
+        "antigravity" => "antigravity",
+        "grok" => "grok",
+        "composite" => "composite",
+        _ => "default"
+    };
+}

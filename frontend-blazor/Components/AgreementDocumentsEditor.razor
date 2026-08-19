@@ -1,0 +1,39 @@
+<section class="agreement-documents" data-testid="agreement-documents-editor">
+    <header><div><h2>协议文档</h2><p>文档内容按 Markdown 保存，路由固定为 <code>/legal/&lt;slug&gt;</code>。</p></div><button type="button" class="button secondary small" @onclick="AddDocument"><Icon Name="plus" Size="14" />添加文档</button></header>
+    @if (Documents.Count == 0)
+    {
+        <p class="agreement-empty">暂无协议文档。启用登录协议前至少需要添加一份文档。</p>
+    }
+    else
+    {
+        <div class="document-list">
+            @for (var index = 0; index < Documents.Count; index++)
+            {
+                var document = Documents[index];
+                <article @key="document">
+                    <header><div><span><Icon Name="file-text" Size="17" /></span><div><strong>@(string.IsNullOrWhiteSpace(document.Title) ? "未命名文档" : document.Title)</strong><small>/legal/@NormalizeSlug(document.Id, index)</small></div></div><button type="button" class="icon-button" title="删除文档" disabled="@(Enabled && Documents.Count <= 1)" @onclick="() => Documents.Remove(document)"><Icon Name="trash" Size="15" /></button></header>
+                    <div class="document-grid"><Field Label="文档名称"><input @bind="document.Title" /></Field><Field Label="路由标识" Hint="只允许字母、数字、短横线和下划线"><input value="@document.Id" @onchange="args => document.Id = NormalizeSlug(args.Value?.ToString() ?? string.Empty, index)" /></Field><Field Label="Markdown 内容" Full="true"><textarea rows="9" @bind="document.ContentMarkdown"></textarea></Field></div>
+                </article>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public List<LegalDocumentDto> Documents { get; set; } = [];
+    [Parameter] public bool Enabled { get; set; }
+
+    private void AddDocument()
+    {
+        var index = Documents.Count;
+        Documents.Add(new LegalDocumentDto { Id = $"document-{index + 1}", Title = $"协议文档 {index + 1}" });
+    }
+
+    private static string NormalizeSlug(string value, int index)
+    {
+        var normalized = new string(value.Trim().ToLowerInvariant().Select(character => char.IsLetterOrDigit(character) || character is '-' or '_' ? character : '-').ToArray());
+        while (normalized.Contains("--", StringComparison.Ordinal)) normalized = normalized.Replace("--", "-", StringComparison.Ordinal);
+        normalized = normalized.Trim('-', '_');
+        return string.IsNullOrWhiteSpace(normalized) ? $"document-{index + 1}" : normalized;
+    }
+}

@@ -1,0 +1,372 @@
+@page "/admin/backup"
+@page "/admin/backups"
+@implements IAsyncDisposable
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>备份与数据 · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div><h1>备份与数据</h1><p>配置 S3 兼容对象存储、异步生图存储和定时策略，并管理数据库备份生命周期。</p></div>
+    <div class="page-header-actions">
+        <button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(error))
+{
+    <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@error</span><button type="button" @onclick="LoadAsync">重试</button></div>
+}
+
+@if (loading)
+{
+    <LoadingState Text="正在载入备份配置与记录" />
+}
+else
+{
+    <div class="backup-page-grid">
+        <section class="content-section backup-card">
+            <div class="section-header">
+                <div><h2>备份对象存储</h2><p>数据库备份保存到 S3、Cloudflare R2 或其他 S3 兼容服务；密钥不会回显。</p></div>
+                <button type="button" class="text-link" @onclick="() => r2GuideOpen = true">R2 配置指南</button>
+            </div>
+            <div class="form-grid settings-form">
+                <div class="form-field"><label for="backup-endpoint">Endpoint</label><InputText id="backup-endpoint" @bind-Value="s3.Endpoint" placeholder="https://&lt;account_id&gt;.r2.cloudflarestorage.com" /></div>
+                <div class="form-field"><label for="backup-region">Region</label><InputText id="backup-region" @bind-Value="s3.Region" placeholder="auto" /></div>
+                <div class="form-field"><label for="backup-bucket">Bucket</label><InputText id="backup-bucket" @bind-Value="s3.Bucket" /></div>
+                <div class="form-field"><label for="backup-prefix">Prefix</label><InputText id="backup-prefix" @bind-Value="s3.Prefix" placeholder="backups/" /></div>
+                <div class="form-field"><label for="backup-access">Access Key ID</label><InputText id="backup-access" @bind-Value="s3.AccessKeyId" /></div>
+                <div class="form-field"><label for="backup-secret">Secret Access Key</label><InputText id="backup-secret" type="password" autocomplete="new-password" @bind-Value="s3.SecretAccessKey" placeholder="@(s3SecretConfigured ? "已配置；留空保留" : "")" /></div>
+                <label class="toggle-row full"><InputCheckbox @bind-Value="s3.ForcePathStyle" /><span><strong>Force path style</strong><small>MinIO 等兼容服务可能需要启用</small></span></label>
+            </div>
+            <div class="section-footer-actions"><button type="button" class="button secondary" disabled="@testingS3" @onclick="TestS3Async">@(testingS3 ? "测试中…" : "测试连接")</button><button type="button" class="button primary" disabled="@savingS3" @onclick="SaveS3Async">@(savingS3 ? "保存中…" : "保存存储配置")</button></div>
+        </section>
+
+        <section class="content-section backup-card">
+            <div class="section-header"><div><h2>异步生图对象存储</h2><p>保存批量图片等异步任务结果，可复用上方备份 S3 凭据，也可使用独立目标。</p></div><label class="header-toggle"><InputCheckbox @bind-Value="imageStorage.Enabled" /><span>启用</span></label></div>
+            <div class="form-grid settings-form">
+                <label class="toggle-row full"><InputCheckbox @bind-Value="imageStorage.ReuseBackupS3" /><span><strong>复用备份 S3</strong><small>继承 Endpoint、Region 和访问密钥，仅配置 Bucket 与 Prefix</small></span></label>
+                <div class="form-field"><label for="image-bucket">Bucket</label><InputText id="image-bucket" @bind-Value="imageStorage.Bucket" placeholder="@(imageStorage.ReuseBackupS3 ? "留空继承备份 Bucket" : "")" /></div>
+                <div class="form-field"><label for="image-prefix">Prefix</label><InputText id="image-prefix" @bind-Value="imageStorage.Prefix" placeholder="images/" /></div>
+                @if (!imageStorage.ReuseBackupS3)
+                {
+                    <div class="form-field"><label for="image-endpoint">Endpoint</label><InputText id="image-endpoint" @bind-Value="imageStorage.Endpoint" /></div>
+                    <div class="form-field"><label for="image-region">Region</label><InputText id="image-region" @bind-Value="imageStorage.Region" placeholder="auto" /></div>
+                    <div class="form-field"><label for="image-access">Access Key ID</label><InputText id="image-access" @bind-Value="imageStorage.AccessKeyId" /></div>
+                    <div class="form-field"><label for="image-secret">Secret Access Key</label><InputText id="image-secret" type="password" autocomplete="new-password" @bind-Value="imageStorage.SecretAccessKey" placeholder="@(imageStorageSecretConfigured ? "已配置；留空保留" : "")" /></div>
+                    <label class="toggle-row full"><InputCheckbox @bind-Value="imageStorage.ForcePathStyle" /><span><strong>Force path style</strong></span></label>
+                }
+                <div class="form-field"><label for="image-public-url">公共基础地址</label><InputText id="image-public-url" @bind-Value="imageStorage.PublicBaseUrl" type="url" placeholder="https://cdn.example.com" /></div>
+                <div class="form-field"><label for="image-expiry">预签名有效期（小时）</label><InputNumber id="image-expiry" @bind-Value="imageStorage.PresignExpiryHours" min="1" /></div>
+                <div class="form-field"><label for="image-max-bytes">最大下载字节数</label><InputNumber id="image-max-bytes" @bind-Value="imageStorage.MaxDownloadBytes" min="1" /></div>
+            </div>
+            <div class="section-footer-actions"><button type="button" class="button secondary" disabled="@testingImageStorage" @onclick="TestImageStorageAsync">@(testingImageStorage ? "测试中…" : "测试连接")</button><button type="button" class="button primary" disabled="@savingImageStorage" @onclick="SaveImageStorageAsync">@(savingImageStorage ? "保存中…" : "保存图片存储")</button></div>
+        </section>
+
+        <section class="content-section backup-card">
+            <div class="section-header"><div><h2>定时备份</h2><p>使用标准五段 Cron 表达式自动创建备份，并按天数和份数清理旧记录。</p></div></div>
+            <div class="form-grid settings-form">
+                <label class="toggle-row full"><InputCheckbox @bind-Value="schedule.Enabled" /><span><strong>启用定时备份</strong></span></label>
+                <div class="form-field"><label for="backup-cron">Cron</label><InputText id="backup-cron" @bind-Value="schedule.CronExpr" placeholder="0 2 * * *" /><small>默认每天 02:00 执行</small></div>
+                <div class="form-field"><label for="backup-retain-days">保留天数</label><InputNumber id="backup-retain-days" @bind-Value="schedule.RetainDays" min="0" /><small>0 表示不按天数清理</small></div>
+                <div class="form-field"><label for="backup-retain-count">保留数量</label><InputNumber id="backup-retain-count" @bind-Value="schedule.RetainCount" min="0" /><small>0 表示不按数量清理</small></div>
+            </div>
+            <div class="section-footer-actions"><button type="button" class="button primary" disabled="@savingSchedule" @onclick="SaveScheduleAsync">@(savingSchedule ? "保存中…" : "保存定时策略")</button></div>
+        </section>
+
+        <section class="content-section backup-card backup-history-card">
+            <div class="section-header operations-header">
+                <div><h2>备份历史</h2><p>创建和恢复任务运行时每 2 秒自动刷新；分卷备份可逐卷下载。</p></div>
+                <div class="backup-create-actions"><label><span>过期天数</span><InputNumber @bind-Value="manualExpireDays" min="0" /></label><button type="button" class="button primary" disabled="@creating" @onclick="CreateAsync"><Icon Name="database" Size="15" />@(creating ? "备份中…" : "立即备份")</button><button type="button" class="button secondary" disabled="@loadingBackups" @onclick="RefreshBackupsAsync"><Icon Name="refresh" Size="15" />刷新</button></div>
+            </div>
+            @if (backups.Count == 0)
+            {
+                <EmptyState Title="暂无备份记录" Description="点击“立即备份”创建第一份备份。" />
+            }
+            else
+            {
+                <DxGrid Data="@backups" KeyFieldName="Id" ShowFilterRow="true" ShowSearchPanel="true" PageSize="20" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer">
+                    <Columns>
+                        <DxGridDataColumn FieldName="Id" Caption="ID" MinWidth="150" />
+                        <DxGridDataColumn Caption="状态" Width="130"><CellDisplayTemplate Context="context">@{ var row = (BackupRecordDto)context.DataItem; }<span class="backup-status @StatusClass(row.Status)">@StatusText(row)</span></CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn FieldName="FileName" Caption="文件" MinWidth="220" />
+                        <DxGridDataColumn Caption="大小" Width="105"><CellDisplayTemplate Context="context">@FormatSize(((BackupRecordDto)context.DataItem).SizeBytes)</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="分卷" Width="75"><CellDisplayTemplate Context="context">@PartsText((BackupRecordDto)context.DataItem)</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="过期时间" MinWidth="150"><CellDisplayTemplate Context="context">@FormatDate(((BackupRecordDto)context.DataItem).ExpiresAt, "永不过期")</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn FieldName="TriggeredBy" Caption="触发方式" Width="105" />
+                        <DxGridDataColumn Caption="开始时间" MinWidth="150"><CellDisplayTemplate Context="context">@FormatDate(((BackupRecordDto)context.DataItem).StartedAt)</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="恢复状态" Width="115"><CellDisplayTemplate Context="context">@RestoreStatusText((BackupRecordDto)context.DataItem)</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="错误" MinWidth="180"><CellDisplayTemplate Context="context">@RecordError((BackupRecordDto)context.DataItem)</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="操作" Width="170"><CellDisplayTemplate Context="context">@{ var row = (BackupRecordDto)context.DataItem; }<div class="row-actions"><button type="button" class="icon-button" title="下载" aria-label="下载" disabled="@(row.Status != "completed")" @onclick="() => DownloadAsync(row)"><Icon Name="download" Size="16" /></button><button type="button" class="icon-button" title="恢复" aria-label="恢复" disabled="@(row.Status != "completed" || row.RestoreStatus == "running")" @onclick="() => RestoreAsync(row)"><Icon Name="rotate-ccw" Size="16" /></button><button type="button" class="icon-button danger" title="删除" aria-label="删除" disabled="@(row.Status == "running" || row.RestoreStatus == "running")" @onclick="() => DeleteAsync(row)"><Icon Name="trash" Size="16" /></button></div></CellDisplayTemplate></DxGridDataColumn>
+                    </Columns>
+                </DxGrid>
+            }
+        </section>
+    </div>
+}
+
+<AppModal Open="r2GuideOpen" Title="Cloudflare R2 配置指南" OnClose="CloseR2Guide">
+    <ChildContent>
+        <ol class="guide-steps">
+            <li><b>创建存储桶</b><span>在 Cloudflare R2 中创建用于 ParaGateway 备份的 Bucket。</span></li>
+            <li><b>创建 API 令牌</b><span>授予对象读写权限，并记录 Access Key ID 与 Secret Access Key。</span></li>
+            <li><b>填写 Endpoint</b><code>https://&lt;account_id&gt;.r2.cloudflarestorage.com</code></li>
+            <li><b>设置参数</b><span>Region 使用 <code>auto</code>，Prefix 建议使用 <code>backups/</code>，通常无需启用 Force path style。</span></li>
+        </ol>
+        <div class="inline-alert success"><Icon Name="circle-check" Size="17" /><span>R2 免费额度适合小规模数据库备份；正式环境仍应配置生命周期与访问审计。</span></div>
+    </ChildContent>
+    <Footer><button type="button" class="button primary" @onclick="CloseR2Guide">知道了</button></Footer>
+</AppModal>
+
+<AppModal Open="downloadOpen" Title="备份分卷下载" OnClose="CloseDownload">
+    <ChildContent>
+        @if (downloadParts.Count == 0) { <p class="muted-text">未返回可下载链接。</p> }
+        else { <div class="stack-list">@foreach (var part in downloadParts) { <div class="stack-row"><span>第 @part.Index 卷 · @FormatSize(part.SizeBytes)</span><a class="button secondary small" href="@part.Url" rel="noopener">下载</a></div> }</div> }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseDownload">关闭</button></Footer>
+</AppModal>
+
+@code {
+    private BackupS3ConfigDto s3 = new();
+    private ImageStorageConfigDto imageStorage = new();
+    private BackupScheduleDto schedule = new();
+    private List<BackupRecordDto> backups = [];
+    private List<BackupDownloadPartDto> downloadParts = [];
+    private bool loading = true, loadingBackups, savingS3, testingS3, savingImageStorage, testingImageStorage, savingSchedule, creating, downloadOpen, r2GuideOpen;
+    private bool s3SecretConfigured, imageStorageSecretConfigured;
+    private int manualExpireDays = 14;
+    private string? error;
+    private CancellationTokenSource? pollingCancellation;
+    private Task? pollingTask;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        StopPolling();
+        loading = true;
+        error = null;
+        try
+        {
+            var s3Task = Api.GetBackupS3ConfigAsync();
+            var imageTask = Api.GetImageStorageConfigAsync();
+            var scheduleTask = Api.GetBackupScheduleAsync();
+            var backupsTask = Api.GetBackupsAsync();
+            await Task.WhenAll(s3Task, imageTask, scheduleTask, backupsTask);
+            s3 = await s3Task;
+            s3SecretConfigured = !string.IsNullOrWhiteSpace(s3.AccessKeyId);
+            s3.SecretAccessKey = null;
+            var imageResponse = await imageTask;
+            imageStorage = imageResponse.Config;
+            imageStorageSecretConfigured = imageResponse.SecretConfigured;
+            imageStorage.SecretAccessKey = null;
+            schedule = await scheduleTask;
+            backups = (await backupsTask).Items;
+            UpdateActiveState();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task SaveS3Async()
+    {
+        savingS3 = true; error = null;
+        try
+        {
+            await RunSensitiveAsync(async () =>
+            {
+                s3 = await Api.UpdateBackupS3ConfigAsync(s3);
+                s3SecretConfigured = !string.IsNullOrWhiteSpace(s3.AccessKeyId);
+                s3.SecretAccessKey = null;
+                Toasts.Success("备份对象存储配置已保存");
+            });
+        }
+        finally { savingS3 = false; }
+    }
+
+    private async Task TestS3Async()
+    {
+        testingS3 = true; error = null;
+        try { var result = await Api.TestBackupS3Async(s3); if (result.Ok) Toasts.Success(string.IsNullOrWhiteSpace(result.Message) ? "S3 连接成功" : result.Message); else error = result.Message; }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { testingS3 = false; }
+    }
+
+    private async Task SaveImageStorageAsync()
+    {
+        savingImageStorage = true; error = null;
+        try
+        {
+            await RunSensitiveAsync(async () =>
+            {
+                imageStorage = await Api.UpdateImageStorageConfigAsync(imageStorage);
+                imageStorage.SecretAccessKey = null;
+                imageStorageSecretConfigured = !imageStorage.ReuseBackupS3 && !string.IsNullOrWhiteSpace(imageStorage.AccessKeyId);
+                Toasts.Success("异步生图对象存储已保存");
+            });
+        }
+        finally { savingImageStorage = false; }
+    }
+
+    private async Task TestImageStorageAsync()
+    {
+        testingImageStorage = true; error = null;
+        try { var result = await Api.TestImageStorageAsync(imageStorage); if (result.Ok) Toasts.Success(string.IsNullOrWhiteSpace(result.Message) ? "图片存储连接成功" : result.Message); else error = result.Message; }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { testingImageStorage = false; }
+    }
+
+    private async Task SaveScheduleAsync()
+    {
+        savingSchedule = true; error = null;
+        try { schedule = await Api.UpdateBackupScheduleAsync(schedule); Toasts.Success("定时备份策略已保存"); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { savingSchedule = false; }
+    }
+
+    private async Task CreateAsync()
+    {
+        creating = true; error = null;
+        try
+        {
+            await RunSensitiveAsync(async () =>
+            {
+                var row = await Api.CreateBackupAsync(Math.Max(0, manualExpireDays));
+                backups.Insert(0, row);
+                Toasts.Success("备份任务已创建");
+                StartPolling();
+            });
+        }
+        finally { if (!HasActiveOperations) creating = false; }
+    }
+
+    private async Task RefreshBackupsAsync()
+    {
+        loadingBackups = true;
+        try { backups = (await Api.GetBackupsAsync()).Items; UpdateActiveState(); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loadingBackups = false; }
+    }
+
+    private async Task DownloadAsync(BackupRecordDto row)
+    {
+        error = null;
+        await RunSensitiveAsync(async () =>
+        {
+            var result = await Api.GetBackupDownloadAsync(row.Id);
+            if (!string.IsNullOrWhiteSpace(result.Url)) { await JS.InvokeVoidAsync("paraGateway.downloadUrl", result.Url); return; }
+            downloadParts = result.Parts;
+            downloadOpen = true;
+        });
+    }
+
+    private async Task RestoreAsync(BackupRecordDto row)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"恢复备份“{row.FileName}”会覆盖当前数据库，确认继续？")) return;
+        var password = await JS.InvokeAsync<string?>("prompt", "请输入管理员密码以恢复备份");
+        if (string.IsNullOrWhiteSpace(password)) return;
+        error = null;
+        await RunSensitiveAsync(async () =>
+        {
+            var updated = await Api.RestoreBackupAsync(row.Id, password);
+            ReplaceRecord(updated);
+            Toasts.Success("恢复任务已提交");
+            StartPolling();
+        });
+    }
+
+    private async Task DeleteAsync(BackupRecordDto row)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认删除备份“{row.FileName}”？")) return;
+        try { await Api.DeleteBackupAsync(row.Id); backups.RemoveAll(item => item.Id == row.Id); Toasts.Success("备份已删除"); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private bool HasActiveOperations => backups.Any(row => row.Status is "pending" or "running" || row.RestoreStatus == "running");
+
+    private void UpdateActiveState()
+    {
+        creating = backups.Any(row => row.Status is "pending" or "running");
+        if (HasActiveOperations) StartPolling(); else StopPolling();
+    }
+
+    private void StartPolling()
+    {
+        if (pollingTask is { IsCompleted: false }) return;
+        pollingCancellation = new CancellationTokenSource();
+        pollingTask = PollActiveOperationsAsync(pollingCancellation.Token);
+    }
+
+    private async Task PollActiveOperationsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                var latest = await Api.GetBackupsAsync();
+                await InvokeAsync(() =>
+                {
+                    backups = latest.Items;
+                    creating = backups.Any(row => row.Status is "pending" or "running");
+                    StateHasChanged();
+                });
+                if (!HasActiveOperations) break;
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (ApiException) { }
+        finally
+        {
+            await InvokeAsync(() =>
+            {
+                creating = backups.Any(row => row.Status is "pending" or "running");
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void StopPolling()
+    {
+        pollingCancellation?.Cancel();
+        pollingCancellation?.Dispose();
+        pollingCancellation = null;
+    }
+
+    private void ReplaceRecord(BackupRecordDto updated)
+    {
+        var index = backups.FindIndex(row => row.Id == updated.Id);
+        if (index >= 0) backups[index] = updated; else backups.Insert(0, updated);
+    }
+
+    private async Task RunSensitiveAsync(Func<Task> operation)
+    {
+        try { await operation(); }
+        catch (ApiException ex) when (string.Equals(ex.Code, "STEP_UP_REQUIRED", StringComparison.OrdinalIgnoreCase))
+        {
+            var code = await JS.InvokeAsync<string?>("prompt", "请输入管理员 TOTP 验证码以继续敏感操作");
+            if (string.IsNullOrWhiteSpace(code)) return;
+            try { await Api.VerifyTotpStepUpAsync(code); await operation(); }
+            catch (ApiException retry) { error = retry.Message; }
+        }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private static string StatusText(BackupRecordDto row) => row.Status == "running" && !string.IsNullOrWhiteSpace(row.Progress) ? $"运行中 · {row.Progress}" : row.Status switch { "pending" => "等待中", "running" => "运行中", "completed" => "已完成", "failed" => "失败", _ => row.Status };
+    private static string StatusClass(string status) => status switch { "completed" => "success", "pending" or "running" => "running", "failed" => "danger", _ => "neutral" };
+    private static string RestoreStatusText(BackupRecordDto row) => row.RestoreStatus switch { "running" => "恢复中", "completed" => "已恢复", "failed" => "恢复失败", _ => "-" };
+    private static string RecordError(BackupRecordDto row) => !string.IsNullOrWhiteSpace(row.RestoreError) ? row.RestoreError : row.ErrorMessage ?? "-";
+    private static string PartsText(BackupRecordDto row) => row.Parts.Count > 0 ? row.Parts.Count.ToString() : row.Status is "pending" or "running" ? "-" : "1";
+    private static string FormatSize(long bytes) => bytes <= 0 ? "-" : bytes < 1024 ? $"{bytes} B" : bytes < 1024 * 1024 ? $"{bytes / 1024d:0.0} KB" : bytes < 1024L * 1024 * 1024 ? $"{bytes / 1024d / 1024:0.0} MB" : $"{bytes / 1024d / 1024 / 1024:0.0} GB";
+    private static string FormatDate(DateTimeOffset? value, string fallback = "-") => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? fallback;
+    private void CloseR2Guide() => r2GuideOpen = false;
+    private void CloseDownload() { downloadOpen = false; downloadParts.Clear(); }
+
+    public ValueTask DisposeAsync()
+    {
+        StopPolling();
+        return ValueTask.CompletedTask;
+    }
+}

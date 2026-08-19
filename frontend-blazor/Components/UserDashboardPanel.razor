@@ -1,0 +1,639 @@
+@using System.Globalization
+@inject ApiClient Api
+@inject AuthSession Auth
+
+<div class="user-dashboard">
+    @if (loading)
+    {
+        <LoadingState Text="正在载入仪表盘" />
+    }
+    else if (stats is null)
+    {
+        <ErrorState Message="@(error ?? "仪表盘数据载入失败。")" OnRetry="RefreshAllAsync" />
+    }
+    else
+    {
+        @if (error is not null)
+        {
+            <div class="inline-alert warning dashboard-alert" role="alert">
+                <Icon Name="alert" Size="18" />
+                <span>@error</span>
+            </div>
+        }
+
+        <section class="dashboard-stat-grid core-stats" aria-label="核心统计">
+            @if (!IsSimpleMode)
+            {
+                <article class="dashboard-stat-card">
+                    <span class="dashboard-stat-icon emerald"><Icon Name="wallet" Size="20" /></span>
+                    <div class="dashboard-stat-copy">
+                        <span>可用余额</span>
+                        <strong class="emerald-text">$@FormatBalance(Auth.User?.Balance ?? 0m)</strong>
+                        <small>当前可用</small>
+                    </div>
+                </article>
+            }
+
+            <article class="dashboard-stat-card">
+                <span class="dashboard-stat-icon blue"><Icon Name="key" Size="20" /></span>
+                <div class="dashboard-stat-copy">
+                    <span>API 密钥</span>
+                    <strong>@FormatNumber(stats.TotalApiKeys)</strong>
+                    <small class="success-text">@FormatNumber(stats.ActiveApiKeys) 个启用</small>
+                </div>
+            </article>
+
+            <article class="dashboard-stat-card">
+                <span class="dashboard-stat-icon green"><Icon Name="activity" Size="20" /></span>
+                <div class="dashboard-stat-copy">
+                    <span>今日请求</span>
+                    <strong>@FormatNumber(stats.TodayRequests)</strong>
+                    <small>总计: @FormatNumber(stats.TotalRequests)</small>
+                </div>
+            </article>
+
+            <article class="dashboard-stat-card wide-copy">
+                <span class="dashboard-stat-icon purple"><Icon Name="dollar" Size="20" /></span>
+                <div class="dashboard-stat-copy">
+                    <span>今日费用</span>
+                    <strong class="cost-pair"><b title="实际扣费">$@FormatCost(stats.TodayActualCost)</b><i>/</i><em title="标准费用">$@FormatCost(stats.TodayCost)</em></strong>
+                    <small class="cost-pair"><span>总计:</span><b title="实际扣费">$@FormatCost(stats.TotalActualCost)</b><i>/</i><em title="标准费用">$@FormatCost(stats.TotalCost)</em></small>
+                </div>
+            </article>
+        </section>
+
+        <section class="dashboard-stat-grid" aria-label="Token 与性能统计">
+            <article class="dashboard-stat-card">
+                <span class="dashboard-stat-icon amber"><Icon Name="box" Size="20" /></span>
+                <div class="dashboard-stat-copy">
+                    <span>今日 Token</span>
+                    <strong>@FormatTokens(stats.TodayTokens)</strong>
+                    <small>输入: @FormatTokens(stats.TodayInputTokens) / 输出: @FormatTokens(stats.TodayOutputTokens)</small>
+                </div>
+            </article>
+
+            <article class="dashboard-stat-card">
+                <span class="dashboard-stat-icon indigo"><Icon Name="database" Size="20" /></span>
+                <div class="dashboard-stat-copy">
+                    <span>总 Token</span>
+                    <strong>@FormatTokens(stats.TotalTokens)</strong>
+                    <small>输入: @FormatTokens(stats.TotalInputTokens) / 输出: @FormatTokens(stats.TotalOutputTokens)</small>
+                </div>
+            </article>
+
+            <article class="dashboard-stat-card">
+                <span class="dashboard-stat-icon violet"><Icon Name="zap" Size="20" /></span>
+                <div class="dashboard-stat-copy performance-copy">
+                    <span>性能指标</span>
+                    <strong>@FormatTokens(stats.Rpm) <em>RPM</em></strong>
+                    <small><b>@FormatTokens(stats.Tpm)</b> TPM</small>
+                </div>
+            </article>
+
+            <article class="dashboard-stat-card">
+                <span class="dashboard-stat-icon rose"><Icon Name="clock" Size="20" /></span>
+                <div class="dashboard-stat-copy">
+                    <span>平均响应</span>
+                    <strong>@FormatDuration(stats.AverageDurationMs)</strong>
+                    <small>平均响应时间</small>
+                </div>
+            </article>
+        </section>
+
+        @if (!IsSimpleMode && PlatformCards.Count > 0)
+        {
+            <section class="dashboard-card platform-breakdown-card">
+                <div class="dashboard-card-heading">
+                    <h2>平台用量</h2>
+                    <span>@stats.ByPlatform.Count 个平台</span>
+                </div>
+                <div class="platform-card-grid">
+                    @foreach (var item in PlatformCards)
+                    {
+                        <article class="platform-card @(item.IsOther ? "other" : null)">
+                            <header>
+                                <strong>@(item.IsOther ? "其他" : PlatformLabel(item.Platform))</strong>
+                                <b title="累计实际扣费">$@FormatCost(item.TotalActualCost)</b>
+                            </header>
+                            <dl>
+                                <div><dt>今日费用</dt><dd>$@FormatCost(item.TodayActualCost)</dd></div>
+                                <div><dt>请求</dt><dd>@(item.TotalRequests > 0 ? FormatNumber(item.TotalRequests) : "-")</dd></div>
+                                <div><dt>Token</dt><dd>@(item.TotalTokens > 0 ? FormatTokens(item.TotalTokens) : "-")</dd></div>
+                            </dl>
+
+                            @if (!item.IsOther && item.Quota is not null && HasAnyLimit(item.Quota))
+                            {
+                                <div class="quota-section">
+                                    <span class="quota-title">平台额度</span>
+                                    @foreach (var window in BuildQuotaWindows(item.Quota))
+                                    {
+                                        @if (window.Limit.HasValue)
+                                        {
+                                            <div class="quota-window">
+                                                @if (window.Limit.Value == 0)
+                                                {
+                                                    <div class="quota-line"><span>@window.Label</span><b class="danger-text">已禁用</b></div>
+                                                    <div class="quota-track"><span class="danger" style="width:100%"></span></div>
+                                                }
+                                                else
+                                                {
+                                                    var percent = QuotaPercent(window.Usage, window.Limit.Value);
+                                                    <div class="quota-line"><span>@window.Label</span><b>$@FormatQuota(window.Usage) / $@FormatQuota(window.Limit.Value)</b></div>
+                                                    <div class="quota-track"><span class="@QuotaBarClass(percent)" style="@($"width:{percent}%")"></span></div>
+                                                    @if (window.ResetsAt.HasValue)
+                                                    {
+                                                        <small>重置于 @FormatResetTime(window.ResetsAt.Value)</small>
+                                                    }
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </article>
+                    }
+                </div>
+            </section>
+        }
+
+        <section class="dashboard-card dashboard-filter-card" aria-label="统计筛选">
+            <div class="dashboard-filter-group">
+                <span class="filter-label">时间范围：</span>
+                <DxDateRangePicker T="DateTime"
+                                   StartDate="@startDate"
+                                   EndDate="@endDate"
+                                   StartDateChanged="@((DateTime value) => OnStartDateChangedAsync(value))"
+                                   EndDateChanged="@((DateTime value) => OnEndDateChangedAsync(value))"
+                                   DisplayFormat="yyyy-MM-dd"
+                                   CssClass="dashboard-date-range" />
+                <button type="button" class="button secondary small" disabled="@(refreshing || loadingCharts || loadingUsage)" @onclick="RefreshAllAsync">
+                    <Icon Name="refresh" Size="15" /> 刷新
+                </button>
+            </div>
+            <div class="dashboard-filter-group granularity-filter">
+                <label class="filter-label" for="user-dashboard-granularity">粒度：</label>
+                <select id="user-dashboard-granularity" value="@granularity" disabled="@(refreshing || loadingCharts)" @onchange="OnGranularityChangedAsync">
+                    <option value="day">按天</option>
+                    <option value="hour">按小时</option>
+                </select>
+            </div>
+        </section>
+
+        <div class="dashboard-chart-grid">
+            <section class="dashboard-card dashboard-chart-card">
+                <div class="dashboard-card-heading"><h2>模型分布</h2></div>
+                @if (loadingCharts)
+                {
+                    <div class="dashboard-loading"><span class="spinner"></span><span>正在载入模型统计</span></div>
+                }
+                else if (chartError is not null)
+                {
+                    <div class="dashboard-empty danger-text">@chartError</div>
+                }
+                else if (ModelRows.Count == 0)
+                {
+                    <div class="dashboard-empty">暂无数据</div>
+                }
+                else
+                {
+                    <div class="distribution-layout">
+                        <div class="distribution-chart">
+                            <DxPieChart Data="@ModelRows" InnerDiameter="0.55" Width="100%" Height="210px">
+                                <DxPieChartSeries T="UserUsageModelStatDto" TArgument="string" TValue="long"
+                                                  ArgumentField="item => item.Model"
+                                                  ValueField="item => item.TotalTokens" />
+                                <DxChartTooltip Enabled="true" />
+                            </DxPieChart>
+                        </div>
+                        <div class="compact-table-wrap">
+                            <table class="compact-dashboard-table">
+                                <thead><tr><th>模型</th><th>请求</th><th>Token</th><th>实际</th><th>标准</th></tr></thead>
+                                <tbody>
+                                    @foreach (var model in ModelRows)
+                                    {
+                                        <tr>
+                                            <td title="@model.Model">@model.Model</td>
+                                            <td>@FormatNumber(model.Requests)</td>
+                                            <td>@FormatTokens(model.TotalTokens)</td>
+                                            <td class="success-text">$@FormatCost(model.ActualCost)</td>
+                                            <td>$@FormatCost(model.Cost)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                }
+            </section>
+
+            <section class="dashboard-card dashboard-chart-card">
+                <div class="dashboard-card-heading"><h2>Token 使用趋势</h2></div>
+                @if (loadingCharts)
+                {
+                    <div class="dashboard-loading"><span class="spinner"></span><span>正在载入趋势</span></div>
+                }
+                else if (chartError is not null)
+                {
+                    <div class="dashboard-empty danger-text">@chartError</div>
+                }
+                else if (TrendRows.Count == 0)
+                {
+                    <div class="dashboard-empty">暂无数据</div>
+                }
+                else
+                {
+                    <DxChart Data="@TrendRows" Width="100%" Height="250px">
+                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
+                                           Name="Input" ArgumentField="point => point.Date" ValueField="point => point.InputTokens" />
+                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
+                                           Name="Output" ArgumentField="point => point.Date" ValueField="point => point.OutputTokens" />
+                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
+                                           Name="Cache Creation" ArgumentField="point => point.Date" ValueField="point => point.CacheCreationTokens" />
+                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
+                                           Name="Cache Read" ArgumentField="point => point.Date" ValueField="point => point.CacheReadTokens" />
+                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="double"
+                                           Name="Cache Hit Rate" ArgumentField="point => point.Date" ValueField="point => point.CacheHitRate" Axis="PercentAxis" />
+                        <DxChartValueAxis />
+                        <DxChartValueAxis Name="PercentAxis" Alignment="ChartAxisAlignment.Far">
+                            <DxChartAxisTitle Text="命中率 (%)" />
+                        </DxChartValueAxis>
+                        <DxChartTooltip Enabled="true" />
+                    </DxChart>
+                }
+            </section>
+        </div>
+
+        <div class="dashboard-bottom-grid">
+            <section class="dashboard-card recent-usage-card">
+                <div class="dashboard-card-heading bordered">
+                    <h2>最近使用</h2>
+                    <span class="range-badge">最近 7 天</span>
+                </div>
+                <div class="recent-usage-body">
+                    @if (loadingUsage)
+                    {
+                        <div class="dashboard-loading"><span class="spinner"></span><span>正在载入最近记录</span></div>
+                    }
+                    else if (usageError is not null)
+                    {
+                        <div class="dashboard-empty danger-text">@usageError</div>
+                    }
+                    else if (recentUsage.Count == 0)
+                    {
+                        <EmptyState Title="暂无使用记录" Description="开始调用 API 后，用量记录会显示在这里。" />
+                    }
+                    else
+                    {
+                        <div class="recent-usage-list">
+                            @foreach (var log in recentUsage)
+                            {
+                                <article class="recent-usage-row">
+                                    <span class="usage-row-icon"><Icon Name="box" Size="19" /></span>
+                                    <div class="usage-row-main">
+                                        <strong>@(string.IsNullOrWhiteSpace(log.Model) ? "未知模型" : log.Model)</strong>
+                                        <small>@UiFormat.DateTime(log.CreatedAt)</small>
+                                    </div>
+                                    <div class="usage-row-cost">
+                                        <strong><b title="实际扣费">$@FormatCost(log.ActualCost)</b><i>/</i><span title="标准费用">$@FormatCost(log.TotalCost)</span></strong>
+                                        <small>@FormatNumber((long)log.InputTokens + log.OutputTokens) tokens</small>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                        <a class="view-all-link" href="/usage">查看全部使用记录 <Icon Name="arrow-right" Size="15" /></a>
+                    }
+                </div>
+            </section>
+
+            <section class="dashboard-card quick-actions-card">
+                <div class="dashboard-card-heading bordered"><h2>快捷操作</h2></div>
+                <div class="quick-action-list">
+                    <a class="quick-action" href="/keys">
+                        <span class="quick-action-icon blue"><Icon Name="key" Size="21" /></span>
+                        <span><strong>创建 API 密钥</strong><small>生成新的访问密钥</small></span>
+                        <Icon Name="chevron-right" Size="17" />
+                    </a>
+                    <a class="quick-action" href="/usage">
+                        <span class="quick-action-icon emerald"><Icon Name="activity" Size="21" /></span>
+                        <span><strong>查看使用记录</strong><small>检查详细调用日志</small></span>
+                        <Icon Name="chevron-right" Size="17" />
+                    </a>
+                    @if (canUseBatchImage)
+                    {
+                        <a class="quick-action" href="/batch-image">
+                            <span class="quick-action-icon sky"><Icon Name="sparkles" Size="21" /></span>
+                            <span><strong>批量生图</strong><small>批量提交和管理图像任务</small></span>
+                            <Icon Name="chevron-right" Size="17" />
+                        </a>
+                    }
+                    <a class="quick-action" href="/redeem">
+                        <span class="quick-action-icon amber"><Icon Name="ticket" Size="21" /></span>
+                        <span><strong>兑换码</strong><small>使用兑换码增加余额</small></span>
+                        <Icon Name="chevron-right" Size="17" />
+                    </a>
+                </div>
+            </section>
+        </div>
+    }
+</div>
+
+@code {
+    private UserDashboardStats? stats;
+    private UserDashboardTrendResponseDto trendResponse = new();
+    private UserUsageModelsResponseDto modelsResponse = new();
+    private List<GoUsageLog> recentUsage = [];
+    private List<UserPlatformQuotaDto> platformQuotas = [];
+    private DateTime startDate = DateTime.Today.AddDays(-6);
+    private DateTime endDate = DateTime.Today;
+    private string granularity = "day";
+    private bool loading = true;
+    private bool refreshing;
+    private bool loadingCharts;
+    private bool loadingUsage;
+    private bool canUseBatchImage;
+    private string? error;
+    private string? chartError;
+    private string? usageError;
+    private int rangeGeneration;
+
+    private bool IsSimpleMode => Auth.User?.IsSimpleMode == true;
+
+    private IReadOnlyList<UserUsageModelStatDto> ModelRows =>
+        modelsResponse.Models.OrderByDescending(item => item.TotalTokens).ToList();
+
+    private IReadOnlyList<UserUsageTrendPointDto> TrendRows =>
+        trendResponse.Trend.OrderBy(item => item.Date).ToList();
+
+    private IReadOnlyList<PlatformCardRow> PlatformCards => BuildPlatformCards();
+
+    protected override Task OnInitializedAsync() => RefreshAllAsync();
+
+    private async Task RefreshAllAsync()
+    {
+        var initialLoad = stats is null;
+        if (initialLoad) loading = true;
+        else refreshing = true;
+        error = null;
+
+        try
+        {
+            await Task.WhenAll(
+                LoadStatsAsync(),
+                LoadRangeDataAsync(),
+                LoadPlatformQuotasAsync(),
+                LoadBatchImageAccessAsync());
+        }
+        finally
+        {
+            loading = false;
+            refreshing = false;
+        }
+    }
+
+    private async Task LoadStatsAsync()
+    {
+        try
+        {
+            await Auth.RefreshAsync();
+            stats = await Api.GetUserDashboardStatsAsync();
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+    }
+
+    private async Task LoadRangeDataAsync()
+    {
+        var generation = ++rangeGeneration;
+        await Task.WhenAll(LoadChartsAsync(generation), LoadRecentUsageAsync(generation));
+    }
+
+    private async Task LoadChartsAsync(int generation)
+    {
+        loadingCharts = true;
+        chartError = null;
+        var query = BuildUsageQuery(page: 1, pageSize: 100);
+        try
+        {
+            var trendTask = Api.GetUserDashboardTrendAsync(query, granularity);
+            var modelsTask = Api.GetMyUsageModelsAsync(query);
+            await Task.WhenAll(trendTask, modelsTask);
+            if (generation != rangeGeneration) return;
+            trendResponse = await trendTask;
+            modelsResponse = await modelsTask;
+        }
+        catch (ApiException ex)
+        {
+            if (generation == rangeGeneration) chartError = ex.Message;
+        }
+        finally
+        {
+            if (generation == rangeGeneration) loadingCharts = false;
+        }
+    }
+
+    private async Task LoadRecentUsageAsync(int generation)
+    {
+        loadingUsage = true;
+        usageError = null;
+        try
+        {
+            var response = await Api.GetMyUsageLogsAsync(BuildUsageQuery(page: 1, pageSize: 100));
+            if (generation != rangeGeneration) return;
+            recentUsage = response.Items.Take(5).ToList();
+        }
+        catch (ApiException ex)
+        {
+            if (generation == rangeGeneration) usageError = ex.Message;
+        }
+        finally
+        {
+            if (generation == rangeGeneration) loadingUsage = false;
+        }
+    }
+
+    private async Task LoadPlatformQuotasAsync()
+    {
+        try
+        {
+            platformQuotas = (await Api.GetMyPlatformQuotasAsync()).PlatformQuotas;
+        }
+        catch (ApiException)
+        {
+            platformQuotas = [];
+        }
+    }
+
+    private async Task LoadBatchImageAccessAsync()
+    {
+        canUseBatchImage = false;
+        try
+        {
+            var page = 1;
+            while (true)
+            {
+                var response = await Api.GetMyApiKeysPageAsync(new ApiKeyListQuery
+                {
+                    Page = page,
+                    PageSize = 100,
+                    Status = "active",
+                    SortBy = "created_at",
+                    SortOrder = "desc"
+                });
+                if (response.Items.Any(key => key.IsActive
+                    && string.Equals(key.GroupPlatform, "gemini", StringComparison.OrdinalIgnoreCase)
+                    && key.GroupAllowsBatchImageGeneration))
+                {
+                    canUseBatchImage = true;
+                    return;
+                }
+                if (page >= response.Pages || response.Items.Count == 0) return;
+                page++;
+            }
+        }
+        catch (ApiException)
+        {
+            canUseBatchImage = false;
+        }
+    }
+
+    private UserUsageQuery BuildUsageQuery(int page, int pageSize) => new()
+    {
+        Page = page,
+        PageSize = pageSize,
+        StartDate = startDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        EndDate = endDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        SortBy = "created_at",
+        SortOrder = "desc"
+    };
+
+    private async Task OnStartDateChangedAsync(DateTime value)
+    {
+        startDate = value.Date;
+        if (startDate > endDate) endDate = startDate;
+        await LoadRangeDataAsync();
+    }
+
+    private async Task OnEndDateChangedAsync(DateTime value)
+    {
+        endDate = value.Date;
+        if (endDate < startDate) startDate = endDate;
+        await LoadRangeDataAsync();
+    }
+
+    private async Task OnGranularityChangedAsync(ChangeEventArgs args)
+    {
+        granularity = string.Equals(args.Value?.ToString(), "hour", StringComparison.OrdinalIgnoreCase) ? "hour" : "day";
+        await LoadRangeDataAsync();
+    }
+
+    private IReadOnlyList<PlatformCardRow> BuildPlatformCards()
+    {
+        if (stats is null) return [];
+
+        var statsByPlatform = new Dictionary<string, UserDashboardPlatformStatsDto>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in stats.ByPlatform)
+        {
+            if (!string.IsNullOrWhiteSpace(item.Platform)) statsByPlatform[item.Platform] = item;
+        }
+
+        var quotaByPlatform = new Dictionary<string, UserPlatformQuotaDto>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in platformQuotas)
+        {
+            if (!string.IsNullOrWhiteSpace(item.Platform)) quotaByPlatform[item.Platform] = item;
+        }
+
+        var platforms = new HashSet<string>(statsByPlatform.Keys, StringComparer.OrdinalIgnoreCase);
+        platforms.UnionWith(quotaByPlatform.Keys);
+        var rows = platforms.Select(platform =>
+        {
+            statsByPlatform.TryGetValue(platform, out var platformStats);
+            quotaByPlatform.TryGetValue(platform, out var quota);
+            return new PlatformCardRow(
+                platform,
+                platformStats?.TotalActualCost ?? 0,
+                platformStats?.TodayActualCost ?? 0,
+                platformStats?.TotalRequests ?? 0,
+                platformStats?.TotalTokens ?? 0,
+                quota,
+                false);
+        }).OrderBy(row => PlatformSortOrder(row.Platform))
+          .ThenBy(row => row.Platform, StringComparer.OrdinalIgnoreCase)
+          .ToList();
+
+        var diffTotal = Math.Max(0, stats.TotalActualCost - rows.Sum(row => row.TotalActualCost));
+        var diffToday = Math.Max(0, stats.TodayActualCost - rows.Sum(row => row.TodayActualCost));
+        if (diffTotal > 0.0001 || diffToday > 0.0001)
+        {
+            rows.Add(new PlatformCardRow("__other__", diffTotal, diffToday, 0, 0, null, true));
+        }
+        return rows;
+    }
+
+    private static IReadOnlyList<QuotaWindowRow> BuildQuotaWindows(UserPlatformQuotaDto quota) =>
+    [
+        new("daily", "每日", quota.DailyLimitUsd, quota.DailyUsageUsd, quota.DailyWindowResetsAt),
+        new("weekly", "每周", quota.WeeklyLimitUsd, quota.WeeklyUsageUsd, quota.WeeklyWindowResetsAt),
+        new("monthly", "每月", quota.MonthlyLimitUsd, quota.MonthlyUsageUsd, quota.MonthlyWindowResetsAt)
+    ];
+
+    private static bool HasAnyLimit(UserPlatformQuotaDto quota) =>
+        quota.DailyLimitUsd.HasValue || quota.WeeklyLimitUsd.HasValue || quota.MonthlyLimitUsd.HasValue;
+
+    private static int PlatformSortOrder(string platform) => platform.ToLowerInvariant() switch
+    {
+        "anthropic" => 0,
+        "openai" => 1,
+        "gemini" => 2,
+        "antigravity" => 3,
+        "grok" => 4,
+        _ => 100
+    };
+
+    private static string PlatformLabel(string platform) => platform.ToLowerInvariant() switch
+    {
+        "anthropic" => "Claude",
+        "openai" => "OpenAI",
+        "gemini" => "Gemini",
+        "antigravity" => "Antigravity",
+        "grok" => "Grok",
+        _ => platform
+    };
+
+    private static int QuotaPercent(double usage, double limit) =>
+        limit <= 0 ? 0 : Math.Clamp((int)Math.Round(usage / limit * 100d), 0, 100);
+
+    private static string QuotaBarClass(int percent) => percent >= 95 ? "danger" : percent >= 75 ? "warning" : "success";
+    private static string FormatResetTime(DateTimeOffset value) => value.ToLocalTime().ToString("M/d HH:mm", CultureInfo.CurrentCulture);
+    private static string FormatBalance(decimal value) => value.ToString("N2", CultureInfo.InvariantCulture);
+    private static string FormatQuota(double value) => value.ToString("N2", CultureInfo.InvariantCulture);
+    private static string FormatCost(double value) => value.ToString("0.0000", CultureInfo.InvariantCulture);
+    private static string FormatNumber(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+    private static string FormatTokens(long value) => value switch
+    {
+        >= 1_000_000_000 => $"{value / 1_000_000_000d:0.##}B",
+        >= 1_000_000 => $"{value / 1_000_000d:0.##}M",
+        >= 1_000 => $"{value / 1_000d:0.##}K",
+        _ => value.ToString(CultureInfo.InvariantCulture)
+    };
+    private static string FormatDuration(double milliseconds) => milliseconds >= 1000
+        ? $"{milliseconds / 1000d:0.00}s"
+        : $"{milliseconds:0}ms";
+
+    private sealed record PlatformCardRow(
+        string Platform,
+        double TotalActualCost,
+        double TodayActualCost,
+        long TotalRequests,
+        long TotalTokens,
+        UserPlatformQuotaDto? Quota,
+        bool IsOther);
+
+    private sealed record QuotaWindowRow(
+        string Key,
+        string Label,
+        double? Limit,
+        double Usage,
+        DateTimeOffset? ResetsAt);
+}

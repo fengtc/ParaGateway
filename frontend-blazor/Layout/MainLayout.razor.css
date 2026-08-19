@@ -1,0 +1,310 @@
+.app-shell {
+    min-height: 100vh;
+}
+
+.app-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    width: 256px;
+    overflow: hidden;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    transition: width .22s ease, transform .22s ease;
+}
+
+.app-sidebar.collapsed {
+    width: 72px;
+}
+
+.app-main {
+    min-width: 0;
+    min-height: 100vh;
+    margin-left: 256px;
+    transition: margin-left .22s ease;
+}
+
+.app-main.sidebar-is-collapsed {
+    margin-left: 72px;
+}
+
+.app-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    min-width: 0;
+    height: 64px;
+    padding: 0 24px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    background: var(--topbar-bg);
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 1px 2px rgba(15, 23, 20, .03);
+    backdrop-filter: blur(14px);
+}
+
+.topbar-left,
+.topbar-actions {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+}
+
+.topbar-left { gap: 10px; }
+.topbar-actions { margin-left: auto; gap: 8px; }
+
+.topbar-context {
+    display: grid;
+    min-width: 0;
+    gap: 1px;
+}
+
+.topbar-context h1 {
+    overflow: hidden;
+    margin: 0;
+    color: var(--ink);
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.topbar-context p {
+    overflow: hidden;
+    margin: 0;
+    color: var(--muted);
+    font-size: .7rem;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mobile-menu { display: none; }
+
+.topbar-icon-link,
+.topbar-link {
+    display: inline-flex;
+    min-height: 36px;
+    padding: 0 10px;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 600;
+    text-decoration: none;
+    border-radius: 8px;
+}
+
+.topbar-icon-link { width: 36px; padding: 0; }
+
+.topbar-icon-link:hover,
+.topbar-link:hover {
+    color: var(--ink);
+    background: var(--sidebar-hover);
+}
+
+.balance-summary {
+    position: relative;
+    display: flex;
+    min-height: 36px;
+    padding: 0 11px;
+    align-items: center;
+    gap: 7px;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border-radius: 10px;
+    outline: none;
+}
+
+.balance-summary > strong {
+    font-size: .78rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.frozen-badge {
+    padding: 2px 6px;
+    color: #946514;
+    background: #fff0c2;
+    border-radius: 999px;
+    font-size: .62rem;
+    font-weight: 650;
+}
+
+.balance-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 55;
+    display: none;
+    width: 220px;
+    padding: 11px 12px;
+    gap: 8px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: var(--popover-shadow);
+    font-size: .72rem;
+}
+
+.balance-popover span {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.balance-popover span:last-child {
+    padding-top: 7px;
+    color: var(--ink);
+    border-top: 1px solid var(--line);
+}
+
+.balance-popover strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.balance-summary:hover .balance-popover,
+.balance-summary:focus .balance-popover,
+.balance-summary:focus-within .balance-popover { display: grid; }
+
+.account-menu-wrap { position: relative; }
+
+.account-trigger {
+    display: flex;
+    min-height: 42px;
+    max-width: 250px;
+    padding: 4px 7px;
+    align-items: center;
+    gap: 9px;
+    color: var(--ink);
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+}
+
+.account-trigger:hover,
+.account-trigger:focus-visible { background: var(--sidebar-hover); }
+
+.avatar {
+    display: grid;
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    color: #fff;
+    font-size: .68rem;
+    font-weight: 750;
+    background: linear-gradient(135deg, #2d8a68, #4cb889);
+    border-radius: 50%;
+}
+
+.account-copy {
+    display: grid;
+    min-width: 0;
+    text-align: left;
+}
+
+.account-copy strong,
+.account-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.account-copy strong { font-size: .76rem; }
+.account-copy small { color: var(--muted); font-size: .63rem; }
+
+.account-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 60;
+    width: 228px;
+    padding: 6px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    box-shadow: var(--popover-shadow);
+}
+
+.account-dropdown-summary {
+    display: grid;
+    padding: 8px 10px 10px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+}
+
+.account-dropdown-summary strong { color: var(--ink); font-size: .78rem; }
+.account-dropdown-summary span { overflow: hidden; color: var(--muted); font-size: .68rem; text-overflow: ellipsis; }
+
+.account-dropdown button {
+    display: flex;
+    width: 100%;
+    padding: 9px 10px;
+    align-items: center;
+    gap: 10px;
+    color: var(--ink);
+    font-size: .78rem;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+}
+
+.account-dropdown button:hover,
+.account-dropdown button:focus-visible { background: var(--sidebar-hover); }
+.account-dropdown .danger-text { color: var(--danger); }
+
+.page-content {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 24px 32px 36px;
+}
+
+.sidebar-scrim { display: none; }
+
+@media (max-width: 1040px) {
+    .topbar-link span,
+    .account-copy { display: none; }
+
+    .topbar-link { width: 36px; padding: 0; }
+}
+
+@media (max-width: 860px) {
+    .app-sidebar,
+    .app-sidebar.collapsed {
+        width: 256px;
+        transform: translateX(-100%);
+    }
+
+    .app-sidebar.open { transform: translateX(0); }
+
+    .app-main,
+    .app-main.sidebar-is-collapsed { margin-left: 0; }
+
+    .app-topbar { padding: 0 14px; }
+    .mobile-menu { display: inline-grid; }
+
+    .sidebar-scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 35;
+        display: block;
+        background: rgba(10, 15, 13, .5);
+        border: 0;
+    }
+
+    .page-content { padding: 20px 16px 28px; }
+}
+
+@media (max-width: 620px) {
+    .topbar-context p,
+    .balance-summary,
+    .topbar-link { display: none; }
+
+    .app-topbar { gap: 8px; }
+    .topbar-actions { gap: 3px; }
+    .account-trigger { padding: 4px; }
+}

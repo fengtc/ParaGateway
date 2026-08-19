@@ -1,0 +1,63 @@
+@inject IJSRuntime JS
+@inject ToastService Toasts
+
+@if (Endpoints.Count > 0)
+{
+    <div class="api-endpoint-list" aria-label="API 接入地址">
+        @foreach (var item in Endpoints)
+        {
+            <article class="api-endpoint-chip" title="@item.Description">
+                <strong>@item.Name</strong>
+                @if (item.IsDefault) { <span class="default-badge">默认</span> }
+                <span class="endpoint-divider">|</span>
+                <button type="button" class="endpoint-copy" title="@(string.IsNullOrWhiteSpace(item.Description) ? "点击复制" : $"{item.Description}；点击复制")" @onclick="() => CopyAsync(item.Endpoint)">
+                    <code>@item.Endpoint</code>
+                    <Icon Name="@(copiedEndpoint == item.Endpoint ? "check" : "copy")" Size="13" />
+                </button>
+                <a class="endpoint-speed" href="@SpeedTestUrl(item.Endpoint)" target="_blank" rel="noopener noreferrer" title="测速" aria-label="测试 @item.Name 延迟"><Icon Name="zap" Size="13" /></a>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string ApiBaseUrl { get; set; } = string.Empty;
+    [Parameter] public IReadOnlyList<CustomEndpointDto> CustomEndpoints { get; set; } = [];
+
+    private string? copiedEndpoint;
+
+    private IReadOnlyList<EndpointItem> Endpoints
+    {
+        get
+        {
+            var items = new List<EndpointItem>();
+            if (!string.IsNullOrWhiteSpace(ApiBaseUrl))
+            {
+                items.Add(new EndpointItem("API 地址", ApiBaseUrl.Trim(), string.Empty, true));
+            }
+            items.AddRange(CustomEndpoints
+                .Where(item => !string.IsNullOrWhiteSpace(item.Endpoint))
+                .Select(item => new EndpointItem(
+                    string.IsNullOrWhiteSpace(item.Name) ? "自定义地址" : item.Name.Trim(),
+                    item.Endpoint.Trim(), item.Description?.Trim() ?? string.Empty, false)));
+            return items;
+        }
+    }
+
+    private async Task CopyAsync(string endpoint)
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", endpoint);
+        copiedEndpoint = endpoint;
+        Toasts.Success("API 地址已复制");
+        StateHasChanged();
+        await Task.Delay(1800);
+        if (copiedEndpoint == endpoint)
+        {
+            copiedEndpoint = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string SpeedTestUrl(string endpoint) => $"https://www.tcptest.cn/http/{Uri.EscapeDataString(endpoint)}";
+    private sealed record EndpointItem(string Name, string Endpoint, string Description, bool IsDefault);
+}

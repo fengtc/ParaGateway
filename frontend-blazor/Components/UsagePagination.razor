@@ -1,0 +1,25 @@
+@if (Total > 0)
+{
+    <nav class="usage-pagination" aria-label="分页">
+        <div class="page-size"><label for="@SelectId">每页</label><select id="@SelectId" value="@PageSize" disabled="@Busy" @onchange="PageSizeChangedAsync"><option value="20">20 条</option><option value="50">50 条</option><option value="100">100 条</option></select></div>
+        <span>共 @Total.ToString("N0") 条 · 第 @Page / @TotalPages 页</span>
+        <div class="page-buttons">
+            <button type="button" class="icon-button" title="上一页" disabled="@(Busy || Page <= 1)" @onclick="() => OnPage.InvokeAsync(Page - 1)"><Icon Name="chevron-left" Size="16" /></button>
+            @foreach (var number in VisiblePages) { <button type="button" class="page-number @(number == Page ? "active" : null)" disabled="@Busy" @onclick="() => OnPage.InvokeAsync(number)">@number</button> }
+            <button type="button" class="icon-button" title="下一页" disabled="@(Busy || Page >= TotalPages)" @onclick="() => OnPage.InvokeAsync(Page + 1)"><Icon Name="chevron-right" Size="16" /></button>
+        </div>
+    </nav>
+}
+
+@code {
+    [Parameter] public int Page { get; set; } = 1;
+    [Parameter] public int PageSize { get; set; } = 20;
+    [Parameter] public long Total { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public EventCallback<int> OnPage { get; set; }
+    [Parameter] public EventCallback<int> OnPageSize { get; set; }
+    private string SelectId { get; } = $"page-size-{Guid.NewGuid():N}";
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(Total / (double)Math.Max(PageSize, 1)));
+    private IEnumerable<int> VisiblePages { get { var start = Math.Max(1, Math.Min(Page - 2, TotalPages - 4)); var end = Math.Min(TotalPages, start + 4); return Enumerable.Range(start, end - start + 1); } }
+    private Task PageSizeChangedAsync(ChangeEventArgs e) => OnPageSize.InvokeAsync(int.TryParse(e.Value?.ToString(), out var value) ? value : 20);
+}

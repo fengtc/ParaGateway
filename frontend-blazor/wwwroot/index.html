@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#17201d" />
+    <title>ParaGateway</title>
+    <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link id="dx-light-theme" rel="stylesheet" href="_content/DevExpress.Blazor.Themes/office-white.bs5.min.css" />
+    <link id="dx-dark-theme" rel="stylesheet" href="_content/DevExpress.Blazor.Themes/blazing-dark.bs5.min.css" disabled />
+    <link rel="stylesheet" href="css/app.css?v=20260819-dark-theme-audit-b" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=paragateway" />
+    <link href="ParaGateway.Frontend.styles.css?v=20260819-dark-theme-audit-b" rel="stylesheet" />
+    <script type="importmap"></script>
+    <script src="js/paragateway.js?v=20260819-clipboard-fallback-a"></script>
+</head>
+
+<body>
+    <div id="app">
+        <div class="app-boot" role="status">
+            <span class="spinner"></span>
+            <span>正在启动 ParaGateway</span>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui">
+        页面发生错误，请刷新后重试。
+        <a href="." class="reload">刷新</a>
+        <span class="dismiss">关闭</span>
+    </div>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+</body>
+
+</html>

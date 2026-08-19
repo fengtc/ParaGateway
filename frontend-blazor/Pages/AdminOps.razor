@@ -1,0 +1,1440 @@
+@page "/admin/ops"
+@implements IAsyncDisposable
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>运维监控 · ParaGateway</PageTitle>
+
+<div class="ops-dashboard @(fullscreen ? "ops-fullscreen" : null)">
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="inline-alert danger ops-alert" role="alert"><Icon Name="alert" Size="17" /><span>@error</span></div>
+    }
+
+    @if (loading && !loadedOnce)
+    {
+        <LoadingState Text="正在载入运维监控数据" />
+    }
+    else
+    {
+        <section class="ops-hero-card">
+            <div class="ops-toolbar">
+                <div class="ops-title-block">
+                    <h2><Icon Name="activity" Size="22" />运维监控</h2>
+                    <div class="ops-ready-line">
+                        <span class="status-dot @(loading ? "loading" : "ready")"></span>
+                        <span>@(loading ? "加载中..." : "就绪")</span>
+                        <span>·</span>
+                        <span>刷新：@(lastUpdated?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "未知")</span>
+                        @if (advanced.AutoRefreshEnabled)
+                        {
+                            <span>·</span><span>自动刷新：@autoRefreshCountdown 秒</span>
+                        }
+                    </div>
+                </div>
+                <div class="ops-toolbar-actions">
+                    @if (!fullscreen)
+                    {
+                        <select value="@platform" @onchange="PlatformChangedAsync" aria-label="平台">
+                            <option value="">全部平台</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option>
+                        </select>
+                        <select value="@GroupFilterValue" @onchange="GroupChangedAsync" aria-label="分组">
+                            <option value="">全部分组</option>
+                            @foreach (var group in FilteredGroups)
+                            {
+                                <option value="@group.Id">@group.Name</option>
+                            }
+                        </select>
+                        <select value="@timeRange" @onchange="TimeRangeChangedAsync" aria-label="时间范围">
+                            <option value="5m">5 分钟</option><option value="30m">30 分钟</option><option value="1h">1 小时</option><option value="6h">6 小时</option><option value="24h">24 小时</option><option value="custom">自定义</option>
+                        </select>
+                    }
+                    <button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="RefreshAllAsync"><Icon Name="refresh" Size="16" /></button>
+                    @if (!fullscreen)
+                    {
+                        <button type="button" class="ops-action blue" @onclick="OpenAlertRulesAsync"><Icon Name="bell" Size="15" />预警规则</button>
+                        <button type="button" class="ops-action" @onclick="OpenSettingsAsync"><Icon Name="settings" Size="15" />设置</button>
+                        <button type="button" class="icon-button" title="全屏" aria-label="全屏" @onclick="ToggleFullscreen"><Icon Name="grid" Size="16" /></button>
+                    }
+                    else
+                    {
+                        <button type="button" class="ops-action" @onclick="ToggleFullscreen">退出全屏</button>
+                    }
+                </div>
+            </div>
+
+            <div class="ops-overview-grid">
+                <div class="health-realtime-panel">
+                    <button type="button" class="health-score" title="系统健康评分综合考虑 SLA、错误率与资源使用情况" @onclick="ToggleDiagnosis">
+                        <span class="health-ring" style="--health-score:@Math.Clamp(overview.HealthScore, 0, 100)"><strong>@HealthScoreLabel</strong><small>健康评分</small></span>
+                        <span class="health-caption">健康状况</span>
+                        <b class="@HealthTone">@HealthStatus</b>
+                    </button>
+                    <div class="realtime-panel">
+                        <div class="realtime-heading"><span><i></i>实时信息</span><div class="window-tabs">@foreach (var option in RealtimeWindows) { <button type="button" class="@(realtimeWindow == option ? "active" : null)" @onclick="() => ChangeRealtimeWindowAsync(option)">@option</button> }</div></div>
+                        <span class="metric-kicker">当前</span>
+                        <div class="realtime-values"><strong>@FormatRate(realtime.Summary?.Qps.Current) <small>QPS</small></strong><strong>@FormatRate(realtime.Summary?.Tps.Current) <small>TPS</small></strong></div>
+                        <div class="realtime-secondary"><span><small>峰值</small><b>@FormatRate(realtime.Summary?.Qps.Peak) QPS</b><b>@FormatRate(realtime.Summary?.Tps.Peak) TPS</b></span><span><small>平均</small><b>@FormatRate(realtime.Summary?.Qps.Avg) QPS</b><b>@FormatRate(realtime.Summary?.Tps.Avg) TPS</b></span></div>
+                        <div class="heartbeat-line"><span></span></div>
+                    </div>
+                </div>
+
+                <div class="ops-metric-grid">
+                    <article class="ops-metric-card"><header><span>请求</span><button type="button" @onclick='() => OpenRequestsAsync("all")'>详情</button></header><dl><div><dt>请求数</dt><dd>@FormatNumber(overview.RequestCountTotal)</dd></div><div><dt>Tokens</dt><dd>@FormatNumber(overview.TokenConsumed)</dd></div><div><dt>平均 QPS</dt><dd>@overview.Qps.Avg.ToString("0.0")</dd></div><div><dt>平均 TPS</dt><dd>@overview.Tps.Avg.ToString("0.0")</dd></div></dl></article>
+                    <article class="ops-metric-card"><header><span>SLA</span><button type="button" @onclick='() => OpenRequestsAsync("error")'>详情</button></header><strong class="metric-main @SlaTone">@Percent(overview.Sla, 3)</strong><div class="meter"><i class="@SlaTone" style="width:@SlaProgress%"></i></div><p>异常 <b>@FormatNumber(Math.Max(0, overview.RequestCountSla - overview.SuccessCount))</b></p></article>
+                    <article class="ops-metric-card"><header><span>请求错误</span><button type="button" @onclick='() => OpenErrorsAsync("request")'>详情</button></header><strong class="metric-main @RequestErrorTone">@Percent(overview.ErrorRate, 2)</strong><p>错误数 <b>@FormatNumber(overview.ErrorCountSla)</b></p><p>业务限制 <b>@FormatNumber(overview.BusinessLimitedCount)</b></p></article>
+                    <article class="ops-metric-card"><header><span>请求时长</span><button type="button" @onclick='() => OpenRequestsAsync("all", "duration_desc")'>详情</button></header><strong class="metric-main">@(overview.Duration.P99Ms?.ToString() ?? "-") <small>ms (P99)</small></strong><div class="percentile-grid"><span>P95 <b>@MsValue(overview.Duration.P95Ms)</b></span><span>P90 <b>@MsValue(overview.Duration.P90Ms)</b></span><span>P50 <b>@MsValue(overview.Duration.P50Ms)</b></span><span>Avg <b>@MsValue(overview.Duration.AvgMs)</b></span></div></article>
+                    <article class="ops-metric-card"><header><span>TTFT</span><button type="button" @onclick='() => OpenRequestsAsync("all", "duration_desc")'>详情</button></header><strong class="metric-main @TtftTone">@(overview.Ttft.P99Ms?.ToString() ?? "-") <small>ms (P99)</small></strong><div class="percentile-grid"><span>P95 <b>@MsValue(overview.Ttft.P95Ms)</b></span><span>P90 <b>@MsValue(overview.Ttft.P90Ms)</b></span><span>P50 <b>@MsValue(overview.Ttft.P50Ms)</b></span><span>Avg <b>@MsValue(overview.Ttft.AvgMs)</b></span></div></article>
+                    <article class="ops-metric-card"><header><span>上游错误</span><button type="button" @onclick='() => OpenErrorsAsync("upstream")'>详情</button></header><strong class="metric-main @UpstreamErrorTone">@Percent(overview.UpstreamErrorRate, 2)</strong><p>错误数（排除 429/529） <b>@FormatNumber(overview.UpstreamErrorCountExcl429529)</b></p><p>429 / 529 <b>@FormatNumber(overview.Upstream429Count + overview.Upstream529Count)</b></p></article>
+                </div>
+            </div>
+
+            @if (diagnosisOpen)
+            {
+                <div class="diagnosis-panel"><h3><Icon Name="pulse" Size="17" />智能诊断</h3>@foreach (var item in DiagnosisItems) { <div class="diagnosis-item @item.Tone"><Icon Name="@(item.Tone == "danger" ? "alert" : "info")" Size="15" /><span><b>@item.Title</b><small>@item.Description</small></span></div> }</div>
+            }
+
+            <div class="resource-grid">
+                <article><span>CPU</span><strong class="@ResourceTone(system?.CpuUsagePercent, 80, 95)">@PercentValue(system?.CpuUsagePercent)</strong><small>警告 80% · 严重 95%</small></article>
+                <article><span>内存</span><strong class="@ResourceTone(system?.MemoryUsagePercent, 85, 95)">@PercentValue(system?.MemoryUsagePercent)</strong><small>@MemorySummary</small></article>
+                <article><span>数据库</span><strong class="@(system?.DbOk == false ? "danger" : "success")">@BoolLabel(system?.DbOk)</strong><small>连接 @(system?.DbConnActive ?? 0) 活跃 · @(system?.DbConnIdle ?? 0) 空闲</small></article>
+                <article><span>Redis</span><strong class="@(system?.RedisOk == false ? "danger" : "success")">@BoolLabel(system?.RedisOk)</strong><small>连接 @(system?.RedisConnTotal?.ToString() ?? "-") / @(system?.RedisPoolSize?.ToString() ?? "-")</small></article>
+                <article><span>Goroutines</span><strong class="@GoroutineTone">@(system?.GoroutineCount?.ToString() ?? "-")</strong><small>队列 @(system?.ConcurrencyQueueDepth?.ToString() ?? "-")</small></article>
+                <article><header><span>后台任务</span><button type="button" @onclick="() => jobsOpen = true">详情</button></header><strong class="@(JobWarningCount > 0 ? "warning" : "success")">@(JobWarningCount > 0 ? "需关注" : "正常")</strong><small>共 @overview.JobHeartbeats.Count · 警告 @JobWarningCount</small></article>
+            </div>
+        </section>
+
+        <div class="ops-analysis-row">
+            <section class="ops-card concurrency-card">
+                <header class="card-header"><div><h3>并发 / 排队</h3><p>@ConcurrencyDimensionLabel · 共 @ConcurrencyRows.Count 项</p></div><button type="button" class="text-button" @onclick="ToggleConcurrencyModeAsync">@(showUserConcurrency ? "切换回平台视图" : "切换到用户视图")</button></header>
+                @if (!concurrency.Enabled && !showUserConcurrency) { <EmptyState Title="实时监控已关闭" Description="请在系统设置中启用实时运维监控。" /> }
+                else if (ConcurrencyRows.Count == 0) { <EmptyState Title="暂无数据" Description="当前筛选条件下没有并发记录。" /> }
+                else { <div class="compact-list">@foreach (var row in ConcurrencyRows.Take(8)) { <div class="concurrency-row"><span><b>@row.Name</b><small>@row.Subtitle</small></span><div><span>@row.Used / @row.Capacity</span><i><em class="@LoadTone(row.Load)" style="width:@Math.Clamp(row.Load, 0, 100)%"></em></i></div><small>排队 @row.Queued</small></div> }</div> }
+            </section>
+            <section class="ops-card switch-card">
+                <header class="card-header"><div><h3>账号切换率趋势</h3><p>近 5 小时账号切换次数 / 请求总数</p></div></header>
+                @if (SwitchTrendRows.Count == 0) { <EmptyState Title="暂无切换数据" Description="当前时间窗口内没有账号切换记录。" /> }
+                else { <DxChart Data="@SwitchTrendRows" Width="100%" Height="255px"><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="切换率 (%)" ArgumentField="p => p.Time" ValueField="p => p.Primary" /><DxChartTooltip Enabled="true" /></DxChart> }
+            </section>
+            <section class="ops-card throughput-card">
+                <header class="card-header"><div><h3>吞吐趋势</h3><p>QPS 与 TPS/1K 趋势</p></div><button type="button" class="text-button" @onclick='() => OpenRequestsAsync("all")'>查看明细</button></header>
+                @if (snapshot.ThroughputTrend.TopGroups.Count > 0)
+                {
+                    <div class="ops-breakdown-chips">
+                        @foreach (var item in snapshot.ThroughputTrend.TopGroups)
+                        {
+                            <button type="button" @onclick="() => SelectBreakdownGroupAsync(item.GroupId)"><span>@(string.IsNullOrWhiteSpace(item.GroupName) ? $"#{item.GroupId}" : item.GroupName)</span><b>@FormatNumber(item.RequestCount)</b></button>
+                        }
+                    </div>
+                }
+                else if (snapshot.ThroughputTrend.ByPlatform.Count > 0)
+                {
+                    <div class="ops-breakdown-chips">
+                        @foreach (var item in snapshot.ThroughputTrend.ByPlatform)
+                        {
+                            <button type="button" @onclick="() => SelectBreakdownPlatformAsync(item.Platform)"><span>@item.Platform.ToUpperInvariant()</span><b>@FormatNumber(item.RequestCount)</b></button>
+                        }
+                    </div>
+                }
+                @if (ThroughputRows.Count == 0) { <EmptyState Title="该时间窗口内暂无请求" Description="暂无可展示的吞吐数据。" /> }
+                else { <DxChart Data="@ThroughputRows" Width="100%" Height="255px"><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="QPS" ArgumentField="p => p.Time" ValueField="p => p.Primary" /><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="TPS/1K" ArgumentField="p => p.Time" ValueField="p => p.Secondary" /><DxChartTooltip Enabled="true" /></DxChart> }
+            </section>
+        </div>
+
+        <div class="ops-chart-grid">
+            <section class="ops-card"><header class="card-header"><div><h3>请求时长分布</h3><p>成功请求的耗时区间（毫秒）</p></div></header>@if (latency.Buckets.Count == 0) { <EmptyState Title="该时间窗口内暂无请求" Description="暂无延迟分布。" /> } else { <div class="bar-list">@foreach (var bucket in latency.Buckets) { <div><span>@bucket.Range</span><i><em style="width:@BarWidth(bucket.Count, latency.Buckets.Max(x => x.Count))%"></em></i><b>@bucket.Count</b></div> }</div> }</section>
+            <section class="ops-card"><header class="card-header"><div><h3>错误分布</h3><p>按状态码统计，排除业务限制</p></div><button type="button" class="text-button" @onclick='() => OpenErrorsAsync("request")'>查看明细</button></header>@if (errorDistribution.Items.Count == 0) { <EmptyState Title="该时间窗口内暂无错误" Description="暂无错误状态码分布。" /> } else { <div class="bar-list error-bars">@foreach (var item in errorDistribution.Items.OrderByDescending(x => x.Sla)) { <div><span>@item.StatusCode</span><i><em style="width:@BarWidth(item.Sla, errorDistribution.Items.Max(x => x.Sla))%"></em></i><b>@item.Sla</b></div> }</div> }</section>
+            <section class="ops-card"><header class="card-header"><div><h3>错误趋势</h3><p>请求错误与上游错误趋势</p></div><button type="button" class="text-button" @onclick='() => OpenErrorsAsync("upstream")'>查看明细</button></header>@if (ErrorTrendRows.Count == 0) { <EmptyState Title="该时间窗口内暂无错误" Description="暂无错误趋势。" /> } else { <DxChart Data="@ErrorTrendRows" Width="100%" Height="250px"><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="请求错误" ArgumentField="p => p.Time" ValueField="p => p.Primary" /><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="上游错误" ArgumentField="p => p.Time" ValueField="p => p.Secondary" /><DxChartTooltip Enabled="true" /></DxChart> }</section>
+        </div>
+
+        @if (advanced.DisplayOpenAiTokenStats)
+        {
+            <section class="ops-card ops-table-card token-stats-card">
+                <header class="card-header">
+                    <div><h3>OpenAI Token 请求统计</h3><p>按模型统计输出速度、首 Token 延迟与请求耗时</p></div>
+                    <div class="card-controls">
+                        <select value="@tokenTimeRange" @onchange="TokenTimeRangeChangedAsync" aria-label="Token 统计时间范围"><option value="30m">30m</option><option value="1h">1h</option><option value="1d">1d</option><option value="15d">15d</option><option value="30d">30d</option></select>
+                        <select value="@tokenViewMode" @onchange="TokenViewModeChangedAsync" aria-label="Token 统计视图"><option value="topn">Top N</option><option value="pagination">分页</option></select>
+                        @if (tokenViewMode == "topn")
+                        {
+                            <select value="@tokenTopN" @onchange="TokenTopNChangedAsync" aria-label="Token 统计 Top N"><option value="10">Top 10</option><option value="20">Top 20</option><option value="50">Top 50</option><option value="100">Top 100</option></select>
+                        }
+                        else
+                        {
+                            <select value="@tokenPageSize" @onchange="TokenPageSizeChangedAsync" aria-label="Token 统计每页条数"><option value="10">10 / 页</option><option value="20">20 / 页</option><option value="50">50 / 页</option><option value="100">100 / 页</option></select>
+                        }
+                        <button type="button" class="secondary-button" @onclick="LoadTokenStatsAsync">刷新</button>
+                    </div>
+                </header>
+                <div class="table-scroll"><table class="ops-table"><thead><tr><th>模型</th><th>请求数</th><th>含首 Token 请求</th><th>平均 Tokens/s</th><th>平均首 Token</th><th>输出 Tokens</th><th>平均耗时</th></tr></thead><tbody>@if (openAiStats.Items.Count == 0) { <tr><td colspan="7" class="empty-cell">暂无数据</td></tr> } else { @foreach (var row in openAiStats.Items) { <tr><td><b>@row.Model</b></td><td>@row.RequestCount</td><td>@row.RequestsWithFirstToken</td><td>@(row.AverageTokensPerSecond?.ToString("0.##") ?? "-")</td><td>@(row.AverageFirstTokenMs?.ToString("0") ?? "-") ms</td><td>@FormatNumber(row.TotalOutputTokens)</td><td>@row.AverageDurationMs.ToString("0") ms</td></tr> } }</tbody></table></div>
+                @if (tokenViewMode == "pagination")
+                {
+                    <div class="ops-pagination"><span>共 @openAiStats.Total 个模型</span><div><button type="button" disabled="@(tokenPage <= 1)" @onclick="() => ChangeTokenPageAsync(tokenPage - 1)">上一页</button><span>@tokenPage / @TokenTotalPages</span><button type="button" disabled="@(tokenPage >= TokenTotalPages)" @onclick="() => ChangeTokenPageAsync(tokenPage + 1)">下一页</button></div></div>
+                }
+            </section>
+        }
+
+        @if (advanced.DisplayAlertEvents)
+        {
+            <section class="ops-card ops-table-card alert-events-card">
+                <header class="card-header"><div><h3>告警事件</h3><p>最近触发的系统告警</p></div><button type="button" class="text-button" @onclick="OpenAlertRulesAsync">管理规则</button></header>
+                <div class="alert-event-filters">
+                    <select value="@alertTimeRange" @onchange="AlertTimeRangeChangedAsync" aria-label="告警时间范围"><option value="5m">5m</option><option value="30m">30m</option><option value="1h">1h</option><option value="6h">6h</option><option value="24h">24h</option><option value="7d">7d</option><option value="30d">30d</option></select>
+                    <select value="@alertSeverity" @onchange="AlertSeverityChangedAsync" aria-label="告警级别"><option value="">全部级别</option><option value="P0">P0</option><option value="P1">P1</option><option value="P2">P2</option><option value="P3">P3</option></select>
+                    <select value="@alertStatusFilter" @onchange="AlertStatusChangedAsync" aria-label="告警状态"><option value="">全部状态</option><option value="firing">告警中</option><option value="resolved">已恢复</option><option value="manual_resolved">手动解决</option></select>
+                    <select value="@alertEmailSent" @onchange="AlertEmailChangedAsync" aria-label="告警邮件状态"><option value="">全部邮件状态</option><option value="true">已发送邮件</option><option value="false">未发送邮件</option></select>
+                    <button type="button" class="secondary-button" disabled="@alertEventsLoading" @onclick="LoadAlertEventsAsync">刷新</button>
+                </div>
+                <div class="table-scroll"><table class="ops-table"><thead><tr><th>时间</th><th>级别 / 状态</th><th>平台</th><th>规则</th><th>告警</th><th>持续时间</th><th>维度</th><th>邮件</th></tr></thead><tbody>@if (alertEvents.Count == 0) { <tr><td colspan="8" class="empty-cell">暂无告警事件</td></tr> } else { @foreach (var item in alertEvents) { <tr class="clickable-row" @onclick="() => OpenAlertEventDetailAsync(item)"><td>@FormatDateTime(item.FiredAt ?? item.CreatedAt)</td><td><span class="level-badge @SeverityTone(item.Severity)">@item.Severity</span><small>@AlertStatus(item.Status)</small></td><td>@(string.IsNullOrWhiteSpace(AlertDimensionText(item, "platform")) ? "-" : AlertDimensionText(item, "platform"))</td><td><code>#@item.RuleId</code></td><td><b>@(string.IsNullOrWhiteSpace(item.Title) ? "-" : item.Title)</b><small>@item.Description</small></td><td>@AlertDurationLabel(item)</td><td><small>@AlertDimensionsSummary(item)</small></td><td>@(item.EmailSent ? "已发送" : "未发送")</td></tr> } }</tbody></table></div>
+                @if (alertEvents.Count > 0)
+                {
+                    <div class="load-more-row"><button type="button" class="secondary-button" disabled="@(!alertHasMore || alertLoadingMore)" @onclick="LoadMoreAlertsAsync">@(alertLoadingMore ? "加载中..." : alertHasMore ? "加载更多" : "没有更多")</button></div>
+                }
+            </section>
+        }
+
+        <section class="ops-card ops-table-card system-log-card">
+            <header class="card-header"><div><h3>系统日志</h3><p>索引化运行日志与写入队列状态</p></div><div class="log-health-badges"><span>队列 @logHealth.QueueDepth / @logHealth.QueueCapacity</span><span>已写入 @logHealth.WrittenCount</span><span class="warning">丢弃 @logHealth.DroppedCount</span><span class="danger">失败 @logHealth.WriteFailedCount</span></div></header>
+            <div class="system-log-tools"><button type="button" class="secondary-button" @onclick="OpenLogSettingsAsync">运行日志设置</button><button type="button" class="secondary-button" @onclick="LoadLogHealthAsync">刷新健康状态</button>@if (!string.IsNullOrWhiteSpace(logHealth.LastError)) { <span class="danger">最近写入错误：@logHealth.LastError</span> }</div>
+            <div class="system-log-filters full">
+                <label><span>时间范围</span><select @bind="logTimeRange"><option value="5m">5m</option><option value="30m">30m</option><option value="1h">1h</option><option value="6h">6h</option><option value="24h">24h</option><option value="7d">7d</option><option value="30d">30d</option></select></label>
+                <label><span>开始时间</span><input type="datetime-local" value="@logStartInput" @onchange="e => logStartInput = e.Value?.ToString() ?? string.Empty" /></label>
+                <label><span>结束时间</span><input type="datetime-local" value="@logEndInput" @onchange="e => logEndInput = e.Value?.ToString() ?? string.Empty" /></label>
+                <label><span>级别</span><select @bind="logLevel"><option value="">全部级别</option><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select></label>
+                <label><span>组件</span><input @bind="logComponent" placeholder="gateway" /></label>
+                <label><span>主机</span><input @bind="logHost" /></label>
+                <label><span>request_id</span><input @bind="logRequestId" /></label>
+                <label><span>client_request_id</span><input @bind="logClientRequestId" /></label>
+                <label><span>user_id</span><input @bind="logUserId" inputmode="numeric" /></label>
+                <label><span>api_key_id</span><input @bind="logApiKeyId" inputmode="numeric" /></label>
+                <label><span>account_id</span><input @bind="logAccountId" inputmode="numeric" /></label>
+                <label><span>平台</span><input @bind="logPlatform" /></label>
+                <label><span>模型</span><input @bind="logModel" /></label>
+                <label><span>关键词</span><input @bind="logSearch" placeholder="消息、错误、访问字段..." /></label>
+            </div>
+            <div class="system-log-actions"><button type="button" class="primary-button" @onclick="ApplyLogFiltersAsync">查询</button><button type="button" class="secondary-button" @onclick="ResetLogFiltersAsync">重置</button><button type="button" class="danger-link" @onclick="CleanupLogsAsync">清理当前筛选</button></div>
+            <div class="table-scroll"><table class="ops-table log-table"><thead><tr><th>时间</th><th>主机</th><th>级别</th><th>日志详情</th></tr></thead><tbody>@if (logs.Items.Count == 0) { <tr><td colspan="4" class="empty-cell">暂无系统日志</td></tr> } else { @foreach (var row in logs.Items) { <tr><td>@row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss")</td><td><b>@(string.IsNullOrWhiteSpace(row.Host) ? "-" : row.Host)</b><small>@row.Component</small></td><td><span class="level-badge @LogLevelTone(row.Level)">@row.Level</span></td><td class="log-message">@FormatSystemLogDetail(row)</td></tr> } }</tbody></table></div>
+            <div class="ops-pagination"><span>共 @logs.Total 条</span><div><select value="@logPageSize" @onchange="LogPageSizeChangedAsync" aria-label="每页日志数"><option value="10">10 / 页</option><option value="20">20 / 页</option><option value="50">50 / 页</option><option value="100">100 / 页</option></select><button type="button" disabled="@(logPage <= 1)" @onclick="() => ChangeLogPageAsync(logPage - 1)">上一页</button><span>@logPage / @Math.Max(1, logs.Pages)</span><button type="button" disabled="@(logPage >= Math.Max(1, logs.Pages))" @onclick="() => ChangeLogPageAsync(logPage + 1)">下一页</button></div></div>
+        </section>
+    }
+</div>
+
+<AppModal Open="@customRangeOpen" Title="自定义时间范围" MaxWidth="520px" OnClose="CloseCustomRange">
+    <ChildContent><div class="form-grid two"><label><span>开始时间</span><input type="datetime-local" value="@customStartInput" @onchange="e => customStartInput = e.Value?.ToString() ?? string.Empty" /></label><label><span>结束时间</span><input type="datetime-local" value="@customEndInput" @onchange="e => customEndInput = e.Value?.ToString() ?? string.Empty" /></label></div>@if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger">@modalError</div> }</ChildContent>
+    <Footer><button type="button" class="secondary-button" @onclick="CloseCustomRange">取消</button><button type="button" class="primary-button" @onclick="ApplyCustomRangeAsync">确定</button></Footer>
+</AppModal>
+
+<AppModal Open="@jobsOpen" Title="后台任务" MaxWidth="760px" OnClose="() => jobsOpen = false">
+    <ChildContent>@if (overview.JobHeartbeats.Count == 0) { <EmptyState Title="暂无任务心跳" Description="服务尚未上报后台任务状态。" /> } else { <div class="job-list">@foreach (var job in overview.JobHeartbeats) { <article><header><b>@job.JobName</b><span>@(job.LastDurationMs?.ToString() ?? "-") ms</span></header><p>最近成功：@FormatDateTime(job.LastSuccessAt)</p><p>最近运行：@FormatDateTime(job.LastRunAt)</p><p>结果：@(job.LastResult ?? "-")</p>@if (!string.IsNullOrWhiteSpace(job.LastError)) { <div class="job-error">@job.LastError</div> }</article> }</div> }</ChildContent>
+</AppModal>
+
+<AppModal Open="@requestsOpen" Title="请求明细" MaxWidth="1120px" OnClose="CloseRequests">
+    <ChildContent>
+        <div class="modal-toolbar ops-modal-heading"><span>时间范围：@CurrentRangeLabel</span><button type="button" class="secondary-button" @onclick="LoadRequestsAsync">刷新</button></div>
+        <div class="modal-filter-row">
+            <select @bind="requestKind"><option value="all">全部请求</option><option value="success">成功</option><option value="error">错误</option></select>
+            <select @bind="requestSort"><option value="created_at_desc">时间从新到旧</option><option value="created_at_asc">时间从旧到新</option><option value="duration_desc">耗时从高到低</option><option value="duration_asc">耗时从低到高</option></select>
+            <input @bind="requestSearch" placeholder="请求 ID、模型、用户..." />
+            <button type="button" class="secondary-button" @onclick="LoadRequestsAsync">查询</button>
+        </div>
+        <div class="table-scroll"><table class="ops-table"><thead><tr><th>时间</th><th>类型</th><th>请求 ID</th><th>平台 / 模型</th><th>状态</th><th>耗时</th><th>关联</th><th>操作</th></tr></thead><tbody>
+            @if (requests.Items.Count == 0) { <tr><td colspan="8" class="empty-cell">暂无请求记录</td></tr> }
+            else { @foreach (var row in requests.Items) { <tr><td>@row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss")</td><td><span class="level-badge @(row.Kind == "error" ? "danger" : "success")">@(row.Kind == "error" ? "错误" : "成功")</span></td><td><code title="@row.RequestId">@row.RequestId</code></td><td><b>@row.Platform</b><small>@row.Model</small></td><td>@(row.StatusCode?.ToString() ?? "-")</td><td>@(row.DurationMs?.ToString() ?? "-") ms</td><td><small>用户 @row.UserId · 账号 @row.AccountId</small></td><td><div class="row-actions"><button type="button" @onclick="() => CopyRequestIdAsync(row.RequestId)">复制 ID</button>@if (row.Kind == "error" && row.ErrorId.HasValue) { <button type="button" class="danger-link" @onclick='() => OpenErrorDetailAsync("request", row.ErrorId.Value)'>查看错误</button> }</div></td></tr> } }
+        </tbody></table></div>
+        <div class="ops-pagination"><span>共 @requests.Total 条</span><div><button disabled="@(requestPage <= 1)" @onclick="() => ChangeRequestPageAsync(requestPage - 1)">上一页</button><span>@requestPage / @Math.Max(1, requests.Pages)</span><button disabled="@(requestPage >= Math.Max(1, requests.Pages))" @onclick="() => ChangeRequestPageAsync(requestPage + 1)">下一页</button></div></div>
+    </ChildContent>
+</AppModal>
+
+<AppModal Open="@errorsOpen" Title="@(errorKind == "upstream" ? "上游错误明细" : "请求错误明细")" MaxWidth="1180px" OnClose="CloseErrors">
+    <ChildContent>
+        <div class="modal-filter-row ops-error-filters">
+            <input @bind="errorSearch" placeholder="消息、请求 ID、模型..." />
+            <select @bind="errorStatusCode">
+                <option value="">全部状态码</option>
+                @foreach (var statusCode in ErrorStatusCodes)
+                {
+                    <option value="@statusCode">@statusCode</option>
+                }
+                <option value="other">其它状态码</option>
+            </select>
+            <select @bind="errorPhase"><option value="">全部阶段</option><option value="request">request</option><option value="auth">auth</option><option value="account_auth">account_auth</option><option value="routing">routing</option><option value="upstream">upstream</option><option value="network">network</option><option value="internal">internal</option></select>
+            <select @bind="errorOwner"><option value="">全部归属</option><option value="provider">provider</option><option value="client">client</option><option value="platform">platform</option></select>
+            <select @bind="errorView"><option value="errors">计入统计</option><option value="excluded">已排除</option><option value="all">全部错误</option></select>
+            <select @bind="errorSortBy"><option value="created_at">按时间</option><option value="model">按模型</option><option value="status_code">按状态码</option></select>
+            <select @bind="errorSortOrder"><option value="desc">降序</option><option value="asc">升序</option></select>
+            <button type="button" class="secondary-button" @onclick="ResetErrorFiltersAsync">重置</button>
+            <button type="button" class="primary-button" @onclick="LoadErrorsAsync">查询</button>
+        </div>
+        <div class="table-scroll"><table class="ops-table"><thead><tr><th>时间</th><th>状态</th><th>平台 / 模型</th><th>阶段 / 来源</th><th>消息</th><th>账号 / 用户</th><th>处理</th></tr></thead><tbody>
+            @if (errors.Items.Count == 0) { <tr><td colspan="7" class="empty-cell">暂无错误记录</td></tr> }
+            else { @foreach (var row in errors.Items) { <tr><td>@row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss")</td><td><span class="level-badge danger">@row.StatusCode</span></td><td><b>@row.Platform</b><small>@(string.IsNullOrWhiteSpace(row.RequestedModel) ? row.Model : row.RequestedModel)</small></td><td><b>@row.Phase</b><small>@(string.IsNullOrWhiteSpace(row.ErrorOwner) ? row.ErrorSource : $"{row.ErrorOwner} / {row.ErrorSource}")</small></td><td class="log-message"><button type="button" class="error-message-button" @onclick="() => OpenErrorDetailAsync(errorKind, row.Id)">@row.Message</button></td><td><small>@row.AccountName<br />@row.UserEmail</small></td><td><div class="row-actions"><button type="button" @onclick="() => OpenErrorDetailAsync(errorKind, row.Id)">查看</button><button type="button" @onclick="() => ToggleErrorResolvedAsync(row)">@(row.Resolved ? "重新打开" : "标记解决")</button></div></td></tr> } }
+        </tbody></table></div>
+        <div class="ops-pagination"><span>共 @errors.Total 条</span><div><button disabled="@(errorPage <= 1)" @onclick="() => ChangeErrorPageAsync(errorPage - 1)">上一页</button><span>@errorPage / @Math.Max(1, errors.Pages)</span><button disabled="@(errorPage >= Math.Max(1, errors.Pages))" @onclick="() => ChangeErrorPageAsync(errorPage + 1)">下一页</button></div></div>
+    </ChildContent>
+</AppModal>
+
+<AppModal Open="@errorDetailOpen" Title="@(errorDetailKind == "upstream" ? "上游错误详情" : "请求错误详情")" MaxWidth="980px" OnClose="CloseErrorDetail">
+    <ChildContent>
+        @if (errorDetailLoading) { <LoadingState Text="正在加载错误详情" /> }
+        else if (selectedErrorDetail is null)
+        {
+            @if (!string.IsNullOrWhiteSpace(modalError))
+            {
+                <div class="inline-alert danger" role="alert">@modalError</div>
+            }
+            <EmptyState Title="错误详情不可用" Description="记录可能已被清理，请刷新后重试。" />
+        }
+        else
+        {
+            <div class="error-detail-grid">
+                <article><span>时间</span><b>@FormatDateTime(selectedErrorDetail.CreatedAt)</b></article>
+                <article><span>状态码</span><b class="danger">@selectedErrorDetail.StatusCode</b></article>
+                <article><span>阶段 / 归属</span><b>@selectedErrorDetail.Phase · @selectedErrorDetail.ErrorOwner</b></article>
+                <article><span>平台</span><b>@selectedErrorDetail.Platform</b></article>
+                <article class="span-two"><span>请求 ID</span><div><code>@(string.IsNullOrWhiteSpace(selectedErrorDetail.RequestId) ? selectedErrorDetail.ClientRequestId : selectedErrorDetail.RequestId)</code><button type="button" class="text-button" @onclick="() => CopyRequestIdAsync(string.IsNullOrWhiteSpace(selectedErrorDetail.RequestId) ? selectedErrorDetail.ClientRequestId : selectedErrorDetail.RequestId)">复制</button></div></article>
+                <article><span>请求模型</span><b>@(string.IsNullOrWhiteSpace(selectedErrorDetail.RequestedModel) ? selectedErrorDetail.Model : selectedErrorDetail.RequestedModel)</b></article>
+                <article><span>上游模型</span><b>@(string.IsNullOrWhiteSpace(selectedErrorDetail.UpstreamModel) ? "-" : selectedErrorDetail.UpstreamModel)</b></article>
+                <article class="span-two"><span>入口 / 上游端点</span><b>@(string.IsNullOrWhiteSpace(selectedErrorDetail.InboundEndpoint) ? selectedErrorDetail.RequestPath : selectedErrorDetail.InboundEndpoint) → @(string.IsNullOrWhiteSpace(selectedErrorDetail.UpstreamEndpoint) ? "-" : selectedErrorDetail.UpstreamEndpoint)</b></article>
+                <article><span>账号 / 分组</span><b>@selectedErrorDetail.AccountName · @selectedErrorDetail.GroupName</b></article>
+                <article><span>用户 / API Key</span><b>@selectedErrorDetail.UserEmail · @selectedErrorDetail.ApiKeyName</b></article>
+                <article class="span-two"><span>错误消息</span><b>@selectedErrorDetail.Message</b></article>
+            </div>
+            <div class="latency-summary"><span>鉴权 <b>@DurationValue(selectedErrorDetail.AuthLatencyMs)</b></span><span>路由 <b>@DurationValue(selectedErrorDetail.RoutingLatencyMs)</b></span><span>上游 <b>@DurationValue(selectedErrorDetail.UpstreamLatencyMs)</b></span><span>响应 <b>@DurationValue(selectedErrorDetail.ResponseLatencyMs)</b></span><span>首 Token <b>@DurationValue(selectedErrorDetail.TimeToFirstTokenMs)</b></span></div>
+            <section class="error-payload"><h3>响应内容</h3><pre>@SelectedErrorPayload</pre></section>
+            @if (errorDetailKind == "request")
+            {
+                <section class="correlated-errors"><h3>关联上游错误（@correlatedUpstreamErrors.Count）</h3>@if (correlatedUpstreamErrors.Count == 0) { <p>没有关联的上游错误。</p> } else { @foreach (var item in correlatedUpstreamErrors) { <article><header><span>@FormatDateTime(item.CreatedAt)</span><b class="danger">@item.StatusCode</b></header><p>@item.Message</p><small>@item.AccountName · @item.UpstreamModel · @DurationValue(item.UpstreamLatencyMs)</small>@if (!string.IsNullOrWhiteSpace(ErrorPayload(item, "upstream"))) { <pre>@ErrorPayload(item, "upstream")</pre> }</article> } }</section>
+            }
+            @if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger">@modalError</div> }
+        }
+    </ChildContent>
+    <Footer>@if (selectedErrorDetail is not null) { <button type="button" class="secondary-button" @onclick="() => ToggleSelectedErrorResolvedAsync()">@(selectedErrorDetail.Resolved ? "重新打开" : "标记解决")</button> }<span class="footer-spacer"></span><button type="button" class="primary-button" @onclick="CloseErrorDetail">关闭</button></Footer>
+</AppModal>
+
+<AppModal Open="@alertDetailOpen" Title="告警事件详情" MaxWidth="920px" OnClose="CloseAlertEventDetail">
+    <ChildContent>
+        @if (alertDetailLoading)
+        {
+            <LoadingState Text="正在加载告警详情" />
+        }
+        else if (selectedAlertEvent is null)
+        {
+            @if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger">@modalError</div> }
+            <EmptyState Title="告警详情不可用" Description="该事件可能已被清理，请刷新后重试。" />
+        }
+        else
+        {
+            <div class="alert-detail-summary">
+                <div><span class="level-badge @SeverityTone(selectedAlertEvent.Severity)">@selectedAlertEvent.Severity</span><span class="level-badge @AlertStatusTone(selectedAlertEvent.Status)">@AlertStatus(selectedAlertEvent.Status)</span><h3>@(string.IsNullOrWhiteSpace(selectedAlertEvent.Title) ? "未命名告警" : selectedAlertEvent.Title)</h3><p>@selectedAlertEvent.Description</p></div>
+                <div class="alert-detail-actions"><label><span>静默</span><select @bind="alertSilenceDuration"><option value="1h">1 小时</option><option value="24h">24 小时</option><option value="7d">7 天</option></select></label><button type="button" class="secondary-button" disabled="@alertActionLoading" @onclick="SilenceSelectedAlertAsync">应用静默</button><button type="button" class="secondary-button" disabled="@(alertActionLoading || selectedAlertEvent.Status == "manual_resolved")" @onclick="ResolveSelectedAlertAsync">手动解决</button></div>
+            </div>
+            <div class="error-detail-grid alert-detail-grid">
+                <article><span>触发时间</span><b>@FormatDateTime(selectedAlertEvent.FiredAt ?? selectedAlertEvent.CreatedAt)</b></article>
+                <article><span>恢复时间</span><b>@FormatDateTime(selectedAlertEvent.ResolvedAt)</b></article>
+                <article><span>规则 ID</span><div><code>#@selectedAlertEvent.RuleId</code><button type="button" class="text-button" @onclick="OpenSelectedAlertRuleAsync">查看规则</button></div></article>
+                <article><span>指标 / 阈值</span><b>@(selectedAlertEvent.MetricValue?.ToString("0.###") ?? "-") / @(selectedAlertEvent.ThresholdValue?.ToString("0.###") ?? "-")</b></article>
+                <article class="span-two"><span>告警维度</span><b>@AlertDimensionsSummary(selectedAlertEvent)</b></article>
+                <article><span>邮件通知</span><b>@(selectedAlertEvent.EmailSent ? "已发送" : "未发送")</b></article>
+                <article><span>持续时间</span><b>@AlertDurationLabel(selectedAlertEvent)</b></article>
+            </div>
+            <div class="alert-detail-links"><button type="button" class="secondary-button" @onclick="OpenSelectedAlertLogsAsync">查看关联错误日志</button></div>
+            <section class="alert-history">
+                <header><div><h3>同规则、同维度历史</h3><p>用于判断告警是否反复出现。</p></div><select value="@alertHistoryRange" @onchange="AlertHistoryRangeChangedAsync"><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option></select></header>
+                @if (alertHistoryLoading) { <LoadingState Text="正在加载告警历史" /> }
+                else if (alertHistory.Count == 0) { <p class="empty-history">暂无历史事件</p> }
+                else { <div class="table-scroll"><table class="ops-table"><thead><tr><th>时间</th><th>状态</th><th>指标 / 阈值</th></tr></thead><tbody>@foreach (var item in alertHistory) { <tr><td>@FormatDateTime(item.FiredAt ?? item.CreatedAt)</td><td>@AlertStatus(item.Status)</td><td>@(item.MetricValue?.ToString("0.##") ?? "-") / @(item.ThresholdValue?.ToString("0.##") ?? "-")</td></tr> }</tbody></table></div> }
+            </section>
+            @if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger">@modalError</div> }
+        }
+    </ChildContent>
+    <Footer><span class="footer-spacer"></span><button type="button" class="primary-button" @onclick="CloseAlertEventDetail">关闭</button></Footer>
+</AppModal>
+
+<AppModal Open="@alertRulesOpen" Title="预警规则" MaxWidth="1050px" OnClose="CloseAlertRules">
+    <ChildContent>
+        @if (!ruleEditorOpen)
+        {
+            <div class="modal-toolbar"><p>按监控指标自动触发告警事件与邮件通知。</p><button type="button" class="primary-button" @onclick="OpenNewRule"><Icon Name="plus" Size="15" />新建规则</button></div>
+            <div class="table-scroll"><table class="ops-table"><thead><tr><th>名称</th><th>指标</th><th>条件</th><th>级别</th><th>启用</th><th>最近触发</th><th>操作</th></tr></thead><tbody>@if (alertRules.Count == 0) { <tr><td colspan="7" class="empty-cell">暂无告警规则</td></tr> } else { @foreach (var row in alertRules) { <tr><td><b>@row.Name</b><small>@row.Description</small></td><td><code>@row.MetricType</code></td><td>@row.Operator @row.Threshold</td><td><span class="level-badge @SeverityTone(row.Severity)">@row.Severity</span></td><td><button type="button" class="switch-button @(row.Enabled ? "on" : null)" aria-label="切换规则启用状态" @onclick="() => ToggleRuleAsync(row)"><i></i></button></td><td>@FormatDateTime(row.LastTriggeredAt)</td><td><div class="row-actions"><button type="button" @onclick="() => EditRule(row)">编辑</button><button type="button" class="danger-link" @onclick="() => DeleteRuleAsync(row)">删除</button></div></td></tr> } }</tbody></table></div>
+        }
+        else
+        {
+            <div class="form-grid two">
+                <label><span>名称</span><input @bind="ruleDraft.Name" /></label>
+                <label><span>指标</span><select value="@ruleDraft.MetricType" @onchange="RuleMetricChanged"><optgroup label="系统指标"><option value="success_rate">成功率</option><option value="error_rate">错误率</option><option value="upstream_error_rate">上游错误率</option><option value="cpu_usage_percent">CPU 使用率</option><option value="memory_usage_percent">内存使用率</option><option value="concurrency_queue_depth">并发排队深度</option></optgroup><optgroup label="分组指标"><option value="group_available_accounts">分组可用账号数</option><option value="group_available_ratio">分组可用账号比例</option><option value="group_rate_limit_ratio">分组限流比例</option></optgroup><optgroup label="账号指标"><option value="account_rate_limited_count">限流账号数</option><option value="account_error_count">错误账号数</option><option value="account_error_ratio">错误账号比例</option><option value="account_temp_unscheduled_count">临时停止调度账号数</option><option value="overload_account_count">过载账号数</option></optgroup></select></label>
+                <label class="span-two"><span>描述</span><textarea @bind="ruleDraft.Description" rows="2"></textarea></label>
+                @if (IsGroupMetric(ruleDraft.MetricType))
+                {
+                    <label class="span-two"><span>作用分组（必选）</span><select @bind="ruleGroupIdValue"><option value="">请选择分组</option>@foreach (var item in groups.Where(x => string.Equals(x.Status, "active", StringComparison.OrdinalIgnoreCase))) { <option value="@item.Id">@item.Name (@item.Platform)</option> }</select><small>分组级指标必须明确指定 group_id。</small></label>
+                }
+                <label><span>运算符</span><select @bind="ruleDraft.Operator"><option value=">">&gt;</option><option value=">=">&gt;=</option><option value="<">&lt;</option><option value="<=">&lt;=</option><option value="==">==</option><option value="!=">!=</option></select></label>
+                <label><span>阈值</span><input type="number" step="0.01" @bind="ruleDraft.Threshold" /></label>
+                <label><span>统计窗口（分钟）</span><select @bind="ruleDraft.WindowMinutes"><option value="1">1</option><option value="5">5</option><option value="60">60</option></select></label>
+                <label><span>连续样本数</span><input type="number" min="1" max="1440" @bind="ruleDraft.SustainedMinutes" /></label>
+                <label><span>级别</span><select @bind="ruleDraft.Severity"><option value="P0">P0</option><option value="P1">P1</option><option value="P2">P2</option><option value="P3">P3</option></select></label>
+                <label><span>冷却期（分钟）</span><input type="number" min="0" max="1440" @bind="ruleDraft.CooldownMinutes" /></label>
+                <label class="check-field"><input type="checkbox" @bind="ruleDraft.Enabled" /><span>启用</span></label>
+                <label class="check-field"><input type="checkbox" @bind="ruleDraft.NotifyEmail" /><span>发送邮件通知</span></label>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger">@modalError</div> }
+            <div class="editor-actions"><button type="button" class="secondary-button" @onclick="CancelRuleEdit">返回列表</button><button type="button" class="primary-button" disabled="@saving" @onclick="SaveRuleAsync">保存规则</button></div>
+        }
+    </ChildContent>
+</AppModal>
+
+<AppModal Open="@settingsOpen" Title="运维监控设置" MaxWidth="1040px" OnClose="CloseSettings">
+    <ChildContent>
+        @if (settingsLoading) { <LoadingState Text="正在加载运维设置" /> }
+        else
+        {
+            <div class="settings-tabs"><button class="@(settingsTab == "general" ? "active" : null)" @onclick="ShowGeneralSettings">仪表盘</button><button class="@(settingsTab == "alerts" ? "active" : null)" @onclick="ShowAlertSettings">告警与邮件</button><button class="@(settingsTab == "retention" ? "active" : null)" @onclick="ShowRetentionSettings">数据与过滤</button></div>
+            @if (settingsTab == "general")
+            {
+                <div class="settings-section"><h3>数据采集</h3><div class="form-grid two"><label><span>评估间隔（秒）</span><input type="number" min="1" max="86400" @bind="runtimeAlert.EvaluationIntervalSeconds" /></label><label><span>自动刷新间隔</span><select @bind="advanced.AutoRefreshIntervalSeconds"><option value="15">15 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></label><label class="check-field"><input type="checkbox" @bind="advanced.AutoRefreshEnabled" /><span>启用自动刷新</span></label><label class="check-field"><input type="checkbox" @bind="advanced.DisplayAlertEvents" /><span>展示告警事件</span></label><label class="check-field"><input type="checkbox" @bind="advanced.DisplayOpenAiTokenStats" /><span>展示 OpenAI Token 请求统计</span></label></div></div>
+                <div class="settings-section"><h3>指标阈值</h3><div class="form-grid two"><label><span>SLA 最低百分比</span><input type="number" min="0" max="100" step="0.1" @bind="thresholds.SlaPercentMin" /></label><label><span>TTFT P99 最大值（毫秒）</span><input type="number" min="0" @bind="thresholds.TtftP99MsMax" /></label><label><span>请求错误率最大值（%）</span><input type="number" min="0" max="100" step="0.1" @bind="thresholds.RequestErrorRatePercentMax" /></label><label><span>上游错误率最大值（%）</span><input type="number" min="0" max="100" step="0.1" @bind="thresholds.UpstreamErrorRatePercentMax" /></label></div></div>
+            }
+            else if (settingsTab == "alerts")
+            {
+                <div class="settings-section"><h3>告警评估器</h3><div class="form-grid two"><label><span>评估间隔（秒）</span><input type="number" min="1" max="86400" @bind="runtimeAlert.EvaluationIntervalSeconds" /></label><label class="check-field"><input type="checkbox" @bind="emailConfig.Alert.Enabled" /><span>启用告警邮件</span></label><label class="span-two"><span>告警收件人（逗号分隔）</span><input value="@AlertRecipientsText" @onchange="SetAlertRecipients" placeholder="admin@example.com" /></label><label><span>最低级别</span><select @bind="emailConfig.Alert.MinSeverity"><option value="">全部级别</option><option value="critical">严重</option><option value="warning">警告</option><option value="info">信息</option></select></label><label><span>每小时限额</span><input type="number" min="0" @bind="emailConfig.Alert.RateLimitPerHour" /></label><label><span>批处理窗口（秒）</span><input type="number" min="0" @bind="emailConfig.Alert.BatchingWindowSeconds" /></label><label class="check-field"><input type="checkbox" @bind="emailConfig.Alert.IncludeResolvedAlerts" /><span>包含恢复通知</span></label></div></div>
+                <div class="settings-section"><h3>评估报告</h3><div class="form-grid two"><label class="check-field"><input type="checkbox" @bind="emailConfig.Report.Enabled" /><span>启用评估报告</span></label><label class="span-two"><span>报告收件人（逗号分隔）</span><input value="@ReportRecipientsText" @onchange="SetReportRecipients" placeholder="ops@example.com" /></label><label class="check-field"><input type="checkbox" @bind="emailConfig.Report.DailySummaryEnabled" /><span>启用每日汇总</span></label><label><span>每日汇总计划（Cron）</span><input @bind="emailConfig.Report.DailySummarySchedule" placeholder="0 9 * * *" disabled="@(!emailConfig.Report.DailySummaryEnabled)" /></label><label class="check-field"><input type="checkbox" @bind="emailConfig.Report.WeeklySummaryEnabled" /><span>启用每周汇总</span></label><label><span>每周汇总计划（Cron）</span><input @bind="emailConfig.Report.WeeklySummarySchedule" placeholder="0 9 * * 1" disabled="@(!emailConfig.Report.WeeklySummaryEnabled)" /></label></div></div>
+            }
+            else
+            {
+                <div class="settings-section"><h3>数据保留策略</h3><div class="form-grid two"><label class="check-field"><input type="checkbox" @bind="advanced.DataRetention.CleanupEnabled" /><span>启用数据清理</span></label><label><span>清理计划（Cron）</span><input @bind="advanced.DataRetention.CleanupSchedule" /></label><label><span>错误日志保留天数</span><input type="number" min="0" max="365" @bind="advanced.DataRetention.ErrorLogRetentionDays" /></label><label><span>分钟指标保留天数</span><input type="number" min="0" max="365" @bind="advanced.DataRetention.MinuteMetricsRetentionDays" /></label><label><span>小时指标保留天数</span><input type="number" min="0" max="365" @bind="advanced.DataRetention.HourlyMetricsRetentionDays" /></label><label class="check-field"><input type="checkbox" @bind="advanced.Aggregation.AggregationEnabled" /><span>启用预聚合任务</span></label></div></div>
+                <div class="settings-section"><h3>OpenAI 账号配额自动暂停</h3><p>填写 0–100 的剩余配额百分比；留空或 0 表示不启用全局默认阈值。</p><div class="form-grid two"><label><span>5 小时配额阈值（%）</span><input type="number" min="0" max="100" step="0.1" @bind="QuotaAutoPause5HPercent" /></label><label><span>7 天配额阈值（%）</span><input type="number" min="0" max="100" step="0.1" @bind="QuotaAutoPause7DPercent" /></label></div></div>
+                <div class="settings-section"><h3>错误过滤</h3><div class="form-grid two"><label class="check-field"><input type="checkbox" @bind="advanced.IgnoreCountTokensErrors" /><span>忽略 count_tokens 错误</span></label><label class="check-field"><input type="checkbox" @bind="advanced.IgnoreContextCanceled" /><span>忽略客户端断连错误</span></label><label class="check-field"><input type="checkbox" @bind="advanced.IgnoreNoAvailableAccounts" /><span>忽略无可用账号错误</span></label><label class="check-field"><input type="checkbox" @bind="advanced.IgnoreInvalidApiKeyErrors" /><span>忽略无效 API Key 错误</span></label><label class="check-field"><input type="checkbox" @bind="advanced.IgnoreInsufficientBalanceErrors" /><span>忽略余额不足错误</span></label></div></div>
+            }
+            @if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger">@modalError</div> }
+        }
+    </ChildContent>
+    <Footer><button type="button" class="secondary-button" @onclick="CloseSettings">取消</button><button type="button" class="primary-button" disabled="@(settingsLoading || saving)" @onclick="SaveSettingsAsync">保存设置</button></Footer>
+</AppModal>
+
+<AppModal Open="@logSettingsOpen" Title="运行日志设置" MaxWidth="720px" OnClose="() => logSettingsOpen = false">
+    <ChildContent><div class="form-grid two"><label><span>日志级别</span><select @bind="runtimeLog.Level"><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select></label><label><span>堆栈级别</span><select @bind="runtimeLog.StacktraceLevel"><option value="none">none</option><option value="error">error</option><option value="fatal">fatal</option></select></label><label><span>保留天数</span><input type="number" min="0" max="365" @bind="runtimeLog.RetentionDays" /></label><label class="check-field"><input type="checkbox" @bind="runtimeLog.Caller" /><span>记录调用位置</span></label><label class="check-field"><input type="checkbox" @bind="runtimeLog.EnableSampling" /><span>启用采样</span></label><label><span>首次采样数量</span><input type="number" min="1" @bind="runtimeLog.SamplingInitial" /></label><label><span>后续采样间隔</span><input type="number" min="1" @bind="runtimeLog.SamplingThereafter" /></label></div></ChildContent>
+    <Footer><button type="button" class="danger-link" @onclick="ResetLogSettingsAsync">恢复默认</button><span class="footer-spacer"></span><button type="button" class="secondary-button" @onclick="() => logSettingsOpen = false">取消</button><button type="button" class="primary-button" @onclick="SaveLogSettingsAsync">保存</button></Footer>
+</AppModal>
+
+@code {
+    private OpsDashboardSnapshotDto snapshot = new();
+    private OpsThroughputTrendDto switchTrend = new();
+    private OpsLatencyHistogramDto latency = new();
+    private OpsErrorDistributionDto errorDistribution = new();
+    private OpsConcurrencyStatsDto concurrency = new();
+    private OpsUserConcurrencyStatsDto userConcurrency = new();
+    private OpsAccountAvailabilityStatsDto availability = new();
+    private OpsRealtimeTrafficResponseDto realtime = new();
+    private OpsOpenAiTokenStatsDto openAiStats = new();
+    private List<OpsAlertEventDto> alertEvents = [];
+    private List<OpsAlertRuleDto> alertRules = [];
+    private PagedEnvelope<OpsSystemLogDto> logs = new();
+    private OpsSystemLogSinkHealthDto logHealth = new();
+    private PagedEnvelope<OpsRequestDetailDto> requests = new();
+    private PagedEnvelope<OpsErrorLogDto> errors = new();
+    private OpsErrorDetailDto? selectedErrorDetail;
+    private OpsAlertEventDto? selectedAlertEvent;
+    private List<OpsErrorDetailDto> correlatedUpstreamErrors = [];
+    private List<OpsAlertEventDto> alertHistory = [];
+    private OpsAdvancedSettingsDto advanced = new();
+    private OpsMetricThresholdsDto thresholds = new();
+    private OpsRuntimeAlertSettingsDto runtimeAlert = new();
+    private OpsEmailNotificationConfigDto emailConfig = new();
+    private OpsRuntimeLogConfigDto runtimeLog = new();
+    private List<GoGroup> groups = [];
+    private string timeRange = "1h", platform = string.Empty, queryMode = "auto", defaultQueryMode = "auto", realtimeWindow = "1min";
+    private string logTimeRange = "1h", logStartInput = string.Empty, logEndInput = string.Empty, logHost = string.Empty, logLevel = string.Empty, logComponent = string.Empty, logRequestId = string.Empty, logClientRequestId = string.Empty, logUserId = string.Empty, logApiKeyId = string.Empty, logAccountId = string.Empty, logPlatform = string.Empty, logModel = string.Empty, logSearch = string.Empty;
+    private string requestKind = "all", requestSearch = string.Empty, requestSort = "created_at_desc";
+    private string errorKind = "request", errorView = "errors", errorSearch = string.Empty, errorStatusCode = string.Empty, errorPhase = string.Empty, errorOwner = string.Empty, errorSortBy = "created_at", errorSortOrder = "desc", errorDetailKind = "request";
+    private string tokenTimeRange = "30d", tokenViewMode = "topn";
+    private string alertTimeRange = "24h", alertSeverity = string.Empty, alertStatusFilter = string.Empty, alertEmailSent = string.Empty, alertHistoryRange = "7d", alertSilenceDuration = "1h";
+    private string customStartInput = string.Empty, customEndInput = string.Empty, settingsTab = "general", ruleGroupIdValue = string.Empty;
+    private long? groupId;
+    private DateTimeOffset? customStart, customEnd, lastUpdated;
+    private bool loading = true, loadedOnce, fullscreen, diagnosisOpen, showUserConcurrency, saving, settingsLoading;
+    private bool customRangeOpen, jobsOpen, requestsOpen, errorsOpen, errorDetailOpen, errorDetailLoading, alertDetailOpen, alertDetailLoading, alertHistoryLoading, alertActionLoading, alertEventsLoading, alertLoadingMore, alertHasMore, alertRulesOpen, ruleEditorOpen, settingsOpen, logSettingsOpen;
+    private bool syncingLocation, applyingLocation, disposed;
+    private string? error, modalError;
+    private int autoRefreshCountdown = 30, loadGeneration, logPage = 1, logPageSize = 20, requestPage = 1, errorPage = 1, tokenTopN = 20, tokenPage = 1, tokenPageSize = 20;
+    private OpsAlertRuleDto ruleDraft = new();
+    private CancellationTokenSource? autoRefreshCts;
+    private DotNetObjectReference<AdminOps>? selfReference;
+    private int? escapeHandlerId;
+
+    private OpsDashboardOverviewDto overview => snapshot.Overview;
+    private OpsSystemMetricsDto? system => overview.SystemMetrics;
+    private string GroupFilterValue => groupId?.ToString() ?? string.Empty;
+    private IEnumerable<GoGroup> FilteredGroups => string.IsNullOrWhiteSpace(platform) ? groups : groups.Where(x => string.Equals(x.Platform, platform, StringComparison.OrdinalIgnoreCase));
+    private static readonly string[] RealtimeWindows = ["1min", "5min", "30min", "1h"];
+    private const int AlertEventPageSize = 10;
+    private static readonly int[] ErrorStatusCodes = [400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504, 529];
+    private static readonly HashSet<string> GroupAlertMetricTypes = new(["group_available_accounts", "group_available_ratio", "group_rate_limit_ratio"], StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> AllowedTimeRanges = new(["5m", "30m", "1h", "6h", "24h", "custom"], StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> AllowedQueryModes = new(["auto", "raw", "preagg"], StringComparer.OrdinalIgnoreCase);
+    private static readonly string[] DashboardQueryKeys = ["tr", "platform", "group_id", "mode", "fullscreen", "open_error_details", "error_type", "alert_rule_id", "open_alert_rules"];
+    private IReadOnlyList<OpsTrendRow> ThroughputRows => snapshot.ThroughputTrend.Points.Select(x => new OpsTrendRow(FormatBucket(x.BucketStart), x.Qps, x.Tps / 1000d)).ToList();
+    private IReadOnlyList<OpsTrendRow> SwitchTrendRows => switchTrend.Points.Select(x => new OpsTrendRow(FormatBucket(x.BucketStart), x.RequestCount <= 0 ? 0 : x.SwitchCount * 100d / x.RequestCount, x.SwitchCount)).ToList();
+    private IReadOnlyList<OpsTrendRow> ErrorTrendRows => snapshot.ErrorTrend.Points.Select(x => new OpsTrendRow(FormatBucket(x.BucketStart), x.ErrorCountSla, x.UpstreamErrorCountExcl429529)).ToList();
+    private IReadOnlyList<ConcurrencyRow> ConcurrencyRows => BuildConcurrencyRows();
+    private string ConcurrencyDimensionLabel => showUserConcurrency ? "按用户" : groupId.HasValue ? "按账号" : string.IsNullOrWhiteSpace(platform) ? "按平台" : "按分组";
+    private string HealthScoreLabel => overview.RequestCountTotal == 0 ? "空闲" : overview.HealthScore.ToString();
+    private string HealthStatus => overview.RequestCountTotal == 0 ? "空闲" : overview.HealthScore >= 90 ? "健康" : overview.HealthScore >= 60 ? "需关注" : "高风险";
+    private string HealthTone => overview.RequestCountTotal == 0 ? "muted" : overview.HealthScore >= 90 ? "success" : overview.HealthScore >= 60 ? "warning" : "danger";
+    private string SlaTone => ThresholdTone(overview.Sla * 100, thresholds.SlaPercentMin, lowerIsBad: true);
+    private string TtftTone => ThresholdTone(overview.Ttft.P99Ms, thresholds.TtftP99MsMax, false);
+    private string RequestErrorTone => ThresholdTone(overview.ErrorRate * 100, thresholds.RequestErrorRatePercentMax, false);
+    private string UpstreamErrorTone => ThresholdTone(overview.UpstreamErrorRate * 100, thresholds.UpstreamErrorRatePercentMax, false);
+    private double SlaProgress => Math.Clamp((overview.Sla * 100 - 90) * 10, 0, 100);
+    private string GoroutineTone => (system?.GoroutineCount ?? 0) >= 8000 ? "danger" : (system?.GoroutineCount ?? 0) >= 2000 ? "warning" : "success";
+    private int JobWarningCount => overview.JobHeartbeats.Count(x => !string.IsNullOrWhiteSpace(x.LastError));
+    private string MemorySummary => system?.MemoryUsedMb is null || system.MemoryTotalMb is null ? "-" : $"{FormatMemory(system.MemoryUsedMb.Value)} / {FormatMemory(system.MemoryTotalMb.Value)}";
+    private string AlertRecipientsText => string.Join(", ", emailConfig.Alert.Recipients);
+    private string ReportRecipientsText => string.Join(", ", emailConfig.Report.Recipients);
+    private IReadOnlyList<DiagnosisRow> DiagnosisItems => BuildDiagnosis();
+    private string CurrentRangeLabel => timeRange == "custom" && customStart.HasValue && customEnd.HasValue
+        ? $"{customStart.Value.ToLocalTime():yyyy-MM-dd HH:mm} 至 {customEnd.Value.ToLocalTime():yyyy-MM-dd HH:mm}"
+        : timeRange;
+    private string SelectedErrorPayload => selectedErrorDetail is null ? string.Empty : ErrorPayload(selectedErrorDetail, errorDetailKind);
+    private int TokenTotalPages => Math.Max(1, (int)Math.Ceiling(openAiStats.Total / (double)Math.Max(1, tokenPageSize)));
+    private double? QuotaAutoPause5HPercent
+    {
+        get => advanced.OpenAiAccountQuotaAutoPause.DefaultThreshold5H > 0 ? Math.Round(advanced.OpenAiAccountQuotaAutoPause.DefaultThreshold5H * 1000) / 10 : null;
+        set => advanced.OpenAiAccountQuotaAutoPause.DefaultThreshold5H = value is > 0 ? value.Value / 100 : 0;
+    }
+    private double? QuotaAutoPause7DPercent
+    {
+        get => advanced.OpenAiAccountQuotaAutoPause.DefaultThreshold7D > 0 ? Math.Round(advanced.OpenAiAccountQuotaAutoPause.DefaultThreshold7D * 1000) / 10 : null;
+        set => advanced.OpenAiAccountQuotaAutoPause.DefaultThreshold7D = value is > 0 ? value.Value / 100 : 0;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        try
+        {
+            var adminSettings = await Api.GetAdminSettingsTypedAsync();
+            if (!adminSettings.OpsMonitoringEnabled)
+            {
+                Navigation.NavigateTo("/admin/settings", replace: true);
+                return;
+            }
+
+            defaultQueryMode = AllowedQueryModes.Contains(adminSettings.OpsQueryModeDefault)
+                ? adminSettings.OpsQueryModeDefault.ToLowerInvariant()
+                : "auto";
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+
+        ApplyLocationState();
+        logPlatform = platform;
+        await LoadInitialSettingsAsync();
+        try { groups = await Api.GetAllAdminGroupsAsync(true); } catch { groups = []; }
+        await RefreshAllAsync();
+        await ApplyDeepLinksAsync();
+        StartAutoRefresh();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        selfReference = DotNetObjectReference.Create(this);
+        try
+        {
+            escapeHandlerId = await JS.InvokeAsync<int>("paraGateway.registerEscapeHandler", selfReference);
+        }
+        catch (JSException)
+        {
+            selfReference.Dispose();
+            selfReference = null;
+        }
+    }
+
+    private async Task LoadInitialSettingsAsync()
+    {
+        try
+        {
+            var advancedTask = Api.GetAdminOpsAdvancedSettingsAsync();
+            var thresholdsTask = Api.GetAdminOpsMetricThresholdsAsync();
+            await Task.WhenAll(advancedTask, thresholdsTask);
+            advanced = await advancedTask;
+            advanced.OpenAiAccountQuotaAutoPause ??= new();
+            thresholds = await thresholdsTask;
+        }
+        catch { advanced = new(); thresholds = new(); }
+    }
+
+    private async Task RefreshAllAsync()
+    {
+        var generation = ++loadGeneration;
+        loading = true; error = null;
+        try
+        {
+            snapshot = await Api.GetAdminOpsSnapshotAsync(timeRange, platform, groupId, queryMode, customStart, customEnd);
+            if (generation != loadGeneration) return;
+            var latencyTask = SafeAsync(() => Api.GetAdminOpsLatencyHistogramAsync(timeRange, platform, groupId, queryMode, customStart, customEnd), new OpsLatencyHistogramDto());
+            var distributionTask = SafeAsync(() => Api.GetAdminOpsErrorDistributionAsync(timeRange, platform, groupId, queryMode, customStart, customEnd), new OpsErrorDistributionDto());
+            var concurrencyTask = SafeAsync(() => Api.GetAdminOpsConcurrencyAsync(platform, groupId), new OpsConcurrencyStatsDto());
+            var availabilityTask = SafeAsync(() => Api.GetAdminOpsAccountAvailabilityAsync(platform, groupId), new OpsAccountAvailabilityStatsDto());
+            var realtimeTask = SafeAsync(() => Api.GetAdminOpsRealtimeTrafficAsync(realtimeWindow, platform, groupId), new OpsRealtimeTrafficResponseDto());
+            var switchTrendEnd = DateTimeOffset.UtcNow;
+            var switchTrendTask = SafeAsync(() => Api.GetAdminOpsThroughputTrendAsync("custom", platform, groupId, queryMode, switchTrendEnd.AddHours(-5), switchTrendEnd), new OpsThroughputTrendDto());
+            var alertsTask = SafeAsync(() => Api.GetAdminOpsAlertEventsAsync(BuildAlertEventsQuery()), new List<OpsAlertEventDto>());
+            var logHealthTask = SafeAsync(Api.GetAdminOpsSystemLogHealthAsync, new OpsSystemLogSinkHealthDto());
+            var logsTask = SafeAsync(() => Api.GetAdminOpsSystemLogsAsync(BuildSystemLogQuery()), new PagedEnvelope<OpsSystemLogDto>());
+            var tokenTask = advanced.DisplayOpenAiTokenStats ? SafeAsync(() => Api.GetAdminOpsOpenAiTokenStatsAsync(tokenTimeRange, platform, groupId, tokenPage, tokenPageSize, tokenViewMode == "topn" ? tokenTopN : null), new OpsOpenAiTokenStatsDto()) : Task.FromResult(new OpsOpenAiTokenStatsDto());
+            await Task.WhenAll(latencyTask, distributionTask, concurrencyTask, availabilityTask, realtimeTask, switchTrendTask, alertsTask, logHealthTask, logsTask, tokenTask);
+            if (generation != loadGeneration) return;
+            latency = await latencyTask; errorDistribution = await distributionTask; concurrency = await concurrencyTask; availability = await availabilityTask;
+            realtime = await realtimeTask; switchTrend = await switchTrendTask; alertEvents = await alertsTask; alertHasMore = alertEvents.Count == AlertEventPageSize; logHealth = await logHealthTask; logs = await logsTask; openAiStats = await tokenTask;
+            lastUpdated = DateTimeOffset.Now; loadedOnce = true;
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { if (generation == loadGeneration) loading = false; }
+    }
+
+    private static async Task<T> SafeAsync<T>(Func<Task<T>> action, T fallback) { try { return await action(); } catch { return fallback; } }
+    private async Task PlatformChangedAsync(ChangeEventArgs e) { platform = e.Value?.ToString() ?? string.Empty; if (groupId.HasValue && !FilteredGroups.Any(x => x.Id == groupId.Value)) groupId = null; if (string.IsNullOrWhiteSpace(logPlatform)) logPlatform = platform; SyncLocation(); await RefreshAllAsync(); }
+    private async Task GroupChangedAsync(ChangeEventArgs e) { groupId = long.TryParse(e.Value?.ToString(), out var id) ? id : null; SyncLocation(); await RefreshAllAsync(); }
+    private async Task SelectBreakdownPlatformAsync(string value) { platform = value; groupId = null; SyncLocation(); await RefreshAllAsync(); }
+    private async Task SelectBreakdownGroupAsync(long value) { groupId = value; var group = groups.FirstOrDefault(x => x.Id == value); if (group is not null) platform = group.Platform; SyncLocation(); await RefreshAllAsync(); }
+    private async Task TimeRangeChangedAsync(ChangeEventArgs e) { var value = e.Value?.ToString() ?? "1h"; if (value == "custom") { var now = DateTime.Now; customStartInput = now.AddHours(-1).ToString("yyyy-MM-ddTHH:mm"); customEndInput = now.ToString("yyyy-MM-ddTHH:mm"); customRangeOpen = true; return; } timeRange = value; customStart = customEnd = null; SyncLocation(); await RefreshAllAsync(); }
+    private Task CloseCustomRange() { customRangeOpen = false; return Task.CompletedTask; }
+    private async Task ApplyCustomRangeAsync() { modalError = null; if (!DateTimeOffset.TryParse(customStartInput, out var start) || !DateTimeOffset.TryParse(customEndInput, out var end) || end <= start) { modalError = "结束时间必须晚于开始时间。"; return; } customStart = start; customEnd = end; timeRange = "custom"; customRangeOpen = false; SyncLocation(); await RefreshAllAsync(); }
+    private async Task ChangeRealtimeWindowAsync(string value) { realtimeWindow = value; realtime = await SafeAsync(() => Api.GetAdminOpsRealtimeTrafficAsync(value, platform, groupId), new OpsRealtimeTrafficResponseDto()); }
+    private void ToggleDiagnosis() => diagnosisOpen = !diagnosisOpen;
+    private Task ToggleFullscreen()
+    {
+        fullscreen = !fullscreen;
+        if (fullscreen) CloseTransientPanels();
+        SyncLocation();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task ExitFullscreenFromKeyboard()
+    {
+        if (!fullscreen) return Task.CompletedTask;
+        fullscreen = false;
+        SyncLocation();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private void ApplyLocationState()
+    {
+        var values = ParseQueryValues(Navigation.ToAbsoluteUri(Navigation.Uri).Query);
+        var requestedRange = values.GetValueOrDefault("tr");
+        timeRange = !string.IsNullOrWhiteSpace(requestedRange) && AllowedTimeRanges.Contains(requestedRange)
+            ? requestedRange.ToLowerInvariant()
+            : "1h";
+        platform = values.GetValueOrDefault("platform")?.Trim().ToLowerInvariant() ?? string.Empty;
+        groupId = long.TryParse(values.GetValueOrDefault("group_id"), out var parsedGroupId) && parsedGroupId > 0
+            ? parsedGroupId
+            : null;
+
+        var requestedMode = values.GetValueOrDefault("mode");
+        queryMode = !string.IsNullOrWhiteSpace(requestedMode) && AllowedQueryModes.Contains(requestedMode)
+            ? requestedMode.ToLowerInvariant()
+            : defaultQueryMode;
+        fullscreen = IsTrue(values.GetValueOrDefault("fullscreen"));
+
+        if (timeRange == "custom")
+        {
+            if (!customStart.HasValue || !customEnd.HasValue || customEnd <= customStart)
+            {
+                customEnd = DateTimeOffset.Now;
+                customStart = customEnd.Value.AddHours(-1);
+                customStartInput = customStart.Value.ToString("yyyy-MM-ddTHH:mm");
+                customEndInput = customEnd.Value.ToString("yyyy-MM-ddTHH:mm");
+            }
+        }
+        else
+        {
+            customStart = customEnd = null;
+        }
+
+        if (fullscreen) CloseTransientPanels();
+    }
+
+    private async Task ApplyDeepLinksAsync()
+    {
+        if (fullscreen) return;
+        var values = ParseQueryValues(Navigation.ToAbsoluteUri(Navigation.Uri).Query);
+        if (IsTrue(values.GetValueOrDefault("open_error_details")))
+        {
+            await OpenErrorsAsync(string.Equals(values.GetValueOrDefault("error_type"), "upstream", StringComparison.OrdinalIgnoreCase)
+                ? "upstream"
+                : "request");
+        }
+
+        var openRules = IsTrue(values.GetValueOrDefault("open_alert_rules"));
+        var hasRuleId = long.TryParse(values.GetValueOrDefault("alert_rule_id"), out var ruleId) && ruleId > 0;
+        if (openRules || hasRuleId)
+        {
+            await OpenAlertRulesAsync();
+            if (hasRuleId)
+            {
+                var rule = alertRules.FirstOrDefault(item => item.Id == ruleId);
+                if (rule is not null) EditRule(rule);
+            }
+        }
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        if (disposed || syncingLocation || !IsOpsLocation(args.Location)) return;
+        _ = InvokeAsync(HandleLocationChangedAsync);
+    }
+
+    private async Task HandleLocationChangedAsync()
+    {
+        if (disposed || applyingLocation) return;
+        applyingLocation = true;
+        try
+        {
+            var previous = (timeRange, platform, groupId, queryMode, fullscreen, customStart, customEnd);
+            ApplyLocationState();
+            var filtersChanged = previous.timeRange != timeRange || previous.platform != platform || previous.groupId != groupId ||
+                                 previous.queryMode != queryMode || previous.customStart != customStart || previous.customEnd != customEnd;
+            if (filtersChanged) await RefreshAllAsync();
+            await ApplyDeepLinksAsync();
+            StateHasChanged();
+        }
+        finally
+        {
+            applyingLocation = false;
+        }
+    }
+
+    private void SyncLocation()
+    {
+        if (disposed || applyingLocation) return;
+        var builder = new UriBuilder(Navigation.Uri);
+        var values = ParseQueryValues(builder.Query);
+        foreach (var key in DashboardQueryKeys) values.Remove(key);
+
+        if (!string.Equals(timeRange, "1h", StringComparison.OrdinalIgnoreCase)) values["tr"] = timeRange;
+        if (!string.IsNullOrWhiteSpace(platform)) values["platform"] = platform;
+        if (groupId.HasValue && groupId.Value > 0) values["group_id"] = groupId.Value.ToString();
+        if (!string.Equals(queryMode, "auto", StringComparison.OrdinalIgnoreCase)) values["mode"] = queryMode;
+        if (fullscreen) values["fullscreen"] = "1";
+
+        builder.Query = string.Join("&", values.Select(pair => $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value)}"));
+        var target = builder.Uri.ToString();
+        if (string.Equals(target, Navigation.Uri, StringComparison.Ordinal)) return;
+
+        syncingLocation = true;
+        try { Navigation.NavigateTo(target, replace: true); }
+        finally { syncingLocation = false; }
+    }
+
+    private bool IsOpsLocation(string location)
+    {
+        var relative = Navigation.ToBaseRelativePath(location);
+        var separator = relative.IndexOfAny(['?', '#']);
+        if (separator >= 0) relative = relative[..separator];
+        return string.Equals(relative.Trim('/'), "admin/ops", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Dictionary<string, string> ParseQueryValues(string query)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            var key = Uri.UnescapeDataString(parts[0].Replace('+', ' '));
+            if (string.IsNullOrWhiteSpace(key)) continue;
+            values[key] = parts.Length == 1 ? string.Empty : Uri.UnescapeDataString(parts[1].Replace('+', ' '));
+        }
+        return values;
+    }
+
+    private static bool IsTrue(string? value) => value is "1" || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+
+    private void CloseTransientPanels()
+    {
+        customRangeOpen = jobsOpen = requestsOpen = errorsOpen = errorDetailOpen = alertDetailOpen = alertRulesOpen = ruleEditorOpen = settingsOpen = logSettingsOpen = false;
+        modalError = null;
+    }
+
+    private async Task ToggleConcurrencyModeAsync() { showUserConcurrency = !showUserConcurrency; if (showUserConcurrency) userConcurrency = await SafeAsync(Api.GetAdminOpsUserConcurrencyAsync, new OpsUserConcurrencyStatsDto()); }
+
+    private IReadOnlyList<ConcurrencyRow> BuildConcurrencyRows()
+    {
+        if (showUserConcurrency) return userConcurrency.User.Values.OrderByDescending(x => x.CurrentInUse).Select(x => new ConcurrencyRow(string.IsNullOrWhiteSpace(x.UserEmail) ? $"用户 {x.UserId}" : x.UserEmail, x.Username, x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
+        if (groupId.HasValue) return concurrency.Account.Values.OrderByDescending(x => x.LoadPercentage).Select(x => new ConcurrencyRow(string.IsNullOrWhiteSpace(x.AccountName) ? $"账号 {x.AccountId}" : x.AccountName, x.GroupName, x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
+        if (!string.IsNullOrWhiteSpace(platform)) return concurrency.Group.Values.Where(x => string.Equals(x.Platform, platform, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.LoadPercentage).Select(x => new ConcurrencyRow(x.GroupName, x.Platform, x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
+        return concurrency.Platform.Values.OrderByDescending(x => x.LoadPercentage).Select(x => new ConcurrencyRow(x.Platform.ToUpperInvariant(), $"可用账号 {availability.Platform.GetValueOrDefault(x.Platform)?.AvailableCount ?? 0}", x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
+    }
+
+    private IReadOnlyList<DiagnosisRow> BuildDiagnosis()
+    {
+        var result = new List<DiagnosisRow>();
+        if (overview.RequestCountTotal == 0) result.Add(new("info", "系统处于空闲状态", "当前时间窗口没有请求，健康评分不参与风险判断。"));
+        if (system?.DbOk == false) result.Add(new("danger", "数据库连接异常", "请求与调度可能受到影响，请检查数据库连接。"));
+        if (system?.RedisOk == false) result.Add(new("warning", "Redis 连接异常", "缓存和实时并发信息可能不完整。"));
+        if ((system?.CpuUsagePercent ?? 0) >= 80) result.Add(new((system?.CpuUsagePercent ?? 0) >= 95 ? "danger" : "warning", "CPU 使用率偏高", $"当前 CPU 使用率 {system?.CpuUsagePercent:0.0}%。"));
+        if ((system?.MemoryUsagePercent ?? 0) >= 85) result.Add(new((system?.MemoryUsagePercent ?? 0) >= 95 ? "danger" : "warning", "内存使用率偏高", $"当前内存使用率 {system?.MemoryUsagePercent:0.0}%。"));
+        if (overview.UpstreamErrorRate * 100 >= 2) result.Add(new(overview.UpstreamErrorRate * 100 >= 5 ? "danger" : "warning", "上游错误率升高", $"当前上游错误率 {overview.UpstreamErrorRate * 100:0.00}%。"));
+        if (result.Count == 0) result.Add(new("success", "未发现明显异常", "核心指标均处于正常范围。"));
+        return result;
+    }
+
+    private async Task OpenRequestsAsync(string kind, string sort = "created_at_desc") { requestKind = kind; requestSort = sort; requestPage = 1; requestSearch = string.Empty; errorsOpen = errorDetailOpen = false; requestsOpen = true; await LoadRequestsAsync(); }
+    private Task CloseRequests() { requestsOpen = false; return Task.CompletedTask; }
+    private async Task LoadRequestsAsync()
+    {
+        requests = await SafeAsync(() => Api.GetAdminOpsRequestDetailsAsync(new OpsRequestDetailsQueryDto
+        {
+            Page = requestPage,
+            PageSize = 20,
+            TimeRange = timeRange,
+            StartTime = timeRange == "custom" ? customStart : null,
+            EndTime = timeRange == "custom" ? customEnd : null,
+            Kind = requestKind,
+            Platform = platform,
+            GroupId = groupId,
+            Search = requestSearch.Trim(),
+            Sort = requestSort
+        }), new PagedEnvelope<OpsRequestDetailDto>());
+    }
+    private async Task ChangeRequestPageAsync(int value) { requestPage = Math.Max(1, value); await LoadRequestsAsync(); }
+    private async Task CopyRequestIdAsync(string requestId)
+    {
+        if (string.IsNullOrWhiteSpace(requestId)) return;
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", requestId); Toasts.Success("请求 ID 已复制"); }
+        catch (JSException) { Toasts.Error("复制请求 ID 失败"); }
+    }
+
+    private async Task OpenErrorsAsync(string kind)
+    {
+        errorKind = string.Equals(kind, "upstream", StringComparison.OrdinalIgnoreCase) ? "upstream" : "request";
+        errorPage = 1;
+        errorSearch = errorStatusCode = errorOwner = string.Empty;
+        errorPhase = errorKind == "upstream" ? "upstream" : string.Empty;
+        errorView = "errors";
+        errorSortBy = "created_at";
+        errorSortOrder = "desc";
+        requestsOpen = errorDetailOpen = false;
+        errorsOpen = true;
+        await LoadErrorsAsync();
+    }
+    private Task CloseErrors() { errorsOpen = false; return Task.CompletedTask; }
+    private async Task LoadErrorsAsync()
+    {
+        var statusCodeIsOther = string.Equals(errorStatusCode, "other", StringComparison.OrdinalIgnoreCase);
+        errors = await SafeAsync(() => Api.GetAdminOpsErrorsAsync(errorKind, new OpsErrorListQueryDto
+        {
+            Page = errorPage,
+            PageSize = 20,
+            TimeRange = timeRange,
+            StartTime = timeRange == "custom" ? customStart : null,
+            EndTime = timeRange == "custom" ? customEnd : null,
+            Platform = platform,
+            GroupId = groupId,
+            Phase = errorPhase,
+            ErrorOwner = errorOwner,
+            View = errorView,
+            Search = errorSearch.Trim(),
+            StatusCodes = statusCodeIsOther ? string.Empty : errorStatusCode,
+            StatusCodesOther = statusCodeIsOther,
+            SortBy = errorSortBy,
+            SortOrder = errorSortOrder
+        }), new PagedEnvelope<OpsErrorLogDto>());
+    }
+    private async Task ChangeErrorPageAsync(int value) { errorPage = Math.Max(1, value); await LoadErrorsAsync(); }
+    private async Task ResetErrorFiltersAsync()
+    {
+        errorSearch = errorStatusCode = errorOwner = string.Empty;
+        errorPhase = errorKind == "upstream" ? "upstream" : string.Empty;
+        errorView = "errors";
+        errorSortBy = "created_at";
+        errorSortOrder = "desc";
+        errorPage = 1;
+        await LoadErrorsAsync();
+    }
+
+    private async Task OpenErrorDetailAsync(string kind, long id)
+    {
+        errorDetailKind = string.Equals(kind, "upstream", StringComparison.OrdinalIgnoreCase) ? "upstream" : "request";
+        errorsOpen = requestsOpen = false;
+        errorDetailOpen = true;
+        errorDetailLoading = true;
+        selectedErrorDetail = null;
+        correlatedUpstreamErrors = [];
+        modalError = null;
+        try
+        {
+            selectedErrorDetail = await Api.GetAdminOpsErrorDetailAsync(errorDetailKind, id);
+            if (errorDetailKind == "request")
+            {
+                var related = await Api.GetAdminOpsCorrelatedUpstreamErrorsAsync(id, 1, 100, true);
+                correlatedUpstreamErrors = related.Items;
+            }
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { errorDetailLoading = false; }
+    }
+
+    private Task CloseErrorDetail() { errorDetailOpen = false; selectedErrorDetail = null; correlatedUpstreamErrors = []; modalError = null; return Task.CompletedTask; }
+
+    private async Task ToggleErrorResolvedAsync(OpsErrorLogDto row)
+    {
+        try
+        {
+            await Api.ResolveAdminOpsErrorAsync(errorKind, row.Id, !row.Resolved);
+            row.Resolved = !row.Resolved;
+            if (selectedErrorDetail?.Id == row.Id) selectedErrorDetail.Resolved = row.Resolved;
+            Toasts.Success(row.Resolved ? "错误已标记为解决" : "错误已重新打开");
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+    }
+
+    private async Task ToggleSelectedErrorResolvedAsync()
+    {
+        if (selectedErrorDetail is null) return;
+        try
+        {
+            await Api.ResolveAdminOpsErrorAsync(errorDetailKind, selectedErrorDetail.Id, !selectedErrorDetail.Resolved);
+            selectedErrorDetail.Resolved = !selectedErrorDetail.Resolved;
+            Toasts.Success(selectedErrorDetail.Resolved ? "错误已标记为解决" : "错误已重新打开");
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+    }
+
+    private async Task LoadTokenStatsAsync()
+    {
+        if (!advanced.DisplayOpenAiTokenStats) return;
+        openAiStats = await SafeAsync(
+            () => Api.GetAdminOpsOpenAiTokenStatsAsync(tokenTimeRange, platform, groupId, tokenPage, tokenPageSize, tokenViewMode == "topn" ? tokenTopN : null),
+            new OpsOpenAiTokenStatsDto());
+        if (tokenViewMode == "pagination" && tokenPage > TokenTotalPages)
+        {
+            tokenPage = TokenTotalPages;
+            openAiStats = await SafeAsync(
+                () => Api.GetAdminOpsOpenAiTokenStatsAsync(tokenTimeRange, platform, groupId, tokenPage, tokenPageSize),
+                new OpsOpenAiTokenStatsDto());
+        }
+    }
+
+    private async Task TokenTimeRangeChangedAsync(ChangeEventArgs e) { tokenTimeRange = e.Value?.ToString() ?? "30d"; tokenPage = 1; await LoadTokenStatsAsync(); }
+    private async Task TokenViewModeChangedAsync(ChangeEventArgs e) { tokenViewMode = e.Value?.ToString() == "pagination" ? "pagination" : "topn"; tokenPage = 1; await LoadTokenStatsAsync(); }
+    private async Task TokenTopNChangedAsync(ChangeEventArgs e) { tokenTopN = ParsePageSize(e, 20); tokenPage = 1; await LoadTokenStatsAsync(); }
+    private async Task TokenPageSizeChangedAsync(ChangeEventArgs e) { tokenPageSize = ParsePageSize(e, 20); tokenPage = 1; await LoadTokenStatsAsync(); }
+    private async Task ChangeTokenPageAsync(int value) { tokenPage = Math.Clamp(value, 1, TokenTotalPages); await LoadTokenStatsAsync(); }
+    private static int ParsePageSize(ChangeEventArgs e, int fallback) => int.TryParse(e.Value?.ToString(), out var value) && value is 10 or 20 or 50 or 100 ? value : fallback;
+
+    private async Task OpenAlertRulesAsync() { alertRulesOpen = true; ruleEditorOpen = false; modalError = null; alertRules = await SafeAsync(Api.GetAdminOpsAlertRulesAsync, new List<OpsAlertRuleDto>()); }
+    private Task CloseAlertRules() { alertRulesOpen = false; ruleEditorOpen = false; return Task.CompletedTask; }
+    private void OpenNewRule() { ruleDraft = new() { MetricType = "error_rate", Operator = ">", Threshold = 1, WindowMinutes = 1, SustainedMinutes = 2, Severity = "P1", CooldownMinutes = 10, NotifyEmail = true, Enabled = true }; ruleGroupIdValue = string.Empty; ruleEditorOpen = true; modalError = null; }
+    private void EditRule(OpsAlertRuleDto row) { ruleDraft = CloneRule(row); ruleGroupIdValue = RuleGroupId(row)?.ToString() ?? string.Empty; ruleEditorOpen = true; modalError = null; }
+    private void CancelRuleEdit() { ruleEditorOpen = false; modalError = null; }
+    private async Task SaveRuleAsync() { ApplyRuleGroupFilter(); modalError = ValidateRule(ruleDraft); if (modalError is not null) return; saving = true; try { if (ruleDraft.Id.HasValue) await Api.UpdateAdminOpsAlertRuleAsync(ruleDraft.Id.Value, ruleDraft); else await Api.CreateAdminOpsAlertRuleAsync(ruleDraft); Toasts.Success("警报规则保存成功"); alertRules = await Api.GetAdminOpsAlertRulesAsync(); ruleEditorOpen = false; } catch (ApiException ex) { modalError = ex.Message; } finally { saving = false; } }
+    private async Task ToggleRuleAsync(OpsAlertRuleDto row) { var copy = CloneRule(row); copy.Enabled = !copy.Enabled; try { await Api.UpdateAdminOpsAlertRuleAsync(row.Id!.Value, copy); row.Enabled = copy.Enabled; } catch (ApiException ex) { modalError = ex.Message; } }
+    private async Task DeleteRuleAsync(OpsAlertRuleDto row) { if (!row.Id.HasValue || !await JS.InvokeAsync<bool>("confirm", $"确认删除预警规则“{row.Name}”？")) return; try { await Api.DeleteAdminOpsAlertRuleAsync(row.Id.Value); alertRules.Remove(row); Toasts.Success("警报规则删除成功"); } catch (ApiException ex) { modalError = ex.Message; } }
+    private static string? ValidateRule(OpsAlertRuleDto row) { if (string.IsNullOrWhiteSpace(row.Name)) return "名称不能为空。"; if (string.IsNullOrWhiteSpace(row.MetricType)) return "指标不能为空。"; if (IsGroupMetric(row.MetricType) && !RuleGroupId(row).HasValue) return "分组级指标必须选择作用分组。"; if (row.WindowMinutes is not (1 or 5 or 60)) return "统计窗口必须为 1、5 或 60 分钟。"; if (row.SustainedMinutes is < 1 or > 1440) return "连续样本数必须在 1 到 1440 之间。"; if (row.CooldownMinutes is < 0 or > 1440) return "冷却期必须在 0 到 1440 分钟之间。"; return null; }
+    private static OpsAlertRuleDto CloneRule(OpsAlertRuleDto x) => new() { Id = x.Id, Name = x.Name, Description = x.Description, Enabled = x.Enabled, MetricType = x.MetricType, Operator = x.Operator, Threshold = x.Threshold, WindowMinutes = x.WindowMinutes, SustainedMinutes = x.SustainedMinutes, Severity = x.Severity, CooldownMinutes = x.CooldownMinutes, NotifyEmail = x.NotifyEmail, Filters = x.Filters is null ? null : new(x.Filters), CreatedAt = x.CreatedAt, UpdatedAt = x.UpdatedAt, LastTriggeredAt = x.LastTriggeredAt };
+
+    private void RuleMetricChanged(ChangeEventArgs e)
+    {
+        ruleDraft.MetricType = e.Value?.ToString() ?? "error_rate";
+        if (!IsGroupMetric(ruleDraft.MetricType)) ruleGroupIdValue = string.Empty;
+    }
+
+    private void ApplyRuleGroupFilter()
+    {
+        if (!IsGroupMetric(ruleDraft.MetricType))
+        {
+            if (ruleDraft.Filters is not null)
+            {
+                ruleDraft.Filters.Remove("group_id");
+                if (ruleDraft.Filters.Count == 0) ruleDraft.Filters = null;
+            }
+            return;
+        }
+
+        if (!long.TryParse(ruleGroupIdValue, out var groupIdValue) || groupIdValue <= 0) return;
+        ruleDraft.Filters ??= [];
+        ruleDraft.Filters["group_id"] = JsonSerializer.SerializeToElement(groupIdValue);
+    }
+
+    private static bool IsGroupMetric(string? metricType) => !string.IsNullOrWhiteSpace(metricType) && GroupAlertMetricTypes.Contains(metricType);
+
+    private static long? RuleGroupId(OpsAlertRuleDto row)
+    {
+        if (row.Filters is null || !row.Filters.TryGetValue("group_id", out var value)) return null;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var numeric) && numeric > 0) return numeric;
+        return value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), out numeric) && numeric > 0 ? numeric : null;
+    }
+    private OpsAlertEventsQueryDto BuildAlertEventsQuery(DateTimeOffset? beforeFiredAt = null, long? beforeId = null) => new()
+    {
+        Limit = AlertEventPageSize,
+        TimeRange = alertTimeRange,
+        Severity = alertSeverity,
+        Status = alertStatusFilter,
+        EmailSent = alertEmailSent switch { "true" => true, "false" => false, _ => null },
+        BeforeFiredAt = beforeFiredAt,
+        BeforeId = beforeId,
+        Platform = platform,
+        GroupId = groupId
+    };
+
+    private async Task LoadAlertEventsAsync()
+    {
+        alertEventsLoading = true;
+        try
+        {
+            alertEvents = await Api.GetAdminOpsAlertEventsAsync(BuildAlertEventsQuery());
+            alertHasMore = alertEvents.Count == AlertEventPageSize;
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+            alertEvents = [];
+            alertHasMore = false;
+        }
+        finally { alertEventsLoading = false; }
+    }
+
+    private async Task LoadMoreAlertsAsync()
+    {
+        if (!alertHasMore || alertLoadingMore || alertEvents.Count == 0) return;
+        var last = alertEvents[^1];
+        var before = last.FiredAt ?? last.CreatedAt;
+        if (!before.HasValue) { alertHasMore = false; return; }
+        alertLoadingMore = true;
+        try
+        {
+            var more = await Api.GetAdminOpsAlertEventsAsync(BuildAlertEventsQuery(before, last.Id));
+            alertEvents.AddRange(more.Where(item => alertEvents.All(existing => existing.Id != item.Id)));
+            alertHasMore = more.Count == AlertEventPageSize;
+        }
+        catch (ApiException ex) { error = ex.Message; alertHasMore = false; }
+        finally { alertLoadingMore = false; }
+    }
+
+    private async Task AlertTimeRangeChangedAsync(ChangeEventArgs e) { alertTimeRange = e.Value?.ToString() ?? "24h"; await LoadAlertEventsAsync(); }
+    private async Task AlertSeverityChangedAsync(ChangeEventArgs e) { alertSeverity = e.Value?.ToString() ?? string.Empty; await LoadAlertEventsAsync(); }
+    private async Task AlertStatusChangedAsync(ChangeEventArgs e) { alertStatusFilter = e.Value?.ToString() ?? string.Empty; await LoadAlertEventsAsync(); }
+    private async Task AlertEmailChangedAsync(ChangeEventArgs e) { alertEmailSent = e.Value?.ToString() ?? string.Empty; await LoadAlertEventsAsync(); }
+
+    private async Task OpenAlertEventDetailAsync(OpsAlertEventDto row)
+    {
+        alertRulesOpen = errorsOpen = requestsOpen = false;
+        alertDetailOpen = true;
+        alertDetailLoading = true;
+        selectedAlertEvent = row;
+        alertHistory = [];
+        modalError = null;
+        try { selectedAlertEvent = await Api.GetAdminOpsAlertEventAsync(row.Id); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { alertDetailLoading = false; }
+        await LoadAlertHistoryAsync();
+    }
+
+    private Task CloseAlertEventDetail()
+    {
+        alertDetailOpen = false;
+        selectedAlertEvent = null;
+        alertHistory = [];
+        modalError = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadAlertHistoryAsync()
+    {
+        if (selectedAlertEvent is null) return;
+        alertHistoryLoading = true;
+        var selected = selectedAlertEvent;
+        try
+        {
+            var selectedPlatform = AlertDimensionText(selected, "platform");
+            var selectedGroupId = AlertDimensionLong(selected, "group_id");
+            var items = await Api.GetAdminOpsAlertEventsAsync(new OpsAlertEventsQueryDto
+            {
+                Limit = 20,
+                TimeRange = alertHistoryRange,
+                Platform = selectedPlatform,
+                GroupId = selectedGroupId
+            });
+            alertHistory = items.Where(item => item.RuleId == selected.RuleId &&
+                string.Equals(AlertDimensionText(item, "platform"), selectedPlatform, StringComparison.OrdinalIgnoreCase) &&
+                AlertDimensionLong(item, "group_id") == selectedGroupId).ToList();
+        }
+        catch { alertHistory = []; }
+        finally { alertHistoryLoading = false; }
+    }
+
+    private async Task AlertHistoryRangeChangedAsync(ChangeEventArgs e) { alertHistoryRange = e.Value?.ToString() ?? "7d"; await LoadAlertHistoryAsync(); }
+
+    private async Task SilenceSelectedAlertAsync()
+    {
+        if (selectedAlertEvent is null || alertActionLoading) return;
+        alertActionLoading = true;
+        try
+        {
+            var until = alertSilenceDuration switch
+            {
+                "24h" => DateTimeOffset.UtcNow.AddHours(24),
+                "7d" => DateTimeOffset.UtcNow.AddDays(7),
+                _ => DateTimeOffset.UtcNow.AddHours(1)
+            };
+            await Api.CreateAdminOpsAlertSilenceAsync(new OpsAlertSilenceRequestDto
+            {
+                RuleId = selectedAlertEvent.RuleId,
+                Platform = AlertDimensionText(selectedAlertEvent, "platform"),
+                GroupId = AlertDimensionLong(selectedAlertEvent, "group_id"),
+                Region = NullIfEmpty(AlertDimensionText(selectedAlertEvent, "region")),
+                Until = until,
+                Reason = $"silence from UI ({alertSilenceDuration})"
+            });
+            Toasts.Success("告警静默已生效");
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { alertActionLoading = false; }
+    }
+
+    private async Task ResolveSelectedAlertAsync()
+    {
+        if (selectedAlertEvent is null || alertActionLoading) return;
+        alertActionLoading = true;
+        try
+        {
+            await Api.UpdateAdminOpsAlertEventStatusAsync(selectedAlertEvent.Id);
+            selectedAlertEvent = await Api.GetAdminOpsAlertEventAsync(selectedAlertEvent.Id);
+            await LoadAlertEventsAsync();
+            await LoadAlertHistoryAsync();
+            Toasts.Success("告警已标记为手动解决");
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { alertActionLoading = false; }
+    }
+
+    private async Task OpenSelectedAlertRuleAsync()
+    {
+        if (selectedAlertEvent is null) return;
+        var ruleId = selectedAlertEvent.RuleId;
+        alertDetailOpen = false;
+        await OpenAlertRulesAsync();
+        var rule = alertRules.FirstOrDefault(item => item.Id == ruleId);
+        if (rule is not null) EditRule(rule);
+    }
+
+    private async Task OpenSelectedAlertLogsAsync()
+    {
+        if (selectedAlertEvent is null) return;
+        platform = AlertDimensionText(selectedAlertEvent, "platform");
+        groupId = AlertDimensionLong(selectedAlertEvent, "group_id");
+        alertDetailOpen = false;
+        SyncLocation();
+        await OpenErrorsAsync("request");
+    }
+
+    private async Task OpenSettingsAsync() { settingsOpen = true; settingsLoading = true; settingsTab = "general"; modalError = null; try { var a = Api.GetAdminOpsAdvancedSettingsAsync(); var t = Api.GetAdminOpsMetricThresholdsAsync(); var r = Api.GetAdminOpsRuntimeAlertSettingsAsync(); var e = Api.GetAdminOpsEmailNotificationConfigAsync(); await Task.WhenAll(a, t, r, e); advanced = await a; advanced.OpenAiAccountQuotaAutoPause ??= new(); thresholds = await t; runtimeAlert = await r; emailConfig = await e; } catch (ApiException ex) { modalError = ex.Message; } finally { settingsLoading = false; } }
+    private void ShowGeneralSettings() => settingsTab = "general";
+    private void ShowAlertSettings() => settingsTab = "alerts";
+    private void ShowRetentionSettings() => settingsTab = "retention";
+    private Task CloseSettings() { settingsOpen = false; modalError = null; return Task.CompletedTask; }
+    private async Task SaveSettingsAsync() { modalError = ValidateSettings(); if (modalError is not null) return; saving = true; try { if (emailConfig.Alert.Enabled && emailConfig.Alert.Recipients.Count == 0) emailConfig.Alert.Enabled = false; if (emailConfig.Report.Enabled && emailConfig.Report.Recipients.Count == 0) emailConfig.Report.Enabled = false; var a = Api.UpdateAdminOpsAdvancedSettingsAsync(advanced); var t = Api.UpdateAdminOpsMetricThresholdsAsync(thresholds); var r = Api.UpdateAdminOpsRuntimeAlertSettingsAsync(runtimeAlert); var e = Api.UpdateAdminOpsEmailNotificationConfigAsync(emailConfig); await Task.WhenAll(a, t, r, e); advanced = await a; runtimeAlert = await r; emailConfig = await e; settingsOpen = false; Toasts.Success("运维监控设置保存成功"); StartAutoRefresh(); await RefreshAllAsync(); } catch (ApiException ex) { modalError = ex.Message; } finally { saving = false; } }
+    private string? ValidateSettings()
+    {
+        if (runtimeAlert.EvaluationIntervalSeconds is < 1 or > 86400) return "评估间隔必须在 1 到 86400 秒之间。";
+        if ((thresholds.SlaPercentMin ?? 0) is < 0 or > 100) return "SLA 最低百分比必须在 0 到 100 之间。";
+        if ((thresholds.TtftP99MsMax ?? 0) < 0) return "TTFT P99 最大值不能小于 0。";
+        if ((thresholds.RequestErrorRatePercentMax ?? 0) is < 0 or > 100 || (thresholds.UpstreamErrorRatePercentMax ?? 0) is < 0 or > 100) return "错误率阈值必须在 0 到 100 之间。";
+        if (advanced.DataRetention.ErrorLogRetentionDays is < 0 or > 365 || advanced.DataRetention.MinuteMetricsRetentionDays is < 0 or > 365 || advanced.DataRetention.HourlyMetricsRetentionDays is < 0 or > 365) return "数据保留天数必须在 0 到 365 之间。";
+        if (advanced.OpenAiAccountQuotaAutoPause.DefaultThreshold5H is < 0 or > 1 || advanced.OpenAiAccountQuotaAutoPause.DefaultThreshold7D is < 0 or > 1) return "OpenAI 配额自动暂停阈值必须在 0 到 100% 之间。";
+        if (emailConfig.Report.DailySummaryEnabled && string.IsNullOrWhiteSpace(emailConfig.Report.DailySummarySchedule)) return "启用每日汇总时必须填写 Cron 计划。";
+        if (emailConfig.Report.WeeklySummaryEnabled && string.IsNullOrWhiteSpace(emailConfig.Report.WeeklySummarySchedule)) return "启用每周汇总时必须填写 Cron 计划。";
+        return null;
+    }
+    private void SetAlertRecipients(ChangeEventArgs e) => emailConfig.Alert.Recipients = ParseRecipients(e.Value?.ToString());
+    private void SetReportRecipients(ChangeEventArgs e) => emailConfig.Report.Recipients = ParseRecipients(e.Value?.ToString());
+    private static List<string> ParseRecipients(string? value) => (value ?? string.Empty).Split([',', ';', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private OpsSystemLogQueryDto BuildSystemLogQuery()
+    {
+        var bounds = ParseLogCustomBounds();
+        return new OpsSystemLogQueryDto
+        {
+            Page = logPage,
+            PageSize = logPageSize,
+            TimeRange = logTimeRange,
+            StartTime = bounds.Start,
+            EndTime = bounds.End,
+            Host = logHost.Trim(),
+            Level = logLevel,
+            Component = logComponent.Trim(),
+            RequestId = logRequestId.Trim(),
+            ClientRequestId = logClientRequestId.Trim(),
+            UserId = ParsePositiveLong(logUserId),
+            ApiKeyId = ParsePositiveLong(logApiKeyId),
+            AccountId = ParsePositiveLong(logAccountId),
+            Platform = logPlatform.Trim(),
+            Model = logModel.Trim(),
+            Search = logSearch.Trim()
+        };
+    }
+
+    private async Task LoadLogsAsync()
+    {
+        logs = await SafeAsync(() => Api.GetAdminOpsSystemLogsAsync(BuildSystemLogQuery()), new PagedEnvelope<OpsSystemLogDto>());
+        await LoadLogHealthAsync();
+    }
+
+    private async Task LoadLogHealthAsync() => logHealth = await SafeAsync(Api.GetAdminOpsSystemLogHealthAsync, new OpsSystemLogSinkHealthDto());
+
+    private async Task ApplyLogFiltersAsync()
+    {
+        if (!ValidateLogCustomBounds()) return;
+        logPage = 1;
+        await LoadLogsAsync();
+    }
+
+    private async Task ResetLogFiltersAsync()
+    {
+        logTimeRange = "1h";
+        logStartInput = logEndInput = logHost = logLevel = logComponent = logRequestId = logClientRequestId = logUserId = logApiKeyId = logAccountId = logModel = logSearch = string.Empty;
+        logPlatform = platform;
+        logPage = 1;
+        logPageSize = 20;
+        await LoadLogsAsync();
+    }
+
+    private async Task ChangeLogPageAsync(int value) { logPage = Math.Max(1, value); await LoadLogsAsync(); }
+    private async Task LogPageSizeChangedAsync(ChangeEventArgs e) { logPageSize = int.TryParse(e.Value?.ToString(), out var value) ? Math.Clamp(value, 10, 100) : 20; logPage = 1; await LoadLogsAsync(); }
+
+    private async Task CleanupLogsAsync()
+    {
+        if (!ValidateLogCustomBounds()) return;
+        if (!await JS.InvokeAsync<bool>("confirm", "确认清理当前筛选条件匹配的系统日志？此操作不可撤销。")) return;
+        var bounds = EffectiveLogCleanupBounds();
+        try
+        {
+            var result = await Api.CleanupAdminOpsSystemLogsAsync(new
+            {
+                start_time = bounds.Start.ToUniversalTime().ToString("O"),
+                end_time = bounds.End.ToUniversalTime().ToString("O"),
+                host = NullIfEmpty(logHost),
+                level = NullIfEmpty(logLevel),
+                component = NullIfEmpty(logComponent),
+                request_id = NullIfEmpty(logRequestId),
+                client_request_id = NullIfEmpty(logClientRequestId),
+                user_id = ParsePositiveLong(logUserId),
+                api_key_id = ParsePositiveLong(logApiKeyId),
+                account_id = ParsePositiveLong(logAccountId),
+                platform = NullIfEmpty(logPlatform),
+                model = NullIfEmpty(logModel),
+                q = NullIfEmpty(logSearch)
+            });
+            Toasts.Success(result.TryGetProperty("deleted", out var count) ? $"已清理 {count.GetInt64()} 条日志" : "系统日志清理完成");
+            logPage = 1;
+            await LoadLogsAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private (DateTimeOffset? Start, DateTimeOffset? End) ParseLogCustomBounds()
+    {
+        var start = DateTimeOffset.TryParse(logStartInput, out var parsedStart) ? parsedStart : (DateTimeOffset?)null;
+        var end = DateTimeOffset.TryParse(logEndInput, out var parsedEnd) ? parsedEnd : (DateTimeOffset?)null;
+        return (start, end);
+    }
+
+    private bool ValidateLogCustomBounds()
+    {
+        var hasStart = !string.IsNullOrWhiteSpace(logStartInput);
+        var hasEnd = !string.IsNullOrWhiteSpace(logEndInput);
+        if (hasStart != hasEnd)
+        {
+            Toasts.Error("开始时间和结束时间必须同时填写。");
+            return false;
+        }
+
+        var bounds = ParseLogCustomBounds();
+        if (hasStart && (!bounds.Start.HasValue || !bounds.End.HasValue || bounds.End <= bounds.Start))
+        {
+            Toasts.Error("日志结束时间必须晚于开始时间。");
+            return false;
+        }
+
+        return true;
+    }
+
+    private (DateTimeOffset Start, DateTimeOffset End) EffectiveLogCleanupBounds()
+    {
+        var custom = ParseLogCustomBounds();
+        if (custom.Start.HasValue && custom.End.HasValue) return (custom.Start.Value, custom.End.Value);
+
+        var end = DateTimeOffset.Now;
+        var duration = logTimeRange switch
+        {
+            "5m" => TimeSpan.FromMinutes(5),
+            "30m" => TimeSpan.FromMinutes(30),
+            "6h" => TimeSpan.FromHours(6),
+            "24h" => TimeSpan.FromHours(24),
+            "7d" => TimeSpan.FromDays(7),
+            "30d" => TimeSpan.FromDays(30),
+            _ => TimeSpan.FromHours(1)
+        };
+        return (end - duration, end);
+    }
+
+    private static long? ParsePositiveLong(string value) =>
+        long.TryParse(value.Trim(), out var id) && id > 0 ? id : null;
+
+    private static string? NullIfEmpty(string value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string FormatSystemLogDetail(OpsSystemLogDto row)
+    {
+        var sections = new List<string>();
+        if (!string.IsNullOrWhiteSpace(row.Message)) sections.Add(row.Message.Trim());
+
+        var request = new List<string>();
+        AddLogDetail(request, "status", ExtraText(row, "status_code"));
+        AddLogDetail(request, "latency", ExtraText(row, "latency_ms"), "ms");
+        AddLogDetail(request, "method", ExtraText(row, "method"));
+        AddLogDetail(request, "path", ExtraText(row, "path"));
+        AddLogDetail(request, "ip", ExtraText(row, "client_ip"));
+        AddLogDetail(request, "protocol", ExtraText(row, "protocol"));
+        if (request.Count > 0) sections.Add(string.Join(" · ", request));
+
+        var correlation = new List<string>();
+        AddLogDetail(correlation, "request_id", row.RequestId);
+        AddLogDetail(correlation, "client_request_id", row.ClientRequestId);
+        if (row.UserId.HasValue) correlation.Add($"user_id={row.UserId.Value}");
+        if (row.ApiKeyId.HasValue) correlation.Add($"api_key_id={row.ApiKeyId.Value}");
+        if (row.AccountId.HasValue) correlation.Add($"account_id={row.AccountId.Value}");
+        AddLogDetail(correlation, "platform", row.Platform);
+        AddLogDetail(correlation, "model", row.Model);
+        if (correlation.Count > 0) sections.Add(string.Join(" · ", correlation));
+
+        var errors = ExtraText(row, "errors");
+        if (!string.IsNullOrWhiteSpace(errors)) sections.Add($"errors={errors}");
+        var exception = ExtraText(row, "err");
+        if (string.IsNullOrWhiteSpace(exception)) exception = ExtraText(row, "error");
+        if (!string.IsNullOrWhiteSpace(exception)) sections.Add($"error={exception}");
+        return sections.Count == 0 ? "-" : string.Join("  ", sections);
+    }
+
+    private static void AddLogDetail(List<string> target, string label, string? value, string suffix = "")
+    {
+        if (!string.IsNullOrWhiteSpace(value)) target.Add($"{label}={value.Trim()}{suffix}");
+    }
+
+    private static string ExtraText(OpsSystemLogDto row, string key)
+    {
+        if (row.Extra is null || !row.Extra.TryGetValue(key, out var value)) return string.Empty;
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString()?.Trim() ?? string.Empty,
+            JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.ToString(),
+            _ => string.Empty
+        };
+    }
+
+    private async Task OpenLogSettingsAsync() { runtimeLog = await SafeAsync(Api.GetAdminOpsRuntimeLogConfigAsync, new OpsRuntimeLogConfigDto()); logSettingsOpen = true; }
+    private async Task SaveLogSettingsAsync() { try { runtimeLog = await Api.UpdateAdminOpsRuntimeLogConfigAsync(runtimeLog); logSettingsOpen = false; Toasts.Success("运行日志设置已生效"); } catch (ApiException ex) { error = ex.Message; } }
+    private async Task ResetLogSettingsAsync() { if (!await JS.InvokeAsync<bool>("confirm", "确认恢复运行日志默认设置？")) return; try { runtimeLog = await Api.ResetAdminOpsRuntimeLogConfigAsync(); Toasts.Success("运行日志设置已恢复默认"); } catch (ApiException ex) { error = ex.Message; } }
+
+    private void StartAutoRefresh() { autoRefreshCts?.Cancel(); autoRefreshCts?.Dispose(); autoRefreshCts = null; if (!advanced.AutoRefreshEnabled) return; autoRefreshCountdown = Math.Clamp(advanced.AutoRefreshIntervalSeconds, 15, 300); autoRefreshCts = new(); _ = RunAutoRefreshAsync(autoRefreshCts.Token); }
+    private async Task RunAutoRefreshAsync(CancellationToken token) { try { using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1)); while (await timer.WaitForNextTickAsync(token)) { autoRefreshCountdown--; if (autoRefreshCountdown <= 0) { autoRefreshCountdown = Math.Clamp(advanced.AutoRefreshIntervalSeconds, 15, 300); await InvokeAsync(RefreshAllAsync); } else await InvokeAsync(StateHasChanged); } } catch (OperationCanceledException) { } }
+
+    private static string Percent(double value, int decimals) => $"{(value <= 1 ? value * 100 : value).ToString($"F{decimals}")}%";
+    private static string PercentValue(double? value) => value.HasValue ? $"{value.Value:0.0}%" : "-";
+    private static string MsValue(int? value) => value.HasValue ? $"{value.Value} ms" : "-";
+    private static string DurationValue(int? value) => value.HasValue ? $"{value.Value} ms" : "-";
+    private static string FormatRate(double? value) => value?.ToString("0.0") ?? "0.0";
+    private static string FormatNumber(long value) => value.ToString("N0");
+    private static string FormatBucket(DateTimeOffset? value) => value?.ToLocalTime().ToString("HH:mm") ?? "-";
+    private static string FormatDateTime(DateTimeOffset? value) => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+    private static string FormatMemory(double mb) => mb >= 1024 ? $"{mb / 1024:0.0} GB" : $"{mb:0} MB";
+    private static string BoolLabel(bool? value) => value switch { true => "正常", false => "异常", _ => "未知" };
+    private static double BarWidth(long value, long max) => max <= 0 ? 0 : Math.Clamp(value * 100d / max, 2, 100);
+    private static string ResourceTone(double? value, double warning, double danger) => value >= danger ? "danger" : value >= warning ? "warning" : "success";
+    private static string LoadTone(double value) => value >= 90 ? "danger" : value >= 70 ? "warning" : "success";
+    private static string ThresholdTone(double? value, double? threshold, bool lowerIsBad) { if (!value.HasValue || !threshold.HasValue) return "success"; var critical = lowerIsBad ? value.Value < threshold.Value : value.Value >= threshold.Value; if (critical) return "danger"; var warning = lowerIsBad ? value.Value < threshold.Value + .1 : value.Value >= threshold.Value * .8; return warning ? "warning" : "success"; }
+    private static string SeverityTone(string value) => value.ToUpperInvariant() switch { "P0" or "CRITICAL" => "danger", "P1" or "WARNING" => "warning", _ => "info" };
+    private static string LogLevelTone(string value) => value.ToLowerInvariant() switch { "error" or "fatal" => "danger", "warn" or "warning" => "warning", "debug" => "muted", _ => "info" };
+    private static string AlertStatus(string value) => value switch { "firing" => "告警中", "resolved" => "已恢复", "manual_resolved" => "手动解决", _ => value };
+    private static string AlertStatusTone(string value) => value switch { "firing" => "danger", "resolved" => "success", "manual_resolved" => "muted", _ => "info" };
+
+    private static string AlertDimensionText(OpsAlertEventDto? item, string key)
+    {
+        if (item?.Dimensions is null || !item.Dimensions.TryGetValue(key, out var value)) return string.Empty;
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString()?.Trim() ?? string.Empty,
+            JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => value.ToString(),
+            _ => string.Empty
+        };
+    }
+
+    private static long? AlertDimensionLong(OpsAlertEventDto? item, string key)
+    {
+        if (item?.Dimensions is null || !item.Dimensions.TryGetValue(key, out var value)) return null;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var numeric)) return numeric;
+        return value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), out numeric) ? numeric : null;
+    }
+
+    private static string AlertDimensionsSummary(OpsAlertEventDto item)
+    {
+        var parts = new List<string>();
+        var itemPlatform = AlertDimensionText(item, "platform");
+        var itemRegion = AlertDimensionText(item, "region");
+        var itemGroupId = AlertDimensionLong(item, "group_id");
+        if (!string.IsNullOrWhiteSpace(itemPlatform)) parts.Add($"platform={itemPlatform}");
+        if (itemGroupId.HasValue) parts.Add($"group_id={itemGroupId.Value}");
+        if (!string.IsNullOrWhiteSpace(itemRegion)) parts.Add($"region={itemRegion}");
+        return parts.Count == 0 ? "-" : string.Join(" · ", parts);
+    }
+
+    private static string AlertDurationLabel(OpsAlertEventDto item)
+    {
+        var firedAt = item.FiredAt ?? item.CreatedAt;
+        if (!firedAt.HasValue) return "-";
+        var end = item.ResolvedAt ?? DateTimeOffset.Now;
+        var prefix = item.ResolvedAt.HasValue ? AlertStatus(item.Status) : "告警中";
+        return $"{prefix} {FormatAlertDuration(end - firedAt.Value)}";
+    }
+
+    private static string FormatAlertDuration(TimeSpan value)
+    {
+        if (value < TimeSpan.Zero) value = TimeSpan.Zero;
+        if (value.TotalMinutes < 1) return $"{(int)value.TotalSeconds}s";
+        if (value.TotalHours < 1) return $"{(int)value.TotalMinutes}m";
+        if (value.TotalDays < 1) return $"{(int)value.TotalHours}h";
+        return $"{(int)value.TotalDays}d";
+    }
+    private static string Correlation(OpsSystemLogDto row) { var parts = new List<string>(); if (!string.IsNullOrWhiteSpace(row.RequestId)) parts.Add($"req={row.RequestId}"); if (row.UserId.HasValue) parts.Add($"user={row.UserId}"); if (row.AccountId.HasValue) parts.Add($"acc={row.AccountId}"); if (!string.IsNullOrWhiteSpace(row.Platform)) parts.Add(row.Platform); if (!string.IsNullOrWhiteSpace(row.Model)) parts.Add(row.Model); return parts.Count == 0 ? "-" : string.Join(" · ", parts); }
+    private static string ErrorPayload(OpsErrorDetailDto detail, string kind)
+    {
+        var values = string.Equals(kind, "upstream", StringComparison.OrdinalIgnoreCase)
+            ? new[] { detail.UpstreamErrorDetail, detail.UpstreamErrorMessage, detail.UpstreamErrors, detail.ErrorBody, detail.Message }
+            : new[] { detail.ErrorBody, detail.Message, detail.UpstreamErrorDetail, detail.UpstreamErrorMessage };
+        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        Navigation.LocationChanged -= OnLocationChanged;
+        autoRefreshCts?.Cancel();
+        autoRefreshCts?.Dispose();
+        if (escapeHandlerId.HasValue)
+        {
+            try { await JS.InvokeVoidAsync("paraGateway.unregisterEscapeHandler", escapeHandlerId.Value); }
+            catch (JSException) { }
+        }
+        selfReference?.Dispose();
+    }
+
+    private sealed record OpsTrendRow(string Time, double Primary, double Secondary);
+    private sealed record ConcurrencyRow(string Name, string Subtitle, int Used, int Capacity, int Queued, double Load);
+    private sealed record DiagnosisRow(string Tone, string Title, string Description);
+}

@@ -1,0 +1,139 @@
+@page "/admin/system"
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>系统更新 · ParaGateway</PageTitle>
+<div class="page-header">
+    <div><h1>系统更新</h1><p>查看 Go 服务版本，并执行官方支持的更新、回滚和重启操作。</p></div>
+    <div class="page-header-actions">
+        <button type="button" class="icon-button" title="刷新版本信息" aria-label="刷新版本信息" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button>
+    </div>
+</div>
+
+@if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else if (loading)
+{
+    <LoadingState Text="正在载入系统版本" />
+}
+else
+{
+    <section class="content-section">
+        <div class="section-header"><div><h2>当前版本</h2><p>更新操作由 Go 服务执行；完成后可能需要重启服务。</p></div><button type="button" class="button secondary" disabled="@busy" @onclick="CheckUpdatesAsync"><Icon Name="refresh" Size="16" /> 检查更新</button></div>
+        <div class="metric-grid">
+            <div class="metric-card"><span>当前版本</span><strong>@CurrentVersion</strong></div>
+            <div class="metric-card"><span>最新版本</span><strong>@(updateInfo?.LatestVersion ?? "-")</strong></div>
+            <div class="metric-card"><span>构建类型</span><strong>@(updateInfo?.BuildType ?? "-")</strong></div>
+            <div class="metric-card"><span>更新状态</span><strong>@(updateInfo?.HasUpdate == true ? "有可用更新" : "已是最新")</strong></div>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(updateInfo?.Warning)) { <div class="inline-alert warning" role="status"><Icon Name="alert" Size="18" /><span>@updateInfo.Warning</span></div> }
+        @if (updateInfo?.ReleaseInfo is { } release)
+        {
+            <div class="detail-panel"><div class="detail-panel-header"><strong>@(string.IsNullOrWhiteSpace(release.Name) ? updateInfo.LatestVersion : release.Name)</strong>@if (!string.IsNullOrWhiteSpace(release.HtmlUrl)) { <a href="@release.HtmlUrl" target="_blank" rel="noopener">查看发行说明</a> }</div><p class="muted-text">@release.Body</p></div>
+        }
+        <div class="section-footer-actions">
+            <button type="button" class="button primary" disabled="@(busy || updateInfo?.HasUpdate != true)" @onclick="UpdateAsync"><Icon Name="download" Size="16" /> @(busyAction == "update" ? "更新中…" : "执行更新")</button>
+            <button type="button" class="button secondary" disabled="@busy" @onclick="RestartAsync"><Icon Name="refresh" Size="16" /> @(busyAction == "restart" ? "重启中…" : "重启服务")</button>
+        </div>
+    </section>
+
+    <section class="content-section">
+        <div class="section-header"><div><h2>可回滚版本</h2><p>官方接口只返回当前版本之前的稳定发行版，最多三项。</p></div></div>
+        @if (rollbackVersions.Count == 0)
+        {
+            <EmptyState Title="暂无可回滚版本" Description="服务未返回可用的稳定发行版。" />
+        }
+        else
+        {
+            <DxGrid Data="@rollbackVersions" KeyFieldName="Version" ShowFilterRow="true" PageSize="10">
+                <Columns>
+                    <DxGridDataColumn FieldName="Version" Caption="版本" Width="160" />
+                    <DxGridDataColumn FieldName="PublishedAt" Caption="发布时间" MinWidth="190" />
+                    <DxGridDataColumn Caption="操作" Width="220"><CellDisplayTemplate Context="context">@{ var row = (RollbackVersionDto)context.DataItem; }<button type="button" class="button secondary small" disabled="@busy" @onclick="() => RollbackAsync(row.Version)"><Icon Name="rotate-ccw" Size="15" /> 回滚到此版本</button>@if (!string.IsNullOrWhiteSpace(row.HtmlUrl)) { <a class="icon-button" title="查看发行说明" aria-label="查看发行说明" href="@row.HtmlUrl" target="_blank" rel="noopener"><Icon Name="arrow-right" Size="15" /></a> }</CellDisplayTemplate></DxGridDataColumn>
+                </Columns>
+            </DxGrid>
+        }
+    </section>
+}
+
+@code {
+    private SystemVersionDto version = new();
+    private SystemUpdateInfoDto? updateInfo;
+    private List<RollbackVersionDto> rollbackVersions = [];
+    private bool loading = true;
+    private string? error;
+    private string busyAction = string.Empty;
+    private bool busy => !string.IsNullOrWhiteSpace(busyAction);
+    private string CurrentVersion => !string.IsNullOrWhiteSpace(updateInfo?.CurrentVersion) ? updateInfo.CurrentVersion : version.Version;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            version = await Api.GetSystemVersionAsync();
+            updateInfo = await Api.CheckSystemUpdatesAsync();
+            rollbackVersions = (await Api.GetRollbackVersionsAsync()).Versions;
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task CheckUpdatesAsync()
+    {
+        error = null;
+        try { updateInfo = await Api.CheckSystemUpdatesAsync(force: true); Toasts.Success("版本信息已刷新"); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task UpdateAsync()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "确认执行系统更新？更新完成后服务可能需要重启。")) return;
+        await RunOperationAsync("update", async () =>
+        {
+            var result = await Api.PerformSystemUpdateAsync();
+            Toasts.Success(result.NeedRestart ? "更新完成，请重启服务" : result.Message);
+            await RefreshVersionsAsync();
+        });
+    }
+
+    private async Task RollbackAsync(string version)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认回滚到版本 {version}？")) return;
+        await RunOperationAsync("rollback", async () =>
+        {
+            var result = await Api.RollbackSystemAsync(version);
+            Toasts.Success(result.NeedRestart ? "回滚完成，请重启服务" : result.Message);
+            await RefreshVersionsAsync();
+        });
+    }
+
+    private async Task RestartAsync()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "确认重启 Go 服务？当前连接会短暂中断。")) return;
+        await RunOperationAsync("restart", async () => { var result = await Api.RestartSystemAsync(); Toasts.Success("服务重启已提交"); });
+    }
+
+    private async Task RefreshVersionsAsync()
+    {
+        version = await Api.GetSystemVersionAsync();
+        updateInfo = await Api.CheckSystemUpdatesAsync();
+        rollbackVersions = (await Api.GetRollbackVersionsAsync()).Versions;
+    }
+
+    private async Task RunOperationAsync(string action, Func<Task> operation)
+    {
+        busyAction = action;
+        error = null;
+        try { await operation(); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { busyAction = string.Empty; }
+    }
+}

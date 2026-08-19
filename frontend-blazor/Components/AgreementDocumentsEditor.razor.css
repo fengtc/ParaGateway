@@ -1,0 +1,16 @@
+.agreement-documents { overflow:hidden; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.agreement-documents > header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding:18px 20px; border-bottom:1px solid var(--line); }
+.agreement-documents h2 { margin:0; color:var(--text); font-size:.98rem; }
+.agreement-documents > header p { margin:5px 0 0; color:var(--muted); font-size:.76rem; }
+.agreement-empty { margin:0; padding:20px; color:var(--muted); font-size:.76rem; }
+.document-list { display:grid; gap:12px; padding:20px; }
+.document-list article { overflow:hidden; border:1px solid var(--line); border-radius:7px; }
+.document-list article > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 14px; border-bottom:1px solid var(--line); background:var(--surface-soft); }
+.document-list article > header > div { display:flex; align-items:center; gap:10px; }
+.document-list article > header > div > span { display:grid; width:32px; height:32px; place-items:center; border-radius:6px; color:var(--primary); background:rgba(35,134,98,.1); }
+.document-list article > header > div > div { display:grid; gap:2px; }
+.document-list article > header small { color:var(--muted); font-size:.66rem; }
+.document-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:14px 17px; padding:15px; }
+.document-grid ::deep input,.document-grid ::deep textarea { width:100%; }
+.document-grid ::deep textarea { resize:vertical; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.74rem; line-height:1.55; }
+@media(max-width:760px){.agreement-documents > header{flex-direction:column}.agreement-documents > header .button{width:100%}.document-grid{grid-template-columns:1fr}}

@@ -1,0 +1,165 @@
+@page "/admin/promo-codes"
+@using System.Globalization
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>优惠码管理 · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>优惠码管理</h1>
+        <p>管理注册优惠额度和使用记录。这里是注册优惠码，不是在线支付订单。</p>
+    </div>
+    <button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 新建优惠码</button>
+</div>
+
+<div class="toolbar promo-toolbar">
+    <div class="search-box"><Icon Name="search" Size="17" /><input value="@search" @oninput="SearchChanged" placeholder="搜索优惠码" aria-label="搜索优惠码" /></div>
+    <div class="filter-field compact"><label for="promo-status">状态</label><select id="promo-status" value="@status" @onchange="StatusChanged"><option value="">全部</option><option value="active">启用</option><option value="disabled">停用</option></select></div>
+    <span class="result-count">共 @total 条</span>
+    <button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button>
+</div>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入优惠码" />
+}
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else if (codes.Count == 0)
+{
+    <EmptyState Title="暂无优惠码" Description="创建优惠码后，可以复制注册链接发给新用户。">
+        <Action><button type="button" class="button primary small" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> 新建优惠码</button></Action>
+    </EmptyState>
+}
+else
+{
+    <DxGrid Data="@codes" KeyFieldName="Id" ShowFilterRow="true" ShowSearchPanel="false" PageSize="25" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer">
+        <Columns>
+            <DxGridDataColumn FieldName="Code" Caption="优惠码" MinWidth="190">
+                <CellDisplayTemplate Context="context">
+                    @{ var row = (PromoCodeDto)context.DataItem; }
+                    <span class="promo-code-cell"><code>@row.Code</code><button type="button" class="icon-button" title="复制优惠码" aria-label="复制优惠码" @onclick="() => CopyAsync(row.Code)"><Icon Name="copy" Size="15" /></button></span>
+                </CellDisplayTemplate>
+            </DxGridDataColumn>
+            <DxGridDataColumn FieldName="BonusAmount" Caption="赠送余额" DisplayFormat="0.00" Width="120" />
+            <DxGridDataColumn Caption="使用次数" Width="120"><CellDisplayTemplate Context="context">@{ var row = (PromoCodeDto)context.DataItem; }@row.UsedCount / @(row.MaxUses == 0 ? "不限" : row.MaxUses.ToString(CultureInfo.InvariantCulture))</CellDisplayTemplate></DxGridDataColumn>
+            <DxGridDataColumn Caption="状态" Width="110"><CellDisplayTemplate Context="context">@{ var row = (PromoCodeDto)context.DataItem; }<span class="status-badge @StatusClass(row)">@StatusLabel(row)</span></CellDisplayTemplate></DxGridDataColumn>
+            <DxGridDataColumn FieldName="ExpiresAt" Caption="有效期至" DisplayFormat="yyyy-MM-dd HH:mm" MinWidth="160" />
+            <DxGridDataColumn FieldName="CreatedAt" Caption="创建时间" DisplayFormat="yyyy-MM-dd HH:mm" MinWidth="160" />
+            <DxGridDataColumn Caption="操作" Width="170">
+                <CellDisplayTemplate Context="context">
+                    @{ var row = (PromoCodeDto)context.DataItem; }
+                    <button type="button" class="icon-button" title="复制注册链接" aria-label="复制注册链接" @onclick="() => CopyRegisterLinkAsync(row)"><Icon Name="link" Size="16" /></button>
+                    <button type="button" class="icon-button" title="查看使用记录" aria-label="查看使用记录" @onclick="() => OpenUsagesAsync(row)"><Icon Name="eye" Size="16" /></button>
+                    <button type="button" class="icon-button" title="编辑" aria-label="编辑" @onclick="() => OpenEdit(row)"><Icon Name="pencil" Size="16" /></button>
+                    <button type="button" class="icon-button danger" title="删除" aria-label="删除" @onclick="() => DeleteAsync(row)"><Icon Name="trash" Size="16" /></button>
+                </CellDisplayTemplate>
+            </DxGridDataColumn>
+        </Columns>
+    </DxGrid>
+}
+
+<AppModal Open="editorOpen" Title="@(editing is null ? "新建优惠码" : "编辑优惠码")" OnClose="CloseEditor">
+    <ChildContent>
+        <EditForm id="promo-editor" Model="form" OnValidSubmit="SaveAsync" FormName="promo-editor">
+            <DataAnnotationsValidator />
+            @if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }
+            <div class="form-grid">
+                <div class="form-field full"><label for="promo-code">优惠码（留空自动生成）</label><InputText id="promo-code" @bind-Value="form.Code" /></div>
+                <div class="form-field"><label for="promo-bonus">赠送余额</label><InputNumber id="promo-bonus" @bind-Value="form.BonusAmount" step="0.01" /><ValidationMessage For="() => form.BonusAmount" /></div>
+                <div class="form-field"><label for="promo-max-uses">最大使用次数（0=不限）</label><InputNumber id="promo-max-uses" @bind-Value="form.MaxUses" /><ValidationMessage For="() => form.MaxUses" /></div>
+                @if (editing is not null) { <div class="form-field"><label for="promo-state">状态</label><InputSelect id="promo-state" @bind-Value="form.Status"><option value="active">启用</option><option value="disabled">停用</option></InputSelect></div> }
+                <div class="form-field"><label for="promo-expires">有效期（可选）</label><InputText id="promo-expires" @bind-Value="form.ExpiresAtLocal" type="datetime-local" /></div>
+                <div class="form-field full"><label for="promo-notes">备注（可选）</label><InputTextArea id="promo-notes" @bind-Value="form.Notes" rows="3" /></div>
+            </div>
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseEditor">取消</button><button type="submit" form="promo-editor" class="button primary" disabled="@saving">@(saving ? "保存中…" : "保存")</button></Footer>
+</AppModal>
+
+<AppModal Open="usagesOpen" Title="优惠码使用记录" MaxWidth="760px" OnClose="CloseUsages">
+    <ChildContent>
+        @if (usagesLoading) { <LoadingState Text="正在载入使用记录" /> }
+        else if (usages.Count == 0) { <EmptyState Title="暂无使用记录" Description="该优惠码还没有被使用。" /> }
+        else
+        {
+            <DxGrid Data="@usages" ShowFilterRow="true" PageSize="20"><Columns><DxGridDataColumn FieldName="UserId" Caption="用户 ID" Width="110" /><DxGridDataColumn Caption="用户邮箱" MinWidth="220"><CellDisplayTemplate Context="context">@(((PromoCodeUsageDto)context.DataItem).User?.Email ?? "-")</CellDisplayTemplate></DxGridDataColumn><DxGridDataColumn FieldName="BonusAmount" Caption="赠送余额" DisplayFormat="0.00" /><DxGridDataColumn FieldName="UsedAt" Caption="使用时间" DisplayFormat="yyyy-MM-dd HH:mm" /></Columns></DxGrid>
+            @if (usageTotal > usages.Count) { <div class="pager-summary"><button type="button" class="button secondary small" disabled="@(usagePage <= 1)" @onclick="PreviousUsagePage">上一页</button><span>第 @usagePage 页，共 @usageTotal 条</span><button type="button" class="button secondary small" disabled="@(usages.Count < UsagePageSize)" @onclick="NextUsagePage">下一页</button></div> }
+        }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseUsages">关闭</button></Footer>
+</AppModal>
+
+@code {
+    private List<PromoCodeDto> codes = [];
+    private List<PromoCodeUsageDto> usages = [];
+    private PromoCodeDto? editing;
+    private PromoCodeDto? viewing;
+    private PromoCodeForm form = new();
+    private string search = string.Empty;
+    private string status = string.Empty;
+    private string? error;
+    private string? modalError;
+    private bool loading = true;
+    private bool saving;
+    private bool editorOpen;
+    private bool usagesOpen;
+    private bool usagesLoading;
+    private int total;
+    private int usageTotal;
+    private int usagePage = 1;
+    private const int UsagePageSize = 20;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true; error = null;
+        try { var page = await Api.GetAdminPromoCodesAsync(1, 1000, status, search); codes = page.Items; total = (int)Math.Min(int.MaxValue, page.Total); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+    private async Task SearchChanged(ChangeEventArgs args) { search = args.Value?.ToString() ?? string.Empty; await LoadAsync(); }
+    private async Task StatusChanged(ChangeEventArgs args) { status = args.Value?.ToString() ?? string.Empty; await LoadAsync(); }
+    private void OpenCreate() { editing = null; form = new(); modalError = null; editorOpen = true; }
+    private void OpenEdit(PromoCodeDto row) { editing = row; form = new() { Code = row.Code, BonusAmount = row.BonusAmount, MaxUses = row.MaxUses, Status = row.Status, Notes = row.Notes, ExpiresAtLocal = row.ExpiresAt?.ToLocalTime().ToString("yyyy-MM-ddTHH:mm") ?? string.Empty }; modalError = null; editorOpen = true; }
+    private void CloseEditor() => editorOpen = false;
+
+    private async Task SaveAsync()
+    {
+        saving = true; modalError = null;
+        try
+        {
+            var payload = new Dictionary<string, object?> { ["code"] = string.IsNullOrWhiteSpace(form.Code) ? null : form.Code.Trim(), ["bonus_amount"] = form.BonusAmount, ["max_uses"] = form.MaxUses, ["notes"] = form.Notes.Trim() };
+            if (TryGetUnixSeconds(form.ExpiresAtLocal, out var expires)) payload["expires_at"] = expires;
+            else if (editing is not null) payload["expires_at"] = 0;
+            if (editing is null) await Api.CreateAdminPromoCodeAsync(payload);
+            else { payload["status"] = form.Status; await Api.UpdateAdminPromoCodeAsync(editing.Id, payload); }
+            editorOpen = false; Toasts.Success(editing is null ? "优惠码已创建" : "优惠码已更新"); await LoadAsync();
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+    private async Task DeleteAsync(PromoCodeDto row)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认删除优惠码“{row.Code}”？")) return;
+        try { await Api.DeleteAdminPromoCodeAsync(row.Id); Toasts.Success("优惠码已删除"); await LoadAsync(); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+    private async Task CopyAsync(string value) { await JS.InvokeVoidAsync("navigator.clipboard.writeText", value); Toasts.Success("优惠码已复制"); }
+    private async Task CopyRegisterLinkAsync(PromoCodeDto row) { await JS.InvokeVoidAsync("navigator.clipboard.writeText", $"{Navigation.BaseUri.TrimEnd('/')}/register?promo={Uri.EscapeDataString(row.Code)}"); Toasts.Success("注册链接已复制"); }
+    private async Task OpenUsagesAsync(PromoCodeDto row) { viewing = row; usagePage = 1; usagesOpen = true; await LoadUsagesAsync(); }
+    private void CloseUsages() { usagesOpen = false; viewing = null; usages.Clear(); }
+    private async Task LoadUsagesAsync() { if (viewing is null) return; usagesLoading = true; try { var page = await Api.GetAdminPromoCodeUsagesAsync(viewing.Id, usagePage, UsagePageSize); usages = page.Items; usageTotal = (int)Math.Min(int.MaxValue, page.Total); } catch (ApiException ex) { error = ex.Message; } finally { usagesLoading = false; } }
+    private async Task PreviousUsagePage() { if (usagePage > 1) { usagePage--; await LoadUsagesAsync(); } }
+    private async Task NextUsagePage() { if (usages.Count >= UsagePageSize) { usagePage++; await LoadUsagesAsync(); } }
+    private static bool TryGetUnixSeconds(string value, out long seconds) { if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var date)) { seconds = date.ToUnixTimeSeconds(); return true; } seconds = 0; return false; }
+    private static string StatusClass(PromoCodeDto row) => IsExpired(row) ? "danger" : row.MaxUses > 0 && row.UsedCount >= row.MaxUses ? "neutral" : row.Status == "active" ? "success" : "neutral";
+    private static string StatusLabel(PromoCodeDto row) => IsExpired(row) ? "已过期" : row.MaxUses > 0 && row.UsedCount >= row.MaxUses ? "已用尽" : row.Status == "active" ? "启用" : "停用";
+    private static bool IsExpired(PromoCodeDto row) => row.ExpiresAt.HasValue && row.ExpiresAt.Value <= DateTimeOffset.UtcNow;
+}

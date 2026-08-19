@@ -1,0 +1,92 @@
+@inject ApiClient Api
+
+<div class="page-header">
+    <div>
+        <h1>用量记录</h1>
+        <p>模型请求、Token 消耗与费用明细</p>
+    </div>
+    <button type="button" class="button secondary" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="16" /> 刷新</button>
+</div>
+
+<div class="toolbar">
+    <div class="filter-field compact">
+        <label for="admin-usage-page-size">每页</label>
+        <select id="admin-usage-page-size" value="@pageSize" @onchange="PageSizeChangedAsync">
+            <option value="20">20 条</option>
+            <option value="50">50 条</option>
+            <option value="100">100 条</option>
+        </select>
+    </div>
+    <span class="result-count">共 @UiFormat.Integer(result?.Total ?? 0) 条记录</span>
+</div>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入用量记录" />
+}
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else if (result is null || result.Items.Count == 0)
+{
+    <EmptyState Title="暂无用量记录" Description="API 请求完成后，Token 与费用信息会显示在这里。" />
+}
+else
+{
+    <div class="data-table-wrap wide-table">
+        <table class="data-table">
+            <thead>
+                <tr><th>时间</th><th>用户 / Key</th><th>模型</th><th>输入 Token</th><th>缓存写入</th><th>缓存读取</th><th>输出 Token</th><th>费用</th><th>耗时</th><th>状态</th><th>记录 ID</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var item in result.Items)
+                {
+                    <tr @key="item.Id">
+                        <td data-label="时间">@UiFormat.DateTime(item.CreatedAt)</td>
+                        <td data-label="用户 / Key"><span class="primary-cell">@(string.IsNullOrWhiteSpace(item.UserEmail) ? "-" : item.UserEmail)</span><small>@(string.IsNullOrWhiteSpace(item.ApiKeyName) ? ShortId(item.ApiKeyId) : item.ApiKeyName)</small></td>
+                        <td data-label="模型"><span class="primary-cell">@item.PublicModel</span><small>@item.ProviderName</small></td>
+                        <td data-label="输入 Token" class="numeric-cell">@UiFormat.Integer(item.PromptTokens)</td>
+                        <td data-label="缓存写入 Token" class="numeric-cell">@UiFormat.Integer(item.CacheWriteTokens)</td>
+                        <td data-label="缓存读取 Token" class="numeric-cell">@UiFormat.Integer(item.CacheReadTokens)</td>
+                        <td data-label="输出 Token" class="numeric-cell">@UiFormat.Integer(item.CompletionTokens)</td>
+                        <td data-label="费用" class="numeric-cell">@UiFormat.Money(item.CostMicros)</td>
+                        <td data-label="耗时">@(item.DurationMs > 0 ? $"{item.DurationMs:N0} ms" : "-")</td>
+                        <td data-label="状态"><span class="status-badge @(item.Success ? "success" : "danger")" title="@item.ErrorCode">@(item.Success ? "成功" : $"失败 {item.StatusCode}")</span></td>
+                        <td data-label="记录 ID"><code class="request-id" title="@item.Id">@ShortId(item.Id)</code></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <nav class="pagination" aria-label="用量记录分页">
+        <button type="button" class="icon-button" title="上一页" aria-label="上一页" disabled="@(page <= 1 || loading)" @onclick="PreviousAsync"><Icon Name="chevron-left" Size="17" /></button>
+        <span>第 @(page) / @TotalPages 页</span>
+        <button type="button" class="icon-button" title="下一页" aria-label="下一页" disabled="@(page >= TotalPages || loading)" @onclick="NextAsync"><Icon Name="chevron-right" Size="17" /></button>
+    </nav>
+}
+
+@code {
+    private PagedResult<UsageRecordDto>? result;
+    private int page = 1;
+    private int pageSize = 20;
+    private bool loading = true;
+    private string? error;
+    private int TotalPages => Math.Max(1, result?.TotalPages > 0 ? result.TotalPages : (int)Math.Ceiling((result?.Total ?? 0) / (double)pageSize));
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try { result = await Api.GetUsageAsync(page, pageSize); if (result.Page > 0) page = result.Page; }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task PageSizeChangedAsync(ChangeEventArgs args) { if (int.TryParse(args.Value?.ToString(), out var size)) pageSize = size; page = 1; await LoadAsync(); }
+    private async Task PreviousAsync() { if (page <= 1) return; page--; await LoadAsync(); }
+    private async Task NextAsync() { if (page >= TotalPages) return; page++; await LoadAsync(); }
+    private static string ShortId(string value) => string.IsNullOrWhiteSpace(value) ? "-" : value.Length <= 12 ? value : $"{value[..8]}…";
+}

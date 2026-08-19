@@ -1,0 +1,18 @@
+@page "/usage"
+@page "/admin/usage"
+@inject NavigationManager Navigation
+
+<PageTitle>@(IsAdminRoute ? "用量记录" : "我的使用记录") · ParaGateway</PageTitle>
+
+@if (IsAdminRoute)
+{
+    <AdminUsagePanel />
+}
+else
+{
+    <UserUsagePanel />
+}
+
+@code {
+    private bool IsAdminRoute => new Uri(Navigation.Uri).AbsolutePath.TrimEnd('/').Equals("/admin/usage", StringComparison.OrdinalIgnoreCase);
+}

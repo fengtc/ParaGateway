@@ -1,0 +1,228 @@
+using System.Text.Json;
+using ParaGateway.Frontend.Models;
+using Xunit;
+
+namespace ParaGateway.Frontend.Tests;
+
+public sealed class OpsPageParityTests
+{
+    [Fact]
+    public void OpsPageMatchesOfficialToolbarAndOverviewSurface()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+
+        foreach (var text in new[] { "全部平台", "全部分组", "自定义", "预警规则", "设置", "实时信息", "健康评分", "请求错误", "上游错误" })
+        {
+            Assert.Contains(text, markup, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void OpsPageContainsOfficialAnalysisAndOperationalSections()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+
+        foreach (var text in new[] { "并发 / 排队", "账号切换率趋势", "吞吐趋势", "请求时长分布", "错误分布", "错误趋势", "OpenAI Token 请求统计", "告警事件", "系统日志" })
+        {
+            Assert.Contains(text, markup, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void OpsPageConnectsDrilldownsRulesSettingsAndLogs()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+
+        foreach (var method in new[] { "GetAdminOpsRequestDetailsAsync", "GetAdminOpsErrorsAsync", "GetAdminOpsAlertRulesAsync", "CreateAdminOpsAlertRuleAsync", "UpdateAdminOpsAdvancedSettingsAsync", "UpdateAdminOpsMetricThresholdsAsync", "GetAdminOpsSystemLogsAsync", "CleanupAdminOpsSystemLogsAsync" })
+        {
+            Assert.Contains($"Api.{method}", markup, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void OpsClientUsesOfficialGoEndpoints()
+    {
+        var client = Read("Services", "ApiClient.cs");
+
+        foreach (var endpoint in new[] { "/admin/ops/dashboard/snapshot-v2", "/admin/ops/dashboard/latency-histogram", "/admin/ops/dashboard/error-distribution", "/admin/ops/concurrency", "/admin/ops/account-availability", "/admin/ops/realtime-traffic", "/admin/ops/alert-rules", "/admin/ops/alert-events", "/admin/ops/system-logs", "/admin/ops/runtime/logging" })
+        {
+            Assert.Contains(endpoint, client, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void OpsPageHasResponsiveScopedStyles()
+    {
+        var css = Read("Pages", "AdminOps.razor.css");
+        Assert.Contains(".ops-overview-grid", css, StringComparison.Ordinal);
+        Assert.Contains(".ops-analysis-row", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 640px)", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpsPageSynchronizesOfficialRouteStateAndFullscreenBehavior()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+        var script = Read("wwwroot", "js", "paragateway.js");
+
+        Assert.Contains("Api.GetAdminSettingsTypedAsync", markup, StringComparison.Ordinal);
+        Assert.Contains("OpsMonitoringEnabled", markup, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(\"/admin/settings\", replace: true)", markup, StringComparison.Ordinal);
+        Assert.Contains("Navigation.LocationChanged += OnLocationChanged", markup, StringComparison.Ordinal);
+        Assert.Contains("Navigation.LocationChanged -= OnLocationChanged", markup, StringComparison.Ordinal);
+        foreach (var key in new[] { "\"tr\"", "\"platform\"", "\"group_id\"", "\"mode\"", "\"fullscreen\"", "\"open_error_details\"", "\"error_type\"", "\"alert_rule_id\"", "\"open_alert_rules\"" })
+        {
+            Assert.Contains(key, markup, StringComparison.Ordinal);
+        }
+        Assert.Contains("[JSInvokable]", markup, StringComparison.Ordinal);
+        Assert.Contains("ExitFullscreenFromKeyboard", markup, StringComparison.Ordinal);
+        Assert.Contains("paraGateway.registerEscapeHandler", markup, StringComparison.Ordinal);
+        Assert.Contains("paraGateway.unregisterEscapeHandler", markup, StringComparison.Ordinal);
+        Assert.Contains("gateway.registerEscapeHandler", script, StringComparison.Ordinal);
+        Assert.Contains("document.addEventListener('keydown'", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpsPageUsesIndependentFiveHourSwitchTrendAndOfficialThroughputUnits()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+        var css = Read("Pages", "AdminOps.razor.css");
+
+        Assert.Contains("switchTrendEnd.AddHours(-5)", markup, StringComparison.Ordinal);
+        Assert.Contains("Api.GetAdminOpsThroughputTrendAsync(\"custom\"", markup, StringComparison.Ordinal);
+        Assert.Contains("x.Qps, x.Tps / 1000d", markup, StringComparison.Ordinal);
+        Assert.Contains("Name=\"QPS\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Name=\"TPS/1K\"", markup, StringComparison.Ordinal);
+        Assert.Contains("ThroughputTrend.TopGroups", markup, StringComparison.Ordinal);
+        Assert.Contains("ThroughputTrend.ByPlatform", markup, StringComparison.Ordinal);
+        Assert.Contains(".ops-breakdown-chips", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpsErrorTrendUsesOfficialExcluding429And529FieldName()
+    {
+        var point = JsonSerializer.Deserialize<OpsErrorPointDto>("""{"upstream_error_count_excl_429_529":7}""");
+
+        Assert.NotNull(point);
+        Assert.Equal(7, point.UpstreamErrorCountExcl429529);
+    }
+
+    [Fact]
+    public void OpsRequestAndErrorDrilldownsUseTypedFiltersAndExactDetailEndpoints()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+        var client = Read("Services", "ApiClient.cs");
+
+        Assert.Contains("new OpsRequestDetailsQueryDto", markup, StringComparison.Ordinal);
+        Assert.Contains("new OpsErrorListQueryDto", markup, StringComparison.Ordinal);
+        Assert.Contains("StartTime = timeRange == \"custom\" ? customStart : null", markup, StringComparison.Ordinal);
+        Assert.Contains("EndTime = timeRange == \"custom\" ? customEnd : null", markup, StringComparison.Ordinal);
+        Assert.Contains("Api.GetAdminOpsErrorDetailAsync", markup, StringComparison.Ordinal);
+        Assert.Contains("Api.GetAdminOpsCorrelatedUpstreamErrorsAsync", markup, StringComparison.Ordinal);
+        Assert.Contains("CopyRequestIdAsync", markup, StringComparison.Ordinal);
+        Assert.Contains("/admin/ops/{resource}/{id}", client, StringComparison.Ordinal);
+        Assert.Contains("/admin/ops/request-errors/{requestErrorId}/upstream-errors", client, StringComparison.Ordinal);
+        Assert.Contains("include_detail=1", client, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpsSystemLogsExposeOfficialFiltersHealthAndCleanupScope()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+        var client = Read("Services", "ApiClient.cs");
+
+        foreach (var field in new[] { "logHost", "logLevel", "logComponent", "logRequestId", "logClientRequestId", "logUserId", "logApiKeyId", "logAccountId", "logPlatform", "logModel", "logSearch" })
+        {
+            Assert.Contains(field, markup, StringComparison.Ordinal);
+        }
+        foreach (var health in new[] { "QueueDepth", "QueueCapacity", "WrittenCount", "DroppedCount", "WriteFailedCount", "LastError" })
+        {
+            Assert.Contains($"logHealth.{health}", markup, StringComparison.Ordinal);
+        }
+        foreach (var queryName in new[] { "host", "level", "component", "request_id", "client_request_id", "user_id", "api_key_id", "account_id", "platform", "model", "q" })
+        {
+            Assert.Contains($"\"{queryName}\"", client, StringComparison.Ordinal);
+        }
+        Assert.Contains("EffectiveLogCleanupBounds", markup, StringComparison.Ordinal);
+        Assert.Contains("CleanupAdminOpsSystemLogsAsync(new", markup, StringComparison.Ordinal);
+        Assert.Contains("FormatSystemLogDetail", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpsAlertRulesExposeEveryOfficialMetricAndRequireGroupScope()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+
+        foreach (var metric in new[]
+        {
+            "success_rate", "error_rate", "upstream_error_rate", "cpu_usage_percent", "memory_usage_percent",
+            "concurrency_queue_depth", "group_available_accounts", "group_available_ratio", "group_rate_limit_ratio",
+            "account_rate_limited_count", "account_error_count", "account_error_ratio",
+            "account_temp_unscheduled_count", "overload_account_count"
+        })
+        {
+            Assert.Contains($"value=\"{metric}\"", markup, StringComparison.Ordinal);
+        }
+        Assert.Contains("GroupAlertMetricTypes", markup, StringComparison.Ordinal);
+        Assert.Contains("ruleDraft.Filters[\"group_id\"]", markup, StringComparison.Ordinal);
+        Assert.Contains("分组级指标必须选择作用分组", markup, StringComparison.Ordinal);
+        Assert.Contains("alert_rule_id", markup, StringComparison.Ordinal);
+        Assert.Contains("EditRule(rule)", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpsAlertEventsProvideFiltersDetailHistorySilenceAndResolution()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+        var client = Read("Services", "ApiClient.cs");
+
+        foreach (var field in new[] { "alertTimeRange", "alertSeverity", "alertStatusFilter", "alertEmailSent", "BeforeFiredAt", "BeforeId" })
+        {
+            Assert.Contains(field, markup, StringComparison.Ordinal);
+        }
+        foreach (var call in new[] { "GetAdminOpsAlertEventAsync", "CreateAdminOpsAlertSilenceAsync", "UpdateAdminOpsAlertEventStatusAsync" })
+        {
+            Assert.Contains($"Api.{call}", markup, StringComparison.Ordinal);
+        }
+        Assert.Contains("alertHistoryRange", markup, StringComparison.Ordinal);
+        Assert.Contains("AlertDimensionsSummary", markup, StringComparison.Ordinal);
+        Assert.Contains("/admin/ops/alert-events/{id}", client, StringComparison.Ordinal);
+        Assert.Contains("/admin/ops/alert-silences", client, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpsOpenAiTokenStatsProvideOfficialRangesTopNAndPagination()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+
+        foreach (var range in new[] { "30m", "1h", "1d", "15d", "30d" })
+        {
+            Assert.Contains($"option value=\"{range}\"", markup, StringComparison.Ordinal);
+        }
+        Assert.Contains("tokenViewMode", markup, StringComparison.Ordinal);
+        Assert.Contains("tokenTopN", markup, StringComparison.Ordinal);
+        Assert.Contains("tokenPageSize", markup, StringComparison.Ordinal);
+        Assert.Contains("RequestsWithFirstToken", markup, StringComparison.Ordinal);
+        Assert.Contains("Api.GetAdminOpsOpenAiTokenStatsAsync(tokenTimeRange", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpsSettingsExposeReportSchedulesAndQuotaAutoPauseThresholds()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+
+        foreach (var field in new[] { "DailySummaryEnabled", "DailySummarySchedule", "WeeklySummaryEnabled", "WeeklySummarySchedule", "QuotaAutoPause5HPercent", "QuotaAutoPause7DPercent" })
+        {
+            Assert.Contains(field, markup, StringComparison.Ordinal);
+        }
+        Assert.Contains("DefaultThreshold5H", markup, StringComparison.Ordinal);
+        Assert.Contains("DefaultThreshold7D", markup, StringComparison.Ordinal);
+        Assert.Contains("OpenAI 配额自动暂停阈值必须在 0 到 100% 之间", markup, StringComparison.Ordinal);
+    }
+
+    private static string Read(params string[] segments)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        return File.ReadAllText(Path.Combine([root, .. segments]));
+    }
+}

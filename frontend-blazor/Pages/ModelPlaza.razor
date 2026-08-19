@@ -1,0 +1,397 @@
+@page "/model-plaza"
+@using System.Globalization
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject NavigationManager Navigation
+
+<PageTitle>模型广场 · ParaGateway</PageTitle>
+
+@if (!IsEmbedded)
+{
+    <header class="plaza-public-nav">
+        <div class="plaza-public-nav-inner">
+            <a class="plaza-public-brand" href="/home" aria-label="@SiteName 首页">
+                <span class="plaza-logo-frame">
+                    @if (SiteLogoUrl is { } logo)
+                    {
+                        <img src="@logo" alt="@SiteName" />
+                    }
+                    else
+                    {
+                        <BrandMark />
+                    }
+                </span>
+                <strong>@SiteName</strong>
+            </a>
+            @if (Auth.IsAuthenticated)
+            {
+                <a class="plaza-nav-action" href="@(Auth.User?.IsAdmin == true ? "/admin/dashboard" : "/dashboard")">回到后台</a>
+            }
+            else
+            {
+                <a class="plaza-nav-action" href="@LoginTarget">登录</a>
+            }
+        </div>
+    </header>
+}
+
+<div class="model-plaza-page @(IsEmbedded ? "embedded" : "standalone")" role="main">
+    @if (!IsEmbedded)
+    {
+        <div class="plaza-title">
+            <h1>模型广场</h1>
+            <p>按分组浏览可用模型与价格</p>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(data?.Description))
+    {
+        <section class="plaza-description markdown-body">@((MarkupString)MarkdownRenderer.ToSafeHtml(data.Description))</section>
+    }
+
+    @if (!Auth.IsAuthenticated)
+    {
+        <p class="plaza-anonymous-hint"><Icon Name="info" Size="14" /> 登录后可查看你的专属分组与专属倍率</p>
+    }
+
+    @if (loading)
+    {
+        <div class="plaza-loading" role="status" aria-label="正在加载模型广场"><span class="spinner"></span></div>
+    }
+    else if (loadFailed)
+    {
+        <div class="plaza-error" role="alert">加载模型广场失败</div>
+    }
+    else
+    {
+        <section class="plaza-filters" aria-label="模型广场筛选">
+            <div class="plaza-filter-row">
+                <span class="plaza-filter-label">平台</span>
+                <div class="plaza-filter-options">
+                    <button type="button" class="filter-chip @(selectedPlatform == "all" ? "active" : null)" aria-pressed="@(selectedPlatform == "all")" @onclick='() => SelectPlatform("all")'>全部</button>
+                    @foreach (var platform in Platforms)
+                    {
+                        <button type="button"
+                                class="filter-chip tinted @(selectedPlatform == platform ? "active" : null)"
+                                style="@PlatformAccentStyle(platform)"
+                                disabled="@(!PlatformEnabled(platform))"
+                                aria-pressed="@(selectedPlatform == platform)"
+                                @onclick="() => SelectPlatform(platform)">
+                            <span class="chip-dot"></span>@PlatformLabel(platform)
+                        </button>
+                    }
+                </div>
+            </div>
+
+            <div class="plaza-filter-row">
+                <span class="plaza-filter-label">分组</span>
+                <div class="plaza-filter-options">
+                    <button type="button" class="filter-chip @(!selectedGroupId.HasValue ? "active" : null)" aria-pressed="@(!selectedGroupId.HasValue)" @onclick="() => SelectGroup(null)">全部</button>
+                    @foreach (var group in GroupOptions)
+                    {
+                        <button type="button"
+                                class="filter-chip tinted @(selectedGroupId == group.Id ? "active" : null)"
+                                style="@PlatformAccentStyle(group.Platform)"
+                                disabled="@(!GroupEnabled(group))"
+                                aria-pressed="@(selectedGroupId == group.Id)"
+                                @onclick="() => SelectGroup(group.Id)">@group.Name</button>
+                    }
+                </div>
+            </div>
+
+            <div class="plaza-filter-row">
+                <span class="plaza-filter-label">倍率</span>
+                <div class="plaza-filter-options">
+                    <button type="button" class="filter-chip @(!selectedRate.HasValue ? "active" : null)" aria-pressed="@(!selectedRate.HasValue)" @onclick="() => SelectRate(null)">全部</button>
+                    @foreach (var rate in Rates)
+                    {
+                        <button type="button"
+                                class="filter-chip mono @(selectedRate.HasValue && NearlyEqual(selectedRate.Value, rate) ? "active" : null)"
+                                disabled="@(!RateEnabled(rate))"
+                                aria-pressed="@(selectedRate.HasValue && NearlyEqual(selectedRate.Value, rate))"
+                                @onclick="() => SelectRate(rate)">@FormatRate(rate)x</button>
+                    }
+                </div>
+            </div>
+
+            <div class="plaza-filter-row model-search-row">
+                <span class="plaza-filter-label">模型</span>
+                <div class="plaza-model-search">
+                    <Icon Name="search" Size="16" />
+                    <input type="search" @bind="searchQuery" @bind:event="oninput" placeholder="搜索模型名称" aria-label="搜索模型名称" />
+                    @if (!string.IsNullOrWhiteSpace(searchQuery))
+                    {
+                        <button type="button" title="清除搜索" aria-label="清除搜索" @onclick="ClearSearch"><Icon Name="x" Size="14" /></button>
+                    }
+                </div>
+            </div>
+        </section>
+
+        @if (FilteredGroups.Count > 0)
+        {
+            <div class="plaza-group-list">
+                @foreach (var visible in FilteredGroups)
+                {
+                    var group = visible.Group;
+                    <section class="plaza-group-card @PlatformClass(group.Platform)" style="@PlatformAccentStyle(group.Platform)" @key="group.Id">
+                        <header class="plaza-group-header">
+                            <div class="plaza-group-badges">
+                                <span class="plaza-group-identity">
+                                    <span class="group-dot"></span>
+                                    <strong>@group.Name</strong>
+                                    <span>@PlatformLabel(group.Platform)</span>
+                                    @if (HasCustomRate(group))
+                                    {
+                                        <s>@FormatRate(group.RateMultiplier)x</s><b>@FormatRate(EffectiveRate(group))x</b>
+                                    }
+                                    else
+                                    {
+                                        <b>@FormatRate(EffectiveRate(group))x</b>
+                                    }
+                                </span>
+                                @if (group.IsExclusive)
+                                {
+                                    <span class="plaza-badge exclusive"><Icon Name="shield" Size="12" /> 专属分组</span>
+                                }
+                                @if (group.SubscriptionType == "subscription")
+                                {
+                                    <span class="plaza-badge subscription">订阅</span>
+                                }
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(group.Description))
+                            {
+                                <p>@group.Description</p>
+                            }
+                            @if (HasPeakRate(group))
+                            {
+                                <p class="plaza-peak-note"><Icon Name="clock" Size="13" /> 高峰时段 @PeakWindow(group) 计费倍率 ×@FormatRate(group.PeakRateMultiplier)</p>
+                            }
+                        </header>
+                        @if (visible.Models.Count == 0)
+                        {
+                            <p class="plaza-no-models">该分组暂未配置模型</p>
+                        }
+                        else
+                        {
+                            <ModelPlazaPricingTable Models="@visible.Models"
+                                                    Platform="@group.Platform"
+                                                    RateMultiplier="@group.RateMultiplier"
+                                                    UserRateMultiplier="@group.UserRateMultiplier"
+                                                    ImageRateIndependent="@group.ImageRateIndependent"
+                                                    ImageRateMultiplier="@group.ImageRateMultiplier" />
+                        }
+                    </section>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="plaza-empty">@(string.IsNullOrWhiteSpace(searchQuery) ? "暂无可展示的分组" : "没有匹配的模型")</div>
+        }
+    }
+</div>
+
+@code {
+    private ModelPlazaResponse? data;
+    private PublicSettingsDto settings = new();
+    private string selectedPlatform = "all";
+    private long? selectedGroupId;
+    private double? selectedRate;
+    private string searchQuery = string.Empty;
+    private bool loading = true;
+    private bool loadFailed;
+
+    private bool IsEmbedded => Auth.IsAuthenticated && HasQueryValue("embedded", "1");
+    private string SiteName => string.IsNullOrWhiteSpace(settings.SiteName) ? "ParaGateway" : settings.SiteName.Trim();
+    private string LoginTarget => $"/login?returnUrl={Uri.EscapeDataString("/model-plaza")}";
+    private string? SiteLogoUrl => SafeImageUrl(settings.SiteLogo);
+
+    private IReadOnlyList<string> Platforms => (data?.Groups ?? [])
+        .Select(group => group.Platform)
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    private IReadOnlyList<ModelPlazaGroup> GroupOptions => data?.Groups ?? [];
+
+    private IReadOnlyList<double> Rates => (data?.Groups ?? [])
+        .Select(EffectiveRate)
+        .Distinct()
+        .OrderBy(value => value)
+        .ToList();
+
+    private IReadOnlyList<VisiblePlazaGroup> FilteredGroups
+    {
+        get
+        {
+            IEnumerable<ModelPlazaGroup> groups = data?.Groups ?? [];
+            if (selectedPlatform != "all") groups = groups.Where(group => string.Equals(group.Platform, selectedPlatform, StringComparison.OrdinalIgnoreCase));
+            if (selectedGroupId.HasValue) groups = groups.Where(group => group.Id == selectedGroupId.Value);
+            if (selectedRate.HasValue) groups = groups.Where(group => NearlyEqual(EffectiveRate(group), selectedRate.Value));
+
+            var query = searchQuery.Trim();
+            return groups
+                .Select(group => new VisiblePlazaGroup(
+                    group,
+                    string.IsNullOrWhiteSpace(query)
+                        ? group.Models
+                        : group.Models.Where(model => model.Name.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList()))
+                .Where(group => string.IsNullOrWhiteSpace(query) || group.Models.Count > 0)
+                .OrderBy(group => EffectiveRate(group.Group))
+                .ThenBy(group => group.Group.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var settingsLoaded = false;
+        try
+        {
+            settings = await Api.GetPublicSettingsAsync();
+            settingsLoaded = true;
+        }
+        catch (ApiException)
+        {
+            // 设置瞬时加载失败时由模型广场端点自身按 fail-closed 规则兜底。
+        }
+
+        if (settingsLoaded && !settings.ModelPlazaEnabled)
+        {
+            Navigation.NavigateTo(Auth.IsAuthenticated
+                ? Auth.User?.IsAdmin == true ? "/admin/dashboard" : "/dashboard"
+                : "/home", replace: true);
+            return;
+        }
+
+        if (settingsLoaded && settings.ModelPlazaRequireAuth && !Auth.IsAuthenticated)
+        {
+            Navigation.NavigateTo(LoginTarget, replace: true);
+            return;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        loadFailed = false;
+        try
+        {
+            data = await Api.GetModelPlazaAsync();
+            if (selectedRate.HasValue && !Rates.Any(rate => NearlyEqual(rate, selectedRate.Value))) selectedRate = null;
+        }
+        catch (ApiException ex) when (!Auth.IsAuthenticated && ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            Navigation.NavigateTo(LoginTarget, replace: true);
+        }
+        catch (ApiException)
+        {
+            loadFailed = true;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private void SelectPlatform(string value) => selectedPlatform = value;
+    private void SelectGroup(long? value) => selectedGroupId = value;
+    private void SelectRate(double? value) => selectedRate = value;
+    private void ClearSearch() => searchQuery = string.Empty;
+
+    private bool PlatformEnabled(string platform) => GroupOptions.Any(group =>
+        string.Equals(group.Platform, platform, StringComparison.OrdinalIgnoreCase)
+        && (!selectedGroupId.HasValue || group.Id == selectedGroupId.Value)
+        && (!selectedRate.HasValue || NearlyEqual(EffectiveRate(group), selectedRate.Value)));
+
+    private bool GroupEnabled(ModelPlazaGroup group) =>
+        (selectedPlatform == "all" || string.Equals(group.Platform, selectedPlatform, StringComparison.OrdinalIgnoreCase))
+        && (!selectedRate.HasValue || NearlyEqual(EffectiveRate(group), selectedRate.Value));
+
+    private bool RateEnabled(double rate) => GroupOptions.Any(group =>
+        NearlyEqual(EffectiveRate(group), rate)
+        && (selectedPlatform == "all" || string.Equals(group.Platform, selectedPlatform, StringComparison.OrdinalIgnoreCase))
+        && (!selectedGroupId.HasValue || group.Id == selectedGroupId.Value));
+
+    private static double EffectiveRate(ModelPlazaGroup group) => group.UserRateMultiplier ?? group.RateMultiplier;
+    private static bool HasCustomRate(ModelPlazaGroup group) => group.UserRateMultiplier.HasValue && !NearlyEqual(group.UserRateMultiplier.Value, group.RateMultiplier);
+    private static bool HasPeakRate(ModelPlazaGroup group) => group.PeakRateEnabled && !string.IsNullOrWhiteSpace(group.PeakStart) && !string.IsNullOrWhiteSpace(group.PeakEnd) && group.PeakRateMultiplier > 0;
+
+    private string PeakWindow(ModelPlazaGroup group)
+    {
+        var offset = string.IsNullOrWhiteSpace(settings.ServerUtcOffset) ? string.Empty : $"（UTC{NormalizeOffset(settings.ServerUtcOffset)}）";
+        return $"{group.PeakStart}–{group.PeakEnd}{offset}";
+    }
+
+    private static string NormalizeOffset(string value)
+    {
+        var trimmed = value.Trim();
+        return trimmed.StartsWith('+') || trimmed.StartsWith('-') ? trimmed : $"+{trimmed}";
+    }
+
+    private bool HasQueryValue(string name, string expected)
+    {
+        var query = new Uri(Navigation.Uri).Query.TrimStart('?');
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = pair.Split('=', 2);
+            if (Uri.UnescapeDataString(parts[0]).Equals(name, StringComparison.OrdinalIgnoreCase)
+                && parts.Length == 2
+                && Uri.UnescapeDataString(parts[1]).Equals(expected, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    private static string? SafeImageUrl(string? value)
+    {
+        var url = value?.Trim();
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        if (url.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)) return url;
+        if (url.StartsWith('/') && !url.StartsWith("//", StringComparison.Ordinal)) return url;
+        if (Uri.TryCreate(url, UriKind.Absolute, out var absolute) && absolute.Scheme is "http" or "https") return url;
+        if (!url.Contains(':') && !url.StartsWith("//", StringComparison.Ordinal)) return url;
+        return null;
+    }
+
+    private static string PlatformLabel(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "anthropic" => "Anthropic",
+        "openai" => "OpenAI",
+        "gemini" => "Gemini",
+        "antigravity" => "Antigravity",
+        "grok" => "Grok",
+        "composite" => "Composite",
+        _ => value
+    };
+
+    private static string PlatformClass(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "anthropic" => "anthropic",
+        "openai" => "openai",
+        "gemini" => "gemini",
+        "antigravity" => "antigravity",
+        "grok" => "grok",
+        "composite" => "composite",
+        _ => "other"
+    };
+
+    private static string PlatformAccentStyle(string value) => $"--plaza-accent:{PlatformAccentColor(value)}";
+    private static string PlatformAccentColor(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "anthropic" => "#d97706",
+        "openai" => "#059669",
+        "gemini" => "#2563eb",
+        "antigravity" => "#7c3aed",
+        "grok" => "#475569",
+        "composite" => "#0891b2",
+        _ => "#28745a"
+    };
+
+    private static string FormatRate(double value) => value.ToString("0.####", CultureInfo.InvariantCulture);
+    private static bool NearlyEqual(double left, double right) => Math.Abs(left - right) < 0.000000001d;
+
+    private sealed record VisiblePlazaGroup(ModelPlazaGroup Group, IReadOnlyList<ModelPlazaModel> Models);
+}

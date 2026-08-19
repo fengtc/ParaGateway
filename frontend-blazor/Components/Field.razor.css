@@ -1,0 +1,59 @@
+.settings-field {
+    display: grid;
+    min-width: 0;
+    align-content: start;
+    gap: 7px;
+}
+
+.settings-field-full {
+    grid-column: 1 / -1;
+}
+
+.settings-field-label {
+    color: var(--text);
+    font-size: .8rem;
+    font-weight: 700;
+}
+
+.settings-field-control {
+    min-width: 0;
+}
+
+.settings-field-control ::deep input,
+.settings-field-control ::deep select,
+.settings-field-control ::deep textarea {
+    width: 100%;
+    min-width: 0;
+    min-height: var(--form-control-height);
+    padding: 7px 10px;
+    color: var(--form-control-color);
+    background: var(--form-control-bg);
+    border: 1px solid var(--form-control-border);
+    border-radius: var(--form-control-radius);
+    font: inherit;
+}
+
+.settings-field-control ::deep textarea {
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.settings-field-control ::deep input::placeholder,
+.settings-field-control ::deep textarea::placeholder {
+    color: var(--form-control-placeholder);
+}
+
+.settings-field-control ::deep input:focus,
+.settings-field-control ::deep select:focus,
+.settings-field-control ::deep textarea:focus {
+    border-color: var(--form-control-focus);
+    outline: 0;
+    box-shadow: 0 0 0 3px var(--form-control-focus-ring);
+}
+
+.settings-field-hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: .72rem;
+    line-height: 1.55;
+}

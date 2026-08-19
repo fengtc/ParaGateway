@@ -1,0 +1,12 @@
+<label class="filter-input">
+    <span>@Label</span>
+    <input type="@Type" value="@Value" @oninput="InputChanged" aria-label="@Label" />
+</label>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Type { get; set; } = "text";
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> Changed { get; set; }
+    private Task InputChanged(ChangeEventArgs args) => Changed.InvokeAsync(args.Value?.ToString() ?? string.Empty);
+}

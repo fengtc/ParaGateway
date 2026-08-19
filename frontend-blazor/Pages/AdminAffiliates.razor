@@ -1,0 +1,282 @@
+@page "/admin/affiliates"
+@page "/admin/affiliates/invites"
+@page "/admin/affiliates/rebates"
+@page "/admin/affiliates/transfers"
+@using System.Globalization
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>邀请返利管理 · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div><h1>邀请返利管理</h1><p>管理官方邀请配置，并查看邀请、返利和额度转移流水。支付订单页面不在此处展示。</p></div>
+    <div class="page-header-actions"><button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button></div>
+</div>
+
+<div class="toolbar">
+    <div class="segmented-control" role="tablist" aria-label="邀请返利视图">
+        <button type="button" class="@(ViewKind == "users" ? "active" : string.Empty)" @onclick='() => NavigateTo("/admin/affiliates")'>用户配置</button>
+        <button type="button" class="@(ViewKind == "invites" ? "active" : string.Empty)" @onclick='() => NavigateTo("/admin/affiliates/invites")'>邀请关系</button>
+        <button type="button" class="@(ViewKind == "rebates" ? "active" : string.Empty)" @onclick='() => NavigateTo("/admin/affiliates/rebates")'>返利流水</button>
+        <button type="button" class="@(ViewKind == "transfers" ? "active" : string.Empty)" @onclick='() => NavigateTo("/admin/affiliates/transfers")'>额度转移</button>
+    </div>
+    <div class="search-box"><Icon Name="search" Size="16" /><input value="@search" @oninput="SearchChanged" placeholder="搜索邮箱、用户名或邀请码" aria-label="搜索" /></div>
+    @if (ViewKind == "users")
+    {
+        <button type="button" class="button primary small" @onclick="OpenAddUser"><Icon Name="plus" Size="15" /> 添加用户</button>
+        <button type="button" class="button secondary small" disabled="@(selectedUserIds.Count == 0)" @onclick="OpenBatchRate"><Icon Name="users" Size="15" /> 批量设置</button>
+    }
+    <span class="result-count">共 @total 条</span>
+</div>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入邀请返利数据" />
+}
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else if (ViewKind == "users")
+{
+    <section class="content-section">
+        <div class="section-header"><div><h2>用户配置档</h2><p>只列出拥有自定义邀请码或专属返利比例的用户。</p></div></div>
+        @if (users.Count == 0)
+        {
+            <EmptyState Title="暂无自定义用户配置" Description="可以先搜索用户，再为其设置邀请码或专属返利比例。" />
+        }
+        else
+        {
+            <DxGrid Data="@users" KeyFieldName="UserId" ShowFilterRow="true" ShowSearchPanel="false" PageSize="25" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer">
+                <Columns>
+                    <DxGridDataColumn Caption="选择" Width="65"><CellDisplayTemplate Context="context">@{ var row = (AffiliateAdminEntryDto)context.DataItem; }<input type="checkbox" checked="@selectedUserIds.Contains(row.UserId)" @onchange="args => ToggleUser(row.UserId, args)" aria-label="选择 @row.Email" /></CellDisplayTemplate></DxGridDataColumn>
+                    <DxGridDataColumn FieldName="UserId" Caption="用户 ID" Width="95" />
+                    <DxGridDataColumn FieldName="Email" Caption="邮箱" MinWidth="210" />
+                    <DxGridDataColumn FieldName="Username" Caption="用户名" MinWidth="140" />
+                    <DxGridDataColumn FieldName="AffCode" Caption="邀请码" MinWidth="145" />
+                    <DxGridDataColumn Caption="配置" Width="130"><CellDisplayTemplate Context="context">@{ var row = (AffiliateAdminEntryDto)context.DataItem; }@(row.AffCodeCustom ? "自定义邀请码" : "系统邀请码")</CellDisplayTemplate></DxGridDataColumn>
+                    <DxGridDataColumn Caption="专属返利比例" Width="135"><CellDisplayTemplate Context="context">@{ var row = (AffiliateAdminEntryDto)context.DataItem; }@(row.AffRebateRatePercent.HasValue ? $"{row.AffRebateRatePercent.Value:0.##}%" : "跟随全局")</CellDisplayTemplate></DxGridDataColumn>
+                    <DxGridDataColumn FieldName="AffCount" Caption="邀请人数" Width="95" />
+                    <DxGridDataColumn Caption="操作" Width="145"><CellDisplayTemplate Context="context">@{ var row = (AffiliateAdminEntryDto)context.DataItem; }<button type="button" class="icon-button" title="编辑用户配置" aria-label="编辑用户配置" @onclick="() => OpenEdit(row)"><Icon Name="pencil" Size="16" /></button><button type="button" class="icon-button danger" title="清除自定义配置" aria-label="清除自定义配置" @onclick="() => ClearAsync(row)"><Icon Name="trash" Size="16" /></button></CellDisplayTemplate></DxGridDataColumn>
+                </Columns>
+            </DxGrid>
+        }
+    </section>
+}
+else if (ViewKind == "invites")
+{
+    <section class="content-section"><div class="section-header"><div><h2>邀请关系</h2><p>邀请人与被邀请人的官方关系记录。</p></div></div><DxGrid Data="@invites" ShowFilterRow="true" ShowSearchPanel="false" PageSize="25"><Columns><DxGridDataColumn FieldName="InviterEmail" Caption="邀请人邮箱" MinWidth="200" /><DxGridDataColumn FieldName="InviterUsername" Caption="邀请人" /><DxGridDataColumn FieldName="InviteeEmail" Caption="被邀请人邮箱" MinWidth="200" /><DxGridDataColumn FieldName="InviteeUsername" Caption="被邀请人" /><DxGridDataColumn FieldName="AffCode" Caption="邀请码" /><DxGridDataColumn FieldName="TotalRebate" Caption="累计返利" DisplayFormat="0.########" /><DxGridDataColumn FieldName="CreatedAt" Caption="建立时间" DisplayFormat="yyyy-MM-dd HH:mm" /></Columns></DxGrid></section>
+}
+else if (ViewKind == "rebates")
+{
+    <section class="content-section"><div class="section-header"><div><h2>返利流水</h2><p>按官方账单关联的返利记录展示。</p></div></div><DxGrid Data="@rebates" ShowFilterRow="true" ShowSearchPanel="false" PageSize="25"><Columns><DxGridDataColumn FieldName="OrderId" Caption="订单 ID" Width="100" /><DxGridDataColumn FieldName="OutTradeNo" Caption="外部单号" MinWidth="180" /><DxGridDataColumn FieldName="InviterEmail" Caption="邀请人" MinWidth="200" /><DxGridDataColumn FieldName="InviteeEmail" Caption="被邀请人" MinWidth="200" /><DxGridDataColumn FieldName="OrderAmount" Caption="订单金额" DisplayFormat="0.########" /><DxGridDataColumn FieldName="RebateAmount" Caption="返利金额" DisplayFormat="0.########" /><DxGridDataColumn FieldName="OrderStatus" Caption="订单状态" /><DxGridDataColumn FieldName="CreatedAt" Caption="时间" DisplayFormat="yyyy-MM-dd HH:mm" /></Columns></DxGrid></section>
+}
+else
+{
+    <section class="content-section"><div class="section-header"><div><h2>额度转移</h2><p>邀请返利额度转入用户余额的官方审计记录。</p></div></div><DxGrid Data="@transfers" ShowFilterRow="true" ShowSearchPanel="false" PageSize="25"><Columns><DxGridDataColumn FieldName="LedgerId" Caption="流水 ID" Width="100" /><DxGridDataColumn FieldName="UserId" Caption="用户 ID" Width="100" /><DxGridDataColumn FieldName="UserEmail" Caption="用户邮箱" MinWidth="220" /><DxGridDataColumn FieldName="Username" Caption="用户名" /><DxGridDataColumn FieldName="Amount" Caption="转移金额" DisplayFormat="0.########" /><DxGridDataColumn FieldName="BalanceAfter" Caption="余额快照" DisplayFormat="0.########" /><DxGridDataColumn FieldName="AvailableQuotaAfter" Caption="返利额度快照" DisplayFormat="0.########" /><DxGridDataColumn FieldName="CreatedAt" Caption="时间" DisplayFormat="yyyy-MM-dd HH:mm" /></Columns></DxGrid></section>
+}
+
+<AppModal Open="editorOpen" Title="@(editing is null ? "添加用户邀请配置" : "编辑用户邀请配置")" MaxWidth="700px" OnClose="CloseEditor">
+    <ChildContent>
+        <EditForm id="affiliate-editor" Model="form" OnValidSubmit="SaveAsync" FormName="affiliate-editor">
+            @if (editing is null)
+            {
+                <div class="form-field full">
+                    <label for="affiliate-user-query">搜索普通用户</label>
+                    <div class="toolbar-inline"><input id="affiliate-user-query" class="text-input" @bind="userLookupQuery" @bind:event="oninput" placeholder="输入邮箱或用户名" /><button type="button" class="button secondary small" @onclick="LookupUsersAsync" disabled="@lookupLoading"><Icon Name="search" Size="15" /> 搜索</button></div>
+                    @if (lookupResults.Count > 0)
+                    {
+                        <div class="picker-list" role="listbox" aria-label="用户搜索结果">
+                            @foreach (var candidate in lookupResults)
+                            {
+                                <button type="button" class="picker-option @(selectedLookup?.Id == candidate.Id ? "active" : string.Empty)" @onclick="() => SelectLookupUserAsync(candidate)"><strong>@candidate.Email</strong><span>@candidate.Username · ID @candidate.Id</span></button>
+                            }
+                        </div>
+                    }
+                    @if (selectedLookup is not null)
+                    {
+                        <div class="inline-alert success" role="status"><Icon Name="check" Size="18" /><span>已选择 @selectedLookup.Email（@selectedLookup.Username）</span></div>
+                    }
+                    @if (lookupError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@lookupError</span></div> }
+                </div>
+            }
+            else
+            {
+                <div class="form-field full"><label for="affiliate-email">用户</label><input id="affiliate-email" class="text-input" value="@editing.Email" readonly /></div>
+            }
+            @if (overview is not null)
+            {
+                <div class="stack-list"><span class="muted-text">当前邀请码：@overview.AffCode</span><span class="muted-text">当前返利比例：@overview.RebateRatePercent.ToString("0.##", CultureInfo.InvariantCulture)% · 已邀请 @overview.InvitedCount 人</span></div>
+            }
+            <div class="form-grid">
+                <div class="form-field full"><label for="affiliate-code">自定义邀请码</label><InputText id="affiliate-code" @bind-Value="form.AffCode" placeholder="留空表示不修改" /></div>
+                <div class="form-field"><label for="affiliate-rate">专属返利比例（%）</label><InputText id="affiliate-rate" @bind-Value="form.RateText" placeholder="0 到 100" /></div>
+                @if (editing is not null && editing.AffRebateRatePercent.HasValue)
+                {
+                    <label class="toggle-row"><InputCheckbox @bind-Value="form.ClearRate" /> 清除当前专属返利比例</label>
+                }
+            </div>
+            @if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseEditor">取消</button><button type="submit" form="affiliate-editor" class="button primary" disabled="@saving">保存</button></Footer>
+</AppModal>
+
+<AppModal Open="batchRateOpen" Title="批量设置专属返利比例" OnClose="CloseBatchRate">
+    <ChildContent>
+        <EditForm id="affiliate-batch-editor" Model="batchForm" OnValidSubmit="SaveBatchRateAsync" FormName="affiliate-batch-editor">
+            <p class="confirm-copy">已选择 @selectedUserIds.Count 个用户。填写比例，或勾选清除后恢复跟随全局比例。</p>
+            <div class="form-field"><label for="affiliate-batch-rate">返利比例（%）</label><InputText id="affiliate-batch-rate" @bind-Value="batchForm.RateText" placeholder="0 到 100" disabled="@batchForm.Clear" /></div>
+            <label class="toggle-row"><InputCheckbox @bind-Value="batchForm.Clear" /> 清除这些用户的专属比例</label>
+            @if (batchError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@batchError</span></div> }
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseBatchRate">取消</button><button type="submit" form="affiliate-batch-editor" class="button primary" disabled="@batchSaving">应用</button></Footer>
+</AppModal>
+
+@code {
+    private string ViewKind => Navigation.Uri.Contains("/rebates", StringComparison.OrdinalIgnoreCase) ? "rebates" : Navigation.Uri.Contains("/transfers", StringComparison.OrdinalIgnoreCase) ? "transfers" : Navigation.Uri.EndsWith("/invites", StringComparison.OrdinalIgnoreCase) ? "invites" : "users";
+    private string search = string.Empty;
+    private bool loading = true, saving, editorOpen, batchRateOpen, batchSaving, lookupLoading;
+    private string? error, modalError, lookupError, batchError;
+    private int total;
+    private List<AffiliateAdminEntryDto> users = [];
+    private List<AffiliateInviteRecordDto> invites = [];
+    private List<AffiliateRebateRecordDto> rebates = [];
+    private List<AffiliateTransferRecordDto> transfers = [];
+    private AffiliateAdminEntryDto? editing;
+    private AffiliateEditorForm form = new();
+    private readonly HashSet<long> selectedUserIds = [];
+    private string userLookupQuery = string.Empty;
+    private List<AffiliateUserLookupDto> lookupResults = [];
+    private AffiliateUserLookupDto? selectedLookup;
+    private AffiliateUserOverviewDto? overview;
+    private AffiliateBatchForm batchForm = new();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true; error = null;
+        try
+        {
+            if (ViewKind == "users")
+            {
+                var page = await Api.GetAffiliateAdminUsersAsync(1, 100, search);
+                users = page.Items; total = (int)Math.Min(int.MaxValue, page.Total);
+                selectedUserIds.RemoveWhere(id => users.All(x => x.UserId != id));
+            }
+            else if (ViewKind == "invites") { var page = await Api.GetAffiliateInvitesAsync(1, 100, search); invites = page.Items; total = (int)Math.Min(int.MaxValue, page.Total); }
+            else if (ViewKind == "rebates") { var page = await Api.GetAffiliateRebatesAsync(1, 100, search); rebates = page.Items; total = (int)Math.Min(int.MaxValue, page.Total); }
+            else { var page = await Api.GetAffiliateTransfersAsync(1, 100, search); transfers = page.Items; total = (int)Math.Min(int.MaxValue, page.Total); }
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task SearchChanged(ChangeEventArgs args) { search = args.Value?.ToString() ?? string.Empty; await LoadAsync(); }
+    private void NavigateTo(string path) { if (!Navigation.Uri.EndsWith(path, StringComparison.OrdinalIgnoreCase)) Navigation.NavigateTo(path); }
+    private void OpenEdit(AffiliateAdminEntryDto row) { editing = row; form = AffiliateEditorForm.From(row); selectedLookup = null; lookupResults = []; userLookupQuery = string.Empty; lookupError = null; modalError = null; overview = null; editorOpen = true; _ = LoadOverviewAsync(row.UserId); }
+    private void OpenAddUser() { editing = null; form = new(); selectedLookup = null; lookupResults = []; userLookupQuery = string.Empty; lookupError = null; modalError = null; overview = null; editorOpen = true; }
+    private void CloseEditor() { editorOpen = false; lookupResults = []; selectedLookup = null; overview = null; }
+
+    private async Task LookupUsersAsync()
+    {
+        lookupError = null; lookupResults = [];
+        if (string.IsNullOrWhiteSpace(userLookupQuery)) { lookupError = "请输入邮箱或用户名。"; return; }
+        lookupLoading = true;
+        try { lookupResults = await Api.LookupAffiliateUsersAsync(userLookupQuery.Trim()); }
+        catch (ApiException ex) { lookupError = ex.Message; }
+        finally { lookupLoading = false; }
+    }
+
+    private async Task SelectLookupUserAsync(AffiliateUserLookupDto candidate)
+    {
+        selectedLookup = candidate; lookupResults = []; lookupError = null; form = new(); await LoadOverviewAsync(candidate.Id);
+    }
+
+    private async Task LoadOverviewAsync(long userId)
+    {
+        try { overview = await Api.GetAffiliateUserOverviewAsync(userId); }
+        catch (ApiException ex) { overview = null; lookupError = ex.Message; }
+    }
+
+    private void ToggleUser(long userId, ChangeEventArgs args)
+    {
+        if (IsChecked(args.Value)) selectedUserIds.Add(userId); else selectedUserIds.Remove(userId);
+    }
+
+    private static bool IsChecked(object? value) => value switch
+    {
+        bool checkedValue => checkedValue,
+        string text when bool.TryParse(text, out var parsed) => parsed,
+        _ => false
+    };
+
+    private void OpenBatchRate() { if (selectedUserIds.Count == 0) return; batchForm = new(); batchError = null; batchRateOpen = true; }
+    private void CloseBatchRate() => batchRateOpen = false;
+
+    private async Task SaveAsync()
+    {
+        var userId = editing?.UserId ?? selectedLookup?.Id;
+        if (!userId.HasValue) { modalError = "请先搜索并选择一个用户。"; return; }
+        saving = true; modalError = null;
+        try
+        {
+            var payload = new Dictionary<string, object?>();
+            if (!string.IsNullOrWhiteSpace(form.AffCode)) payload["aff_code"] = form.AffCode.Trim();
+            if (form.ClearRate)
+            {
+                payload["clear_rebate_rate"] = true;
+            }
+            else if (!string.IsNullOrWhiteSpace(form.RateText))
+            {
+                if (!double.TryParse(form.RateText.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var rate) || rate < 0 || rate > 100) throw new ApiException("返利比例必须是 0 到 100 之间的数字。");
+                payload["aff_rebate_rate_percent"] = rate;
+            }
+            if (payload.Count == 0) throw new ApiException("至少填写一个需要修改的字段。");
+            await Api.UpdateAffiliateUserAsync(userId.Value, payload);
+            editorOpen = false; Toasts.Success("用户邀请配置已更新"); await LoadAsync();
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task SaveBatchRateAsync()
+    {
+        batchSaving = true; batchError = null;
+        try
+        {
+            double? rate = null;
+            if (!batchForm.Clear)
+            {
+                if (!double.TryParse(batchForm.RateText.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) || parsed < 0 || parsed > 100) throw new ApiException("返利比例必须是 0 到 100 之间的数字。");
+                rate = parsed;
+            }
+            await Api.BatchSetAffiliateRateAsync(selectedUserIds, rate, batchForm.Clear);
+            batchRateOpen = false; selectedUserIds.Clear(); Toasts.Success("批量返利比例已更新"); await LoadAsync();
+        }
+        catch (ApiException ex) { batchError = ex.Message; }
+        finally { batchSaving = false; }
+    }
+
+    private async Task ClearAsync(AffiliateAdminEntryDto row)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认清除用户 {row.Email} 的自定义邀请码和返利比例？")) return;
+        try { await Api.ClearAffiliateUserAsync(row.UserId); Toasts.Success("用户自定义配置已清除"); await LoadAsync(); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private sealed class AffiliateEditorForm
+    {
+        public string AffCode { get; set; } = string.Empty;
+        public string RateText { get; set; } = string.Empty;
+        public bool ClearRate { get; set; }
+        public static AffiliateEditorForm From(AffiliateAdminEntryDto row) => new() { AffCode = row.AffCodeCustom ? row.AffCode : string.Empty, RateText = row.AffRebateRatePercent?.ToString("0.##", CultureInfo.InvariantCulture) ?? string.Empty };
+    }
+
+    private sealed class AffiliateBatchForm { public string RateText { get; set; } = string.Empty; public bool Clear { get; set; } }
+}

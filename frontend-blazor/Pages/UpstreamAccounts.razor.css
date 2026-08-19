@@ -1,0 +1,7 @@
+.upstream-domain-note { margin-bottom: 14px; }
+.upstream-domain-note code { color: var(--primary); font-size: .8rem; }
+.providers-table-wrap { overflow-x: auto; }
+.providers-table { min-width: 1320px; }
+.providers-table .actions-column { min-width: 132px; }
+.toolbar select { min-height: 38px; padding: 7px 30px 7px 10px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font-size: .82rem; }
+.form-field .field-hint { display: block; margin-top: 4px; color: var(--muted); font-size: .75rem; }

@@ -1,0 +1,49 @@
+@page "/legal/{DocumentId}"
+@layout AuthLayout
+@inject ApiClient Api
+
+<PageTitle>法律文档 · ParaGateway</PageTitle>
+<div class="public-tool-page narrow-content">
+    @if (loading) { <LoadingState Text="正在载入文档" /> }
+    else if (error is not null) { <ErrorState Message="@error" OnRetry="LoadAsync" /> }
+    else if (document is null) { <EmptyState Title="文档不存在" Description="该文档可能已被管理员删除。" /> }
+    else
+    {
+        <article class="content-section markdown-lite"><div class="section-header"><div><h1>@document.Title</h1></div></div><div class="markdown-body">@((MarkupString)MarkdownRenderer.ToSafeHtml(document.ContentMarkdown))</div></article>
+    }
+</div>
+
+@code {
+    [Parameter] public string DocumentId { get; set; } = string.Empty;
+    private LegalDocumentDto? document;
+    private bool loading = true;
+    private string? error;
+
+    private string? loadedDocumentId;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    protected override Task OnParametersSetAsync()
+    {
+        if (!string.Equals(loadedDocumentId, DocumentId, StringComparison.OrdinalIgnoreCase))
+        {
+            return LoadAsync();
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadAsync()
+    {
+        loadedDocumentId = DocumentId;
+        loading = true; error = null;
+        try
+        {
+            var settings = await Api.GetPublicSettingsAsync();
+            document = settings.LoginAgreementDocuments.FirstOrDefault(x => string.Equals(x.Id, DocumentId, StringComparison.OrdinalIgnoreCase));
+            if (document is null && string.Equals(DocumentId, "admin-compliance", StringComparison.OrdinalIgnoreCase))
+                document = new LegalDocumentDto { Id = DocumentId, Title = "自部署合规说明", ContentMarkdown = "该实例使用官方 Go 后端，部署方需独立承担适用的法律、数据和上游服务责任。" };
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+}

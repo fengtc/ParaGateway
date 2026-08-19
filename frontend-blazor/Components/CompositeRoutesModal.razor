@@ -1,0 +1,214 @@
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<AppModal Open="Open" Title="@Title" MaxWidth="1120px" OnClose="CloseAsync">
+    <ChildContent>
+        @if (Group is not null)
+        {
+            @if (!string.IsNullOrWhiteSpace(error))
+            {
+                <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@error</span></div>
+            }
+
+            <div class="composite-layout">
+                <section class="route-list-panel">
+                    <div class="panel-heading">
+                        <h3>路由规则</h3>
+                        <button type="button" class="button secondary icon-only" title="刷新路由" aria-label="刷新路由" disabled="@loading" @onclick="LoadAsync">
+                            <Icon Name="refresh" Size="16" />
+                        </button>
+                    </div>
+
+                    @if (loading)
+                    {
+                        <LoadingState Text="正在载入组合路由" />
+                    }
+                    else if (routes.Count == 0)
+                    {
+                        <div class="routes-empty">暂无路由规则</div>
+                    }
+                    else
+                    {
+                        <div class="routes-table-scroll">
+                            <table class="routes-table">
+                                <thead><tr><th>公开模型</th><th>目标</th><th>范围</th><th class="actions-cell">操作</th></tr></thead>
+                                <tbody>
+                                    @foreach (var route in routes)
+                                    {
+                                        <tr @key="route.Id" class="@(!route.Enabled ? "disabled-route" : null)">
+                                            <td>
+                                                <strong class="model-name">@route.PublicModel</strong>
+                                                <div class="route-badges"><span class="mini-badge">@MatchLabel(route.MatchType)</span>@if (!route.Enabled) { <span class="mini-badge danger">已停用</span> }</div>
+                                            </td>
+                                            <td><strong>@PlatformLabel(route.TargetPlatform)</strong><small>@(string.IsNullOrWhiteSpace(route.UpstreamModel) ? route.PublicModel : route.UpstreamModel)</small></td>
+                                            <td><span>@EndpointLabel(route.Endpoint)</span><small>优先级：@route.Priority</small></td>
+                                            <td class="actions-cell">
+                                                <button type="button" class="icon-button" title="编辑路由" aria-label="编辑路由 @route.PublicModel" @onclick="() => EditRoute(route)"><Icon Name="pencil" Size="15" /></button>
+                                                <button type="button" class="icon-button danger" title="删除路由" aria-label="删除路由 @route.PublicModel" disabled="@deletingIds.Contains(route.Id)" @onclick="() => DeleteRouteAsync(route)"><Icon Name="trash" Size="15" /></button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </section>
+
+                <section class="route-editor-panel">
+                    <EditForm Model="routeForm" OnValidSubmit="SaveRouteAsync" FormName="composite-route-editor">
+                        <DataAnnotationsValidator />
+                        <div class="panel-heading">
+                            <h3>@(editingId.HasValue ? "编辑路由" : "添加路由")</h3>
+                            @if (editingId.HasValue) { <button type="button" class="text-button" @onclick="ResetEditor">取消编辑</button> }
+                        </div>
+                        <div class="route-form-grid">
+                            <div class="form-field full"><label for="route-public-model">公开模型</label><InputText id="route-public-model" @bind-Value="routeForm.PublicModel" placeholder="openrouter/gpt-5" /><ValidationMessage For="() => routeForm.PublicModel" /></div>
+                            <div class="form-field"><label for="route-match-type">匹配类型</label><InputSelect id="route-match-type" @bind-Value="routeForm.MatchType"><option value="exact">精确匹配</option><option value="prefix">前缀匹配</option></InputSelect></div>
+                            <div class="form-field"><label for="route-endpoint">接口范围</label><InputSelect id="route-endpoint" @bind-Value="routeForm.Endpoint">@EndpointOptions</InputSelect></div>
+                            <div class="form-field"><label for="route-target-platform">目标平台</label><InputSelect id="route-target-platform" @bind-Value="routeForm.TargetPlatform"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option></InputSelect></div>
+                            <div class="form-field"><label for="route-priority">优先级</label><InputNumber id="route-priority" @bind-Value="routeForm.Priority" min="1" step="1" /></div>
+                            <div class="form-field full"><label for="route-upstream-model">上游模型</label><InputText id="route-upstream-model" @bind-Value="routeForm.UpstreamModel" placeholder="gpt-5" /><small>留空时沿用公开模型名称。</small></div>
+                            <div class="form-field full"><label for="route-notes">备注</label><InputTextArea id="route-notes" @bind-Value="routeForm.Notes" rows="2" /></div>
+                            <label class="toggle-row full compact-toggle"><InputCheckbox @bind-Value="routeForm.Enabled" /><span><strong>启用路由</strong></span></label>
+                        </div>
+                        <div class="route-save-row"><button type="submit" class="button primary" disabled="@saving"><Icon Name="check" Size="15" /> @(editingId.HasValue ? "更新" : "创建")</button></div>
+                    </EditForm>
+
+                    <div class="preview-panel">
+                        <h3>路由预览</h3>
+                        <div class="preview-row"><input value="@previewModel" @oninput="e => previewModel = e.Value?.ToString() ?? string.Empty" @onkeydown="PreviewKeyDownAsync" placeholder="openrouter/gpt-5" aria-label="预览模型" /><select value="@previewEndpoint" @onchange="PreviewEndpointChanged" aria-label="预览接口">@EndpointOptions</select><button type="button" class="button secondary icon-only" title="执行预览" aria-label="执行路由预览" disabled="@(previewing || string.IsNullOrWhiteSpace(previewModel))" @onclick="PreviewAsync"><Icon Name="arrow-right" Size="16" /></button></div>
+                        @if (previewDecision is not null)
+                        {
+                            <div class="preview-result @(previewDecision.Matched ? "matched" : "not-matched")">
+                                <div><span class="mini-badge @(previewDecision.Matched ? "success" : "danger")">@(previewDecision.Matched ? "已匹配" : "未匹配")</span><span class="mini-badge">@SourceLabel(previewDecision.Source)</span></div>
+                                @if (previewDecision.Matched)
+                                {
+                                    <p>目标平台：<strong>@PlatformLabel(previewDecision.TargetPlatform)</strong></p><p>上游模型：<strong>@previewDecision.UpstreamModel</strong></p>
+                                }
+                                else { <p>@(string.IsNullOrWhiteSpace(previewDecision.Reason) ? "没有找到匹配的路由。" : previewDecision.Reason)</p> }
+                            </div>
+                        }
+                    </div>
+                </section>
+            </div>
+        }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseAsync">关闭</button></Footer>
+</AppModal>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public GroupDto? Group { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private readonly HashSet<long> deletingIds = [];
+    private List<CompositeModelRouteDto> routes = [];
+    private CompositeModelRouteInput routeForm = NewRouteForm();
+    private CompositeRouteDecisionDto? previewDecision;
+    private long? editingId;
+    private string? loadedGroupId;
+    private string? error;
+    private string previewModel = string.Empty;
+    private string previewEndpoint = "any";
+    private bool loading;
+    private bool saving;
+    private bool previewing;
+
+    private string Title => Group is null ? "组合路由" : $"组合路由 · {Group.Name}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Open || Group is null || loadedGroupId == Group.Id) return;
+        loadedGroupId = Group.Id;
+        ResetEditor();
+        previewModel = string.Empty;
+        previewDecision = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (Group is null) return;
+        loading = true;
+        error = null;
+        try { routes = (await Api.GetCompositeRoutesAsync(Group.Id)).OrderBy(x => x.Priority).ThenBy(x => x.Id).ToList(); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private void EditRoute(CompositeModelRouteDto route)
+    {
+        editingId = route.Id;
+        routeForm = new CompositeModelRouteInput { PublicModel = route.PublicModel, MatchType = route.MatchType, TargetPlatform = route.TargetPlatform, UpstreamModel = route.UpstreamModel, Endpoint = route.Endpoint, Priority = route.Priority, Enabled = route.Enabled, Notes = route.Notes };
+        error = null;
+    }
+
+    private void ResetEditor() { editingId = null; routeForm = NewRouteForm(); }
+
+    private async Task SaveRouteAsync()
+    {
+        if (Group is null) return;
+        saving = true;
+        error = null;
+        try
+        {
+            routeForm.PublicModel = routeForm.PublicModel.Trim();
+            routeForm.UpstreamModel = routeForm.UpstreamModel.Trim();
+            routeForm.Notes = routeForm.Notes.Trim();
+            if (editingId.HasValue) await Api.UpdateCompositeRouteAsync(Group.Id, editingId.Value, routeForm);
+            else await Api.CreateCompositeRouteAsync(Group.Id, routeForm);
+            Toasts.Success(editingId.HasValue ? "组合路由已更新" : "组合路由已创建");
+            ResetEditor();
+            await LoadAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task DeleteRouteAsync(CompositeModelRouteDto route)
+    {
+        if (Group is null || !deletingIds.Add(route.Id)) return;
+        error = null;
+        try
+        {
+            await Api.DeleteCompositeRouteAsync(Group.Id, route.Id);
+            if (editingId == route.Id) ResetEditor();
+            routes.RemoveAll(x => x.Id == route.Id);
+            Toasts.Success("组合路由已删除");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { deletingIds.Remove(route.Id); }
+    }
+
+    private async Task PreviewAsync()
+    {
+        if (Group is null || string.IsNullOrWhiteSpace(previewModel)) return;
+        previewing = true;
+        error = null;
+        try { previewDecision = await Api.PreviewCompositeRouteAsync(Group.Id, previewModel, previewEndpoint); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { previewing = false; }
+    }
+
+    private Task PreviewKeyDownAsync(KeyboardEventArgs e) => e.Key == "Enter" ? PreviewAsync() : Task.CompletedTask;
+    private void PreviewEndpointChanged(ChangeEventArgs e) => previewEndpoint = e.Value?.ToString() ?? "any";
+
+    private async Task CloseAsync()
+    {
+        loadedGroupId = null;
+        await OnClose.InvokeAsync();
+    }
+
+    private static CompositeModelRouteInput NewRouteForm() => new() { MatchType = "exact", TargetPlatform = "openai", Endpoint = "any", Priority = 100, Enabled = true };
+    private static string MatchLabel(string value) => value == "prefix" ? "前缀匹配" : "精确匹配";
+    private static string PlatformLabel(string value) => value switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", _ => value };
+    private static string EndpointLabel(string value) => value switch { "any" => "全部接口", "messages" => "Messages", "count_tokens" => "Count Tokens", "responses" => "Responses", "chat_completions" => "Chat Completions", "embeddings" => "Embeddings", "images" => "Images", "gemini" => "Gemini", _ => value };
+    private static string SourceLabel(string value) => value switch { "route" => "路由规则", "detector" => "自动检测", _ => string.IsNullOrWhiteSpace(value) ? "-" : value };
+
+    private RenderFragment EndpointOptions => builder =>
+    {
+        var values = new[] { ("any", "全部接口"), ("messages", "Messages"), ("count_tokens", "Count Tokens"), ("responses", "Responses"), ("chat_completions", "Chat Completions"), ("embeddings", "Embeddings"), ("images", "Images"), ("gemini", "Gemini") };
+        var sequence = 0;
+        foreach (var (value, label) in values) { builder.OpenElement(sequence++, "option"); builder.AddAttribute(sequence++, "value", value); builder.AddContent(sequence++, label); builder.CloseElement(); }
+    };
+}

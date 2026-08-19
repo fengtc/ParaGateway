@@ -1,0 +1,387 @@
+@page "/admin/data-management"
+@implements IAsyncDisposable
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>数据管理 · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div><h1>数据管理</h1><p>管理独立数据代理、PostgreSQL/Redis 来源配置档、S3 目标和代理备份任务。</p></div>
+    <div class="page-header-actions"><button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button>@if (health.Enabled) { <button type="button" class="button primary" disabled="@(loading || savingConfig)" @onclick="SaveConfigAsync"><Icon Name="save" Size="16" />保存全局配置</button> }</div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(error))
+{
+    <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@error</span><button type="button" @onclick="LoadAsync">重试</button></div>
+}
+
+@if (loading)
+{
+    <LoadingState Text="正在检查数据管理代理" />
+}
+else
+{
+    <section class="content-section agent-health-card">
+        <div class="section-header"><div><h2>代理状态</h2><p>独立主机部署可使用本机 Unix Socket 连接数据管理代理。</p></div><span class="agent-state @(health.Enabled ? "success" : "danger")">@(health.Enabled ? "已连接" : "不可用")</span></div>
+        <div class="metric-grid">
+            <div class="metric-card"><span>功能状态</span><strong>@(health.Enabled ? "已启用" : "未启用")</strong></div>
+            <div class="metric-card"><span>代理状态</span><strong>@(health.Agent?.Status ?? health.Reason)</strong></div>
+            <div class="metric-card"><span>版本</span><strong>@(health.Agent?.Version ?? "-")</strong></div>
+            <div class="metric-card"><span>运行时间</span><strong>@FormatUptime(health.Agent?.UptimeSeconds)</strong></div>
+        </div>
+        @if (!health.Enabled)
+        {
+            <div class="inline-alert warning"><Icon Name="alert" Size="17" /><span>Go 后端当前未连接数据管理代理（@health.SocketPath）。配置档和代理备份操作将在代理启用后自动开放；常规数据库备份请使用“备份管理”页面。</span><a class="button secondary small" href="/admin/backups">前往备份管理</a></div>
+        }
+    </section>
+
+    @if (health.Enabled)
+    {
+        <section class="content-section data-card">
+            <div class="section-header"><div><h2>全局数据源配置</h2><p>设置来源模式、默认直连参数、备份目录及保留规则。密码留空时保留代理中的现有值。</p></div></div>
+            <div class="form-grid settings-form">
+                <div class="form-field"><label for="data-source-mode">来源模式</label><InputSelect id="data-source-mode" @bind-Value="config.SourceMode"><option value="direct">直接连接</option><option value="docker_exec">Docker Exec</option></InputSelect></div>
+                <div class="form-field"><label for="data-backup-root">备份根目录</label><InputText id="data-backup-root" @bind-Value="config.BackupRoot" /></div>
+                <div class="form-field"><label for="data-retention">保留天数</label><InputNumber id="data-retention" @bind-Value="config.RetentionDays" min="0" /></div>
+                <div class="form-field"><label for="data-keep-last">保留份数</label><InputNumber id="data-keep-last" @bind-Value="config.KeepLast" min="0" /></div>
+                <div class="form-field full"><label for="data-sqlite">SQLite 路径（兼容字段）</label><InputText id="data-sqlite" @bind-Value="config.SqlitePath" /></div>
+            </div>
+            <div class="source-inline-grid">
+                <div class="source-inline-card"><h3>PostgreSQL</h3><div class="form-grid settings-form"><div class="form-field"><label>主机</label><InputText @bind-Value="config.Postgres.Host" /></div><div class="form-field"><label>端口</label><InputNumber @bind-Value="config.Postgres.Port" /></div><div class="form-field"><label>用户</label><InputText @bind-Value="config.Postgres.User" /></div><div class="form-field"><label>密码</label><input type="password" autocomplete="new-password" @bind="postgresPassword" placeholder="@(config.Postgres.PasswordConfigured ? "已配置；留空保留" : "")" /></div><div class="form-field"><label>数据库</label><InputText @bind-Value="config.Postgres.Database" /></div><div class="form-field"><label>SSL 模式</label><InputText @bind-Value="config.Postgres.SslMode" /></div><div class="form-field full"><label>容器名</label><InputText @bind-Value="config.Postgres.ContainerName" /></div></div></div>
+                <div class="source-inline-card"><h3>Redis</h3><div class="form-grid settings-form"><div class="form-field"><label>地址</label><InputText @bind-Value="config.Redis.Addr" placeholder="127.0.0.1:6379" /></div><div class="form-field"><label>用户名</label><InputText @bind-Value="config.Redis.Username" /></div><div class="form-field"><label>密码</label><input type="password" autocomplete="new-password" @bind="redisPassword" placeholder="@(config.Redis.PasswordConfigured ? "已配置；留空保留" : "")" /></div><div class="form-field"><label>DB</label><InputNumber @bind-Value="config.Redis.Db" min="0" /></div><div class="form-field full"><label>容器名</label><InputText @bind-Value="config.Redis.ContainerName" /></div></div></div>
+            </div>
+            <div class="source-inline-card"><div class="sub-card-heading"><div><h3>默认 S3</h3><p>可供数据代理备份使用，也可以在下方创建多个目标配置档。</p></div><div><button type="button" class="button secondary small" disabled="@testingS3" @onclick="TestCurrentS3Async">@(testingS3 ? "测试中…" : "测试 S3")</button></div></div><div class="form-grid settings-form"><label class="toggle-row"><InputCheckbox @bind-Value="config.S3.Enabled" /><span><strong>启用 S3</strong></span></label><label class="toggle-row"><InputCheckbox @bind-Value="config.S3.UseSsl" /><span><strong>使用 HTTPS</strong></span></label><div class="form-field"><label>Endpoint</label><InputText @bind-Value="config.S3.Endpoint" /></div><div class="form-field"><label>Region</label><InputText @bind-Value="config.S3.Region" /></div><div class="form-field"><label>Bucket</label><InputText @bind-Value="config.S3.Bucket" /></div><div class="form-field"><label>Access Key ID</label><InputText @bind-Value="config.S3.AccessKeyId" /></div><div class="form-field"><label>Secret Access Key</label><input type="password" autocomplete="new-password" @bind="defaultS3Secret" placeholder="@(config.S3.SecretAccessKeyConfigured ? "已配置；留空保留" : "")" /></div><div class="form-field"><label>Prefix</label><InputText @bind-Value="config.S3.Prefix" /></div><label class="toggle-row full"><InputCheckbox @bind-Value="config.S3.ForcePathStyle" /><span><strong>Force path style</strong></span></label></div></div>
+        </section>
+
+        <section class="content-section data-card">
+            <div class="section-header"><div><h2>PostgreSQL / Redis 配置档</h2><p>保存多个来源并切换活动配置，避免反复覆盖全局连接参数。</p></div><div class="card-actions"><button type="button" class="button secondary small" @onclick='() => OpenSourceEditor("postgres")'><Icon Name="plus" Size="14" />添加 PostgreSQL</button><button type="button" class="button secondary small" @onclick='() => OpenSourceEditor("redis")'><Icon Name="plus" Size="14" />添加 Redis</button></div></div>
+            @if (sourceProfiles.Count == 0) { <EmptyState Title="暂无数据源配置档" Description="创建 PostgreSQL 或 Redis 配置档后可在备份任务中选择。" /> }
+            else
+            {
+                <DxGrid Data="@sourceProfiles" KeyFieldName="ProfileId" ShowFilterRow="true" ShowSearchPanel="true" PageSize="20">
+                    <Columns>
+                        <DxGridDataColumn FieldName="ProfileId" Caption="ID" MinWidth="140" /><DxGridDataColumn FieldName="Name" Caption="名称" /><DxGridDataColumn FieldName="SourceType" Caption="类型" Width="110" />
+                        <DxGridDataColumn Caption="连接目标"><CellDisplayTemplate Context="context">@SourceTarget((DataManagementSourceProfileDto)context.DataItem)</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="状态" Width="90"><CellDisplayTemplate Context="context">@(((DataManagementSourceProfileDto)context.DataItem).IsActive ? "活动" : "备用")</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="密码" Width="90"><CellDisplayTemplate Context="context">@(((DataManagementSourceProfileDto)context.DataItem).PasswordConfigured ? "已配置" : "未配置")</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="操作" Width="190"><CellDisplayTemplate Context="context">@{ var row = (DataManagementSourceProfileDto)context.DataItem; }<div class="row-actions"><button type="button" class="icon-button" title="编辑" @onclick="() => OpenSourceEditor(row)"><Icon Name="pencil" Size="15" /></button><button type="button" class="icon-button" title="设为活动" disabled="@row.IsActive" @onclick="() => ActivateSourceAsync(row)"><Icon Name="circle-check" Size="15" /></button><button type="button" class="icon-button danger" title="删除" disabled="@row.IsActive" @onclick="() => DeleteSourceAsync(row)"><Icon Name="trash" Size="15" /></button></div></CellDisplayTemplate></DxGridDataColumn>
+                    </Columns>
+                </DxGrid>
+            }
+        </section>
+
+        <section class="content-section data-card">
+            <div class="section-header"><div><h2>S3 目标配置档</h2><p>管理多个 S3 兼容目标；创建、修改和启用目标需要管理员二次验证。</p></div><button type="button" class="button secondary small" @onclick="OpenS3Editor"><Icon Name="plus" Size="14" />添加 S3 目标</button></div>
+            @if (s3Profiles.Count == 0) { <EmptyState Title="暂无 S3 配置档" Description="创建对象存储配置档后可在代理备份任务中上传。" /> }
+            else
+            {
+                <DxGrid Data="@s3Profiles" KeyFieldName="ProfileId" ShowFilterRow="true" PageSize="20">
+                    <Columns>
+                        <DxGridDataColumn FieldName="ProfileId" Caption="ID" /><DxGridDataColumn FieldName="Name" Caption="名称" /><DxGridDataColumn Caption="Bucket"><CellDisplayTemplate Context="context">@(((DataManagementS3ProfileDto)context.DataItem).S3.Bucket)</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="状态" Width="90"><CellDisplayTemplate Context="context">@(((DataManagementS3ProfileDto)context.DataItem).IsActive ? "活动" : "备用")</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="密钥" Width="90"><CellDisplayTemplate Context="context">@(((DataManagementS3ProfileDto)context.DataItem).SecretAccessKeyConfigured ? "已配置" : "未配置")</CellDisplayTemplate></DxGridDataColumn>
+                        <DxGridDataColumn Caption="操作" Width="220"><CellDisplayTemplate Context="context">@{ var row = (DataManagementS3ProfileDto)context.DataItem; }<div class="row-actions"><button type="button" class="icon-button" title="测试" @onclick="() => TestS3ProfileAsync(row)"><Icon Name="activity" Size="15" /></button><button type="button" class="icon-button" title="编辑" @onclick="() => OpenS3Editor(row)"><Icon Name="pencil" Size="15" /></button><button type="button" class="icon-button" title="设为活动" disabled="@row.IsActive" @onclick="() => ActivateS3Async(row)"><Icon Name="circle-check" Size="15" /></button><button type="button" class="icon-button danger" title="删除" disabled="@row.IsActive" @onclick="() => DeleteS3Async(row)"><Icon Name="trash" Size="15" /></button></div></CellDisplayTemplate></DxGridDataColumn>
+                    </Columns>
+                </DxGrid>
+            }
+        </section>
+
+        <section class="content-section data-card">
+            <div class="section-header"><div><h2>代理备份任务</h2><p>选择数据源和上传目标创建异步备份；运行中的任务每 2 秒刷新一次。</p></div><div class="card-actions"><button type="button" class="button primary small" disabled="@creatingBackup" @onclick="CreateBackupJobAsync"><Icon Name="database" Size="14" />@(creatingBackup ? "创建中…" : "创建任务")</button><button type="button" class="button secondary small" disabled="@jobsLoading" @onclick="RefreshBackupJobsAsync"><Icon Name="refresh" Size="14" />刷新</button></div></div>
+            <div class="backup-job-form">
+                <Field Label="备份类型"><InputSelect @bind-Value="backupForm.BackupType"><option value="full">PostgreSQL + Redis</option><option value="postgres">仅 PostgreSQL</option><option value="redis">仅 Redis</option></InputSelect></Field>
+                @if (backupForm.BackupType is "full" or "postgres") { <Field Label="PostgreSQL 配置档"><InputSelect @bind-Value="backupForm.PostgresProfileId"><option value="">使用活动配置</option>@foreach (var item in sourceProfiles.Where(x => x.SourceType == "postgres")) { <option value="@item.ProfileId">@item.Name</option> }</InputSelect></Field> }
+                @if (backupForm.BackupType is "full" or "redis") { <Field Label="Redis 配置档"><InputSelect @bind-Value="backupForm.RedisProfileId"><option value="">使用活动配置</option>@foreach (var item in sourceProfiles.Where(x => x.SourceType == "redis")) { <option value="@item.ProfileId">@item.Name</option> }</InputSelect></Field> }
+                <ToggleField Label="上传到 S3" Hint="任务完成后将产物上传到选定目标"><InputCheckbox @bind-Value="backupForm.UploadToS3" /></ToggleField>
+                @if (backupForm.UploadToS3) { <Field Label="S3 配置档"><InputSelect @bind-Value="backupForm.S3ProfileId"><option value="">使用活动配置</option>@foreach (var item in s3Profiles) { <option value="@item.ProfileId">@item.Name</option> }</InputSelect></Field> }
+            </div>
+            @if (backupJobs.Count == 0) { <EmptyState Title="暂无代理备份任务" Description="配置数据管理代理后可在这里创建数据库与 Redis 备份。" /> }
+            else
+            {
+                <DxGrid Data="@backupJobs" KeyFieldName="JobId" ShowFilterRow="true" ShowSearchPanel="true" PageSize="20"><Columns><DxGridDataColumn FieldName="JobId" Caption="任务 ID" MinWidth="180" /><DxGridDataColumn FieldName="BackupType" Caption="类型" Width="105" /><DxGridDataColumn FieldName="Status" Caption="状态" Width="105" /><DxGridDataColumn FieldName="TriggeredBy" Caption="触发方式" /><DxGridDataColumn Caption="上传"><CellDisplayTemplate Context="context">@(((DataManagementBackupJobDto)context.DataItem).UploadToS3 ? "S3" : "仅本地")</CellDisplayTemplate></DxGridDataColumn><DxGridDataColumn Caption="产物大小"><CellDisplayTemplate Context="context">@FormatSize(((DataManagementBackupJobDto)context.DataItem).Artifact.SizeBytes)</CellDisplayTemplate></DxGridDataColumn><DxGridDataColumn FieldName="StartedAt" Caption="开始时间" DisplayFormat="yyyy-MM-dd HH:mm:ss" /><DxGridDataColumn FieldName="FinishedAt" Caption="结束时间" DisplayFormat="yyyy-MM-dd HH:mm:ss" /><DxGridDataColumn FieldName="ErrorMessage" Caption="错误" MinWidth="180" /></Columns></DxGrid>
+            }
+        </section>
+    }
+}
+
+<AppModal Open="sourceEditorOpen" Title="@(editingSource is null ? "添加数据源配置档" : "编辑数据源配置档")" OnClose="CloseSourceEditor">
+    <ChildContent>
+        <div class="modal-form-grid">
+            <Field Label="来源类型"><InputSelect @bind-Value="sourceForm.SourceType" disabled="@(editingSource is not null)"><option value="postgres">PostgreSQL</option><option value="redis">Redis</option></InputSelect></Field>
+            <Field Label="配置档 ID" Hint="创建后不可修改"><InputText @bind-Value="sourceForm.ProfileId" disabled="@(editingSource is not null)" /></Field>
+            <Field Label="显示名称" Full="true"><InputText @bind-Value="sourceForm.Name" /></Field>
+            @if (sourceForm.SourceType == "postgres")
+            {
+                <Field Label="主机"><InputText @bind-Value="sourceForm.Config.Host" /></Field><Field Label="端口"><InputNumber @bind-Value="sourceForm.Config.Port" /></Field><Field Label="用户"><InputText @bind-Value="sourceForm.Config.User" /></Field><Field Label="密码" Hint="@(editingSource?.PasswordConfigured == true ? "已配置；留空保留" : "")"><input type="password" autocomplete="new-password" @bind="sourceForm.Config.Password" /></Field><Field Label="数据库"><InputText @bind-Value="sourceForm.Config.Database" /></Field><Field Label="SSL 模式"><InputText @bind-Value="sourceForm.Config.SslMode" /></Field>
+            }
+            else
+            {
+                <Field Label="地址"><InputText @bind-Value="sourceForm.Config.Addr" /></Field><Field Label="用户名"><InputText @bind-Value="sourceForm.Config.Username" /></Field><Field Label="密码" Hint="@(editingSource?.PasswordConfigured == true ? "已配置；留空保留" : "")"><input type="password" autocomplete="new-password" @bind="sourceForm.Config.Password" /></Field><Field Label="DB"><InputNumber @bind-Value="sourceForm.Config.Db" min="0" /></Field>
+            }
+            <Field Label="容器名" Full="true"><InputText @bind-Value="sourceForm.Config.ContainerName" /></Field>
+            @if (editingSource is null) { <ToggleField Label="创建后设为活动" Hint="立即作为该类型的默认数据源"><InputCheckbox @bind-Value="sourceForm.SetActive" /></ToggleField> }
+        </div>
+        @if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger"><Icon Name="alert" Size="15" /><span>@modalError</span></div> }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseSourceEditor">取消</button><button type="button" class="button primary" disabled="@modalSaving" @onclick="SaveSourceProfileAsync">@(modalSaving ? "保存中…" : "保存")</button></Footer>
+</AppModal>
+
+<AppModal Open="s3EditorOpen" Title="@(editingS3 is null ? "添加 S3 配置档" : "编辑 S3 配置档")" OnClose="CloseS3Editor">
+    <ChildContent>
+        <div class="modal-form-grid">
+            <Field Label="配置档 ID" Hint="创建后不可修改"><InputText @bind-Value="s3Form.ProfileId" disabled="@(editingS3 is not null)" /></Field><Field Label="显示名称"><InputText @bind-Value="s3Form.Name" /></Field>
+            <ToggleField Label="启用此目标" Hint="允许代理向该目标上传"><InputCheckbox @bind-Value="s3Form.S3.Enabled" /></ToggleField><ToggleField Label="使用 HTTPS" Hint="通过 TLS 连接对象存储"><InputCheckbox @bind-Value="s3Form.S3.UseSsl" /></ToggleField>
+            <Field Label="Endpoint"><InputText @bind-Value="s3Form.S3.Endpoint" /></Field><Field Label="Region"><InputText @bind-Value="s3Form.S3.Region" /></Field><Field Label="Bucket"><InputText @bind-Value="s3Form.S3.Bucket" /></Field><Field Label="Prefix"><InputText @bind-Value="s3Form.S3.Prefix" /></Field><Field Label="Access Key ID"><InputText @bind-Value="s3Form.S3.AccessKeyId" /></Field><Field Label="Secret Access Key" Hint="@(editingS3?.SecretAccessKeyConfigured == true ? "已配置；留空保留" : "")"><input type="password" autocomplete="new-password" @bind="s3Form.S3.SecretAccessKey" /></Field>
+            <ToggleField Label="Force path style" Hint="MinIO 等服务可能需要启用"><InputCheckbox @bind-Value="s3Form.S3.ForcePathStyle" /></ToggleField>
+            @if (editingS3 is null) { <ToggleField Label="创建后设为活动" Hint="立即作为默认上传目标"><InputCheckbox @bind-Value="s3Form.SetActive" /></ToggleField> }
+        </div>
+        @if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger"><Icon Name="alert" Size="15" /><span>@modalError</span></div> }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseS3Editor">取消</button><button type="button" class="button primary" disabled="@modalSaving" @onclick="SaveS3ProfileAsync">@(modalSaving ? "保存中…" : "保存")</button></Footer>
+</AppModal>
+
+@code {
+    private DataManagementConfigDto config = new();
+    private DataManagementHealthDto health = new();
+    private List<DataManagementSourceProfileDto> sourceProfiles = [];
+    private List<DataManagementS3ProfileDto> s3Profiles = [];
+    private List<DataManagementBackupJobDto> backupJobs = [];
+    private bool loading = true, savingConfig, testingS3, jobsLoading, creatingBackup, sourceEditorOpen, s3EditorOpen, modalSaving;
+    private string postgresPassword = string.Empty, redisPassword = string.Empty, defaultS3Secret = string.Empty;
+    private string? error, modalError;
+    private DataManagementSourceProfileDto? editingSource;
+    private DataManagementS3ProfileDto? editingS3;
+    private SourceProfileForm sourceForm = new();
+    private S3ProfileForm s3Form = new();
+    private BackupJobForm backupForm = new();
+    private CancellationTokenSource? jobsPollingCancellation;
+    private Task? jobsPollingTask;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        StopJobsPolling();
+        loading = true; error = null;
+        try
+        {
+            health = await Api.GetAdminDataManagementHealthAsync();
+            if (!health.Enabled) return;
+            var configTask = Api.GetAdminDataManagementConfigAsync();
+            var postgresTask = Api.GetDataManagementSourceProfilesAsync("postgres");
+            var redisTask = Api.GetDataManagementSourceProfilesAsync("redis");
+            var s3Task = Api.GetDataManagementS3ProfilesAsync();
+            var jobsTask = Api.GetDataManagementBackupJobsAsync();
+            await Task.WhenAll(configTask, postgresTask, redisTask, s3Task, jobsTask);
+            config = await configTask;
+            config.Postgres.Password = null; config.Redis.Password = null; config.S3.SecretAccessKey = null;
+            postgresPassword = redisPassword = defaultS3Secret = string.Empty;
+            sourceProfiles = [.. await postgresTask, .. await redisTask];
+            s3Profiles = await s3Task;
+            backupJobs = await jobsTask;
+            if (backupJobs.Any(IsJobActive)) StartJobsPolling();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task SaveConfigAsync()
+    {
+        savingConfig = true; error = null;
+        try
+        {
+            var postgres = new Dictionary<string, object?> { ["host"] = config.Postgres.Host, ["port"] = config.Postgres.Port, ["user"] = config.Postgres.User, ["database"] = config.Postgres.Database, ["ssl_mode"] = config.Postgres.SslMode, ["container_name"] = config.Postgres.ContainerName };
+            var redis = new Dictionary<string, object?> { ["addr"] = config.Redis.Addr, ["username"] = config.Redis.Username, ["db"] = config.Redis.Db, ["container_name"] = config.Redis.ContainerName };
+            var s3 = S3Payload(config.S3);
+            if (!string.IsNullOrWhiteSpace(postgresPassword)) postgres["password"] = postgresPassword;
+            if (!string.IsNullOrWhiteSpace(redisPassword)) redis["password"] = redisPassword;
+            if (!string.IsNullOrWhiteSpace(defaultS3Secret)) s3["secret_access_key"] = defaultS3Secret;
+            config = await Api.UpdateAdminDataManagementConfigAsync(new Dictionary<string, object?>
+            {
+                ["source_mode"] = config.SourceMode, ["backup_root"] = config.BackupRoot, ["sqlite_path"] = config.SqlitePath,
+                ["retention_days"] = config.RetentionDays, ["keep_last"] = config.KeepLast,
+                ["active_postgres_profile_id"] = config.ActivePostgresProfileId, ["active_redis_profile_id"] = config.ActiveRedisProfileId, ["active_s3_profile_id"] = config.ActiveS3ProfileId,
+                ["postgres"] = postgres, ["redis"] = redis, ["s3"] = s3
+            });
+            postgresPassword = redisPassword = defaultS3Secret = string.Empty;
+            Toasts.Success("数据管理全局配置已保存");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { savingConfig = false; }
+    }
+
+    private async Task TestCurrentS3Async()
+    {
+        testingS3 = true; error = null;
+        try { var payload = S3Payload(config.S3); if (!string.IsNullOrWhiteSpace(defaultS3Secret)) payload["secret_access_key"] = defaultS3Secret; var result = await Api.TestDataManagementS3Async(payload); if (result.Ok) Toasts.Success(result.Message); else error = result.Message; }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { testingS3 = false; }
+    }
+
+    private void OpenSourceEditor(string sourceType)
+    {
+        editingSource = null; modalError = null;
+        sourceForm = new SourceProfileForm { SourceType = sourceType, ProfileId = $"{sourceType}-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}", Config = new DataManagementSourceConfigDto { Port = sourceType == "postgres" ? 5432 : 0, SslMode = "prefer" } };
+        sourceEditorOpen = true;
+    }
+
+    private void OpenSourceEditor(DataManagementSourceProfileDto row)
+    {
+        editingSource = row; modalError = null;
+        sourceForm = new SourceProfileForm { SourceType = row.SourceType, ProfileId = row.ProfileId, Name = row.Name, Config = CloneSourceConfig(row.Config) };
+        sourceForm.Config.Password = null;
+        sourceEditorOpen = true;
+    }
+
+    private async Task SaveSourceProfileAsync()
+    {
+        if (string.IsNullOrWhiteSpace(sourceForm.ProfileId) || string.IsNullOrWhiteSpace(sourceForm.Name)) { modalError = "请填写配置档 ID 和名称"; return; }
+        modalSaving = true; modalError = null;
+        try
+        {
+            var configPayload = SourceConfigPayload(sourceForm.Config);
+            DataManagementSourceProfileDto result;
+            if (editingSource is null) result = await Api.CreateDataManagementSourceProfileAsync(sourceForm.SourceType, new { profile_id = sourceForm.ProfileId.Trim(), name = sourceForm.Name.Trim(), config = configPayload, set_active = sourceForm.SetActive });
+            else result = await Api.UpdateDataManagementSourceProfileAsync(sourceForm.SourceType, sourceForm.ProfileId, new { name = sourceForm.Name.Trim(), config = configPayload });
+            UpsertSource(result); CloseSourceEditor(); Toasts.Success("数据源配置档已保存");
+            await ReloadProfilesAsync();
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { modalSaving = false; }
+    }
+
+    private async Task ActivateSourceAsync(DataManagementSourceProfileDto row)
+    {
+        try { await Api.ActivateDataManagementSourceProfileAsync(row.SourceType, row.ProfileId); await ReloadProfilesAsync(); Toasts.Success("活动数据源已切换"); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task DeleteSourceAsync(DataManagementSourceProfileDto row)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认删除配置档“{row.Name}”？")) return;
+        try { await Api.DeleteDataManagementSourceProfileAsync(row.SourceType, row.ProfileId); sourceProfiles.Remove(row); Toasts.Success("数据源配置档已删除"); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task ReloadProfilesAsync()
+    {
+        var postgresTask = Api.GetDataManagementSourceProfilesAsync("postgres"); var redisTask = Api.GetDataManagementSourceProfilesAsync("redis");
+        await Task.WhenAll(postgresTask, redisTask); sourceProfiles = [.. await postgresTask, .. await redisTask];
+    }
+
+    private void OpenS3Editor()
+    {
+        editingS3 = null; modalError = null; s3Form = new S3ProfileForm { ProfileId = $"s3-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}", S3 = new DataManagementS3Dto { Enabled = true, Region = "auto", Prefix = "backups/", UseSsl = true } }; s3EditorOpen = true;
+    }
+
+    private void OpenS3Editor(DataManagementS3ProfileDto row)
+    {
+        editingS3 = row; modalError = null; s3Form = new S3ProfileForm { ProfileId = row.ProfileId, Name = row.Name, S3 = CloneS3(row.S3) }; s3Form.S3.SecretAccessKey = null; s3EditorOpen = true;
+    }
+
+    private async Task SaveS3ProfileAsync()
+    {
+        if (string.IsNullOrWhiteSpace(s3Form.ProfileId) || string.IsNullOrWhiteSpace(s3Form.Name)) { modalError = "请填写配置档 ID 和名称"; return; }
+        modalSaving = true; modalError = null;
+        try
+        {
+            await RunSensitiveAsync(async () =>
+            {
+                var payload = S3Payload(s3Form.S3); payload["name"] = s3Form.Name.Trim();
+                DataManagementS3ProfileDto result;
+                if (editingS3 is null) { payload["profile_id"] = s3Form.ProfileId.Trim(); payload["set_active"] = s3Form.SetActive; result = await Api.CreateDataManagementS3ProfileAsync(payload); }
+                else result = await Api.UpdateDataManagementS3ProfileAsync(s3Form.ProfileId, payload);
+                UpsertS3(result); CloseS3Editor(); Toasts.Success("S3 配置档已保存");
+                s3Profiles = await Api.GetDataManagementS3ProfilesAsync();
+            });
+        }
+        finally { modalSaving = false; }
+    }
+
+    private async Task TestS3ProfileAsync(DataManagementS3ProfileDto row)
+    {
+        try { var result = await Api.TestDataManagementS3Async(S3Payload(row.S3)); if (result.Ok) Toasts.Success(result.Message); else error = result.Message; }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task ActivateS3Async(DataManagementS3ProfileDto row) => await RunSensitiveAsync(async () => { await Api.ActivateDataManagementS3ProfileAsync(row.ProfileId); s3Profiles = await Api.GetDataManagementS3ProfilesAsync(); Toasts.Success("活动 S3 目标已切换"); });
+
+    private async Task DeleteS3Async(DataManagementS3ProfileDto row)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认删除 S3 配置档“{row.Name}”？")) return;
+        try { await Api.DeleteDataManagementS3ProfileAsync(row.ProfileId); s3Profiles.Remove(row); Toasts.Success("S3 配置档已删除"); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task CreateBackupJobAsync()
+    {
+        creatingBackup = true; error = null;
+        try
+        {
+            await RunSensitiveAsync(async () =>
+            {
+                var result = await Api.CreateDataManagementBackupJobAsync(new { backup_type = backupForm.BackupType, upload_to_s3 = backupForm.UploadToS3, s3_profile_id = backupForm.S3ProfileId, postgres_profile_id = backupForm.PostgresProfileId, redis_profile_id = backupForm.RedisProfileId, idempotency_key = Guid.NewGuid().ToString("N") });
+                backupJobs.Insert(0, result); Toasts.Success("代理备份任务已创建"); StartJobsPolling();
+            });
+        }
+        finally { creatingBackup = false; }
+    }
+
+    private async Task RefreshBackupJobsAsync()
+    {
+        jobsLoading = true;
+        try { backupJobs = await Api.GetDataManagementBackupJobsAsync(); if (backupJobs.Any(IsJobActive)) StartJobsPolling(); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { jobsLoading = false; }
+    }
+
+    private static bool IsJobActive(DataManagementBackupJobDto job) => job.Status is "pending" or "queued" or "running";
+    private void StartJobsPolling() { if (jobsPollingTask is { IsCompleted: false }) return; jobsPollingCancellation = new(); jobsPollingTask = PollJobsAsync(jobsPollingCancellation.Token); }
+    private async Task PollJobsAsync(CancellationToken token)
+    {
+        try { while (!token.IsCancellationRequested) { await Task.Delay(TimeSpan.FromSeconds(2), token); var items = await Api.GetDataManagementBackupJobsAsync(); await InvokeAsync(() => { backupJobs = items; StateHasChanged(); }); if (!items.Any(IsJobActive)) break; } }
+        catch (OperationCanceledException) { } catch (ApiException) { }
+    }
+    private void StopJobsPolling() { jobsPollingCancellation?.Cancel(); jobsPollingCancellation?.Dispose(); jobsPollingCancellation = null; }
+
+    private async Task RunSensitiveAsync(Func<Task> operation)
+    {
+        try { await operation(); }
+        catch (ApiException ex) when (string.Equals(ex.Code, "STEP_UP_REQUIRED", StringComparison.OrdinalIgnoreCase))
+        {
+            var code = await JS.InvokeAsync<string?>("prompt", "请输入管理员 TOTP 验证码以继续敏感操作"); if (string.IsNullOrWhiteSpace(code)) return;
+            try { await Api.VerifyTotpStepUpAsync(code); await operation(); } catch (ApiException retry) { error = modalError = retry.Message; }
+        }
+        catch (ApiException ex) { error = modalError = ex.Message; }
+    }
+
+    private static Dictionary<string, object?> SourceConfigPayload(DataManagementSourceConfigDto value)
+    {
+        var payload = new Dictionary<string, object?> { ["host"] = value.Host, ["port"] = value.Port, ["user"] = value.User, ["database"] = value.Database, ["ssl_mode"] = value.SslMode, ["addr"] = value.Addr, ["username"] = value.Username, ["db"] = value.Db, ["container_name"] = value.ContainerName };
+        if (!string.IsNullOrWhiteSpace(value.Password)) payload["password"] = value.Password;
+        return payload;
+    }
+    private static Dictionary<string, object?> S3Payload(DataManagementS3Dto value)
+    {
+        var payload = new Dictionary<string, object?> { ["enabled"] = value.Enabled, ["endpoint"] = value.Endpoint, ["region"] = value.Region, ["bucket"] = value.Bucket, ["access_key_id"] = value.AccessKeyId, ["prefix"] = value.Prefix, ["force_path_style"] = value.ForcePathStyle, ["use_ssl"] = value.UseSsl };
+        if (!string.IsNullOrWhiteSpace(value.SecretAccessKey)) payload["secret_access_key"] = value.SecretAccessKey;
+        return payload;
+    }
+    private static DataManagementSourceConfigDto CloneSourceConfig(DataManagementSourceConfigDto value) => new() { Host = value.Host, Port = value.Port, User = value.User, Database = value.Database, SslMode = value.SslMode, Addr = value.Addr, Username = value.Username, Db = value.Db, ContainerName = value.ContainerName };
+    private static DataManagementS3Dto CloneS3(DataManagementS3Dto value) => new() { Enabled = value.Enabled, Endpoint = value.Endpoint, Region = value.Region, Bucket = value.Bucket, AccessKeyId = value.AccessKeyId, Prefix = value.Prefix, ForcePathStyle = value.ForcePathStyle, UseSsl = value.UseSsl, SecretAccessKeyConfigured = value.SecretAccessKeyConfigured };
+    private void UpsertSource(DataManagementSourceProfileDto value) { var index = sourceProfiles.FindIndex(item => item.SourceType == value.SourceType && item.ProfileId == value.ProfileId); if (index >= 0) sourceProfiles[index] = value; else sourceProfiles.Add(value); }
+    private void UpsertS3(DataManagementS3ProfileDto value) { var index = s3Profiles.FindIndex(item => item.ProfileId == value.ProfileId); if (index >= 0) s3Profiles[index] = value; else s3Profiles.Add(value); }
+    private static string SourceTarget(DataManagementSourceProfileDto row) => row.SourceType == "postgres" ? $"{row.Config.Host}:{row.Config.Port}/{row.Config.Database}" : row.Config.Addr;
+    private static string FormatUptime(long? seconds) => seconds is null ? "-" : TimeSpan.FromSeconds(seconds.Value) is var span ? $"{(int)span.TotalDays}天 {span.Hours}小时 {span.Minutes}分" : "-";
+    private static string FormatSize(long bytes) => bytes <= 0 ? "-" : bytes < 1024 * 1024 ? $"{bytes / 1024d:0.0} KB" : $"{bytes / 1024d / 1024:0.0} MB";
+    private void CloseSourceEditor() { sourceEditorOpen = false; editingSource = null; modalError = null; }
+    private void CloseS3Editor() { s3EditorOpen = false; editingS3 = null; modalError = null; }
+
+    public ValueTask DisposeAsync() { StopJobsPolling(); return ValueTask.CompletedTask; }
+
+    private sealed class SourceProfileForm { public string SourceType { get; set; } = "postgres"; public string ProfileId { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public DataManagementSourceConfigDto Config { get; set; } = new(); public bool SetActive { get; set; } }
+    private sealed class S3ProfileForm { public string ProfileId { get; set; } = string.Empty; public string Name { get; set; } = string.Empty; public DataManagementS3Dto S3 { get; set; } = new(); public bool SetActive { get; set; } }
+    private sealed class BackupJobForm { public string BackupType { get; set; } = "full"; public bool UploadToS3 { get; set; } = true; public string S3ProfileId { get; set; } = string.Empty; public string PostgresProfileId { get; set; } = string.Empty; public string RedisProfileId { get; set; } = string.Empty; }
+}

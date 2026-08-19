@@ -1,0 +1,977 @@
+@page "/batch-image"
+@page "/docs/batch-image"
+@implements IAsyncDisposable
+@inject ApiClient Api
+@inject IJSRuntime Js
+@inject ToastService Toasts
+@inject NavigationManager Navigation
+
+<PageTitle>批量生图 · ParaGateway</PageTitle>
+
+<div class="page-header batch-page-header">
+    <div>
+        <h1>批量生图</h1>
+        <p>使用已创建的 Gemini API Key 提交任务、查看进度、预览结果、下载与重试失败项目。</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="button secondary" disabled="@(loadingKeys || loadingJobs)" @onclick="RefreshPageAsync"><Icon Name="refresh" Size="16" /> 刷新</button>
+        <button type="button" class="button secondary" @onclick="OpenGuide"><Icon Name="book" Size="16" /> 使用指南</button>
+        <button type="button" class="button primary" disabled="@(loadingKeys || EligibleKeys.Count == 0)" @onclick="OpenCreateAsync"><Icon Name="plus" Size="16" /> 创建任务</button>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(error))
+{
+    <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@error</span></div>
+}
+
+<section class="content-section batch-filter-section">
+    <div class="batch-filters">
+        <div class="form-field batch-task-search">
+            <label for="batch-task-filter">任务名称</label>
+            <input id="batch-task-filter" type="search" @bind="taskNameFilter" @bind:event="oninput" placeholder="搜索任务名称" @onkeydown="HandleSearchKeyAsync" />
+        </div>
+        <div class="form-field">
+            <label for="batch-key-filter">API Key</label>
+            <select id="batch-key-filter" value="@apiKeyFilter" @onchange="ApiKeyFilterChangedAsync">
+                <option value="">全部 API Key</option>
+                @foreach (var key in EligibleKeys)
+                {
+                    <option value="@key.Id">@KeyLabel(key)</option>
+                }
+            </select>
+        </div>
+        <div class="form-field">
+            <label for="batch-status-filter">状态</label>
+            <select id="batch-status-filter" value="@statusFilter" @onchange="StatusFilterChangedAsync">
+                <option value="">全部状态</option>
+                <option value="queued">排队中</option>
+                <option value="running">运行中</option>
+                <option value="processing_results">处理结果</option>
+                <option value="settling">结算中</option>
+                <option value="completed">已完成</option>
+                <option value="failed">失败</option>
+                <option value="cancelled">已取消</option>
+                <option value="output_deleted">结果已删除</option>
+            </select>
+        </div>
+        <div class="form-field">
+            <label for="batch-download-filter">下载状态</label>
+            <select id="batch-download-filter" value="@downloadedFilter" @onchange="DownloadedFilterChangedAsync">
+                <option value="">全部</option>
+                <option value="true">已下载</option>
+                <option value="false">未下载</option>
+            </select>
+        </div>
+        <div class="batch-filter-actions">
+            <button type="button" class="button primary" disabled="@loadingJobs" @onclick="ApplyFiltersAsync"><Icon Name="search" Size="16" /> 查询</button>
+            <button type="button" class="button secondary" disabled="@loadingJobs" @onclick="ResetFiltersAsync">重置</button>
+        </div>
+    </div>
+</section>
+
+@if (selectedJobIds.Count > 0)
+{
+    <section class="content-section batch-selection-bar">
+        <span>已选择 <strong>@selectedJobIds.Count</strong> 个任务</span>
+        <div class="button-row">
+            <button type="button" class="button secondary compact" disabled="@(bulkDownloading || SelectedDownloadableRows.Count == 0)" @onclick="DownloadSelectedJobsAsync"><Icon Name="download" Size="15" /> 下载可用结果</button>
+            <button type="button" class="button secondary compact danger-text" disabled="@bulkDeleting" @onclick="DeleteSelectedJobsAsync"><Icon Name="trash" Size="15" /> 删除终态记录</button>
+            <button type="button" class="button secondary compact" @onclick="ClearSelection">取消选择</button>
+        </div>
+    </section>
+}
+
+<section class="content-section batch-list-section">
+    <div class="section-header">
+        <div>
+            <h2>批量任务</h2>
+            <p>任务按所选 API Key 汇总；失败项目可重试为原任务的子任务。</p>
+        </div>
+        @if (VisibleJobs.Count > 0)
+        {
+            <label class="batch-select-all"><input type="checkbox" checked="@AllVisibleSelected" @onchange="ToggleAllVisible" /> 选择当前页</label>
+        }
+    </div>
+
+    @if (loadingKeys || loadingJobs)
+    {
+        <LoadingState Text="正在载入批量任务" />
+    }
+    else if (EligibleKeys.Count == 0)
+    {
+        <div class="batch-empty-action">
+            <EmptyState Title="没有可用于批量生图的 API Key" Description="需要一个活动的 Gemini 分组 API Key，并由管理员为该分组开启批量图片生成。" />
+            <a class="button primary" href="/keys"><Icon Name="key" Size="16" /> 管理 API Key</a>
+        </div>
+    }
+    else if (VisibleJobs.Count == 0)
+    {
+        <div class="batch-empty-action">
+            <EmptyState Title="暂无批量任务" Description="调整筛选条件，或创建第一个批量生图任务。" />
+            <button type="button" class="button primary" @onclick="OpenCreateAsync"><Icon Name="plus" Size="16" /> 创建任务</button>
+        </div>
+    }
+    else
+    {
+        <DxGrid Data="@VisibleJobs" KeyFieldName="Id" PageSize="100" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer">
+            <Columns>
+                <DxGridDataColumn Caption="选择" Width="64">
+                    <CellDisplayTemplate Context="context">
+                        @{ var row = (BatchImageJobRow)context.DataItem; }
+                        <input type="checkbox" checked="@selectedJobIds.Contains(row.Id)" aria-label="选择任务 @row.TaskName" @onchange="args => ToggleSelection(row.Id, args)" @onclick:stopPropagation="true" />
+                    </CellDisplayTemplate>
+                </DxGridDataColumn>
+                <DxGridDataColumn Caption="任务名称" MinWidth="235">
+                    <CellDisplayTemplate Context="context">
+                        @{ var row = (BatchImageJobRow)context.DataItem; }
+                        <div class="batch-task-cell @(row.IsChild ? "child" : string.Empty)">
+                            @if (row.ChildCount > 0 && !row.IsChild)
+                            {
+                                <button type="button" class="icon-button compact" title="@(expandedParentIds.Contains(row.Id) ? "收起重试任务" : "展开重试任务")" @onclick="() => ToggleChildren(row.Id)"><Icon Name="@(expandedParentIds.Contains(row.Id) ? "chevron-down" : "chevron-right")" Size="14" /></button>
+                            }
+                            else
+                            {
+                                <span class="batch-indent"></span>
+                            }
+                            <button type="button" class="batch-task-link" @onclick="() => OpenDetailAsync(row)">
+                                <strong title="@row.TaskName">@row.TaskName</strong>
+                                <small>@row.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</small>
+                            </button>
+                            @if (row.ChildCount > 0 && !row.IsChild) { <span class="status-badge neutral">@row.ChildCount 个重试</span> }
+                            @if (row.IsChild) { <span class="status-badge warning">重试</span> }
+                        </div>
+                    </CellDisplayTemplate>
+                </DxGridDataColumn>
+                <DxGridDataColumn FieldName="Model" Caption="模型" MinWidth="180" />
+                <DxGridDataColumn FieldName="ApiKeyName" Caption="API Key" MinWidth="150" />
+                <DxGridDataColumn Caption="状态" Width="115">
+                    <CellDisplayTemplate Context="context">@{ var row = (BatchImageJobRow)context.DataItem; }<span class="status-badge @StatusClass(DisplayStatus(row))">@StatusLabel(DisplayStatus(row))</span></CellDisplayTemplate>
+                </DxGridDataColumn>
+                <DxGridDataColumn Caption="结果" Width="125">
+                    <CellDisplayTemplate Context="context">@{ var row = (BatchImageJobRow)context.DataItem; }<span class="batch-count success">@DisplaySuccess(row)</span><span class="batch-count-separator">/</span><span class="batch-count @(DisplayFail(row) > 0 ? "failed" : string.Empty)">@DisplayFail(row)</span><small> · @row.ItemCount</small></CellDisplayTemplate>
+                </DxGridDataColumn>
+                <DxGridDataColumn Caption="费用" Width="125">
+                    <CellDisplayTemplate Context="context">@CostLabel((BatchImageJobRow)context.DataItem)</CellDisplayTemplate>
+                </DxGridDataColumn>
+                <DxGridDataColumn Caption="下载状态" MinWidth="145">
+                    <CellDisplayTemplate Context="context">@DownloadLabel((BatchImageJobRow)context.DataItem)</CellDisplayTemplate>
+                </DxGridDataColumn>
+                <DxGridDataColumn Caption="操作" Width="205">
+                    <CellDisplayTemplate Context="context">
+                        @{ var row = (BatchImageJobRow)context.DataItem; }
+                        <div class="row-actions">
+                            <button type="button" class="icon-button" title="查看详情" aria-label="查看详情" @onclick="() => OpenDetailAsync(row)"><Icon Name="eye" Size="16" /></button>
+                            <button type="button" class="icon-button" title="下载 ZIP" aria-label="下载 ZIP" disabled="@(!CanDownload(row) || downloadingJobId.Length > 0)" @onclick="() => DownloadJobAsync(row)"><Icon Name="download" Size="16" /></button>
+                            <button type="button" class="icon-button" title="重试失败项目" aria-label="重试失败项目" disabled="@(!CanRetry(row) || retryingJobId.Length > 0)" @onclick="() => RetryFailedAsync(row)"><Icon Name="refresh" Size="16" /></button>
+                            <button type="button" class="icon-button danger" title="删除记录" aria-label="删除记录" disabled="@(!IsTerminal(row.Status) || deletingJobId.Length > 0)" @onclick="() => DeleteJobAsync(row)"><Icon Name="trash" Size="16" /></button>
+                        </div>
+                    </CellDisplayTemplate>
+                </DxGridDataColumn>
+            </Columns>
+        </DxGrid>
+
+        <div class="batch-pagination">
+            <div>第 <strong>@(page)</strong> 页，本页 <strong>@VisibleJobs.Count</strong> 条</div>
+            <label>每页
+                <select value="@pageSize" @onchange="PageSizeChangedAsync"><option value="20">20</option><option value="50">50</option><option value="100">100</option></select>
+            </label>
+            <div class="button-row">
+                <button type="button" class="button secondary compact" disabled="@(page <= 1 || loadingJobs)" @onclick="PreviousPageAsync"><Icon Name="chevron-left" Size="14" /> 上一页</button>
+                <button type="button" class="button secondary compact" disabled="@(!hasMore || loadingJobs)" @onclick="NextPageAsync">下一页 <Icon Name="chevron-right" Size="14" /></button>
+            </div>
+        </div>
+    }
+</section>
+
+<AppModal Open="@showCreate" Title="创建批量生图任务" MaxWidth="980px" OnClose="CloseCreate">
+    <ChildContent>
+        <EditForm Model="createForm" OnValidSubmit="SubmitJobAsync" FormName="batch-image-create">
+            <DataAnnotationsValidator />
+            <div class="form-grid batch-create-grid">
+                <div class="form-field full"><label for="batch-create-name">任务名称</label><InputText id="batch-create-name" maxlength="255" @bind-Value="createForm.TaskName" placeholder="例如：产品封面图" /></div>
+                <div class="form-field full">
+                    <label for="batch-create-key">API Key</label>
+                    <select id="batch-create-key" value="@createApiKeyId" @onchange="CreateKeyChangedAsync" disabled="@loadingKeys">
+                        <option value="">请选择 API Key</option>
+                        @foreach (var key in EligibleKeys) { <option value="@key.Id">@KeyLabel(key)</option> }
+                    </select>
+                </div>
+                <div class="form-field">
+                    <label for="batch-create-model">模型</label>
+                    <select id="batch-create-model" @bind="createForm.Model" disabled="@(loadingModels || availableModels.Count == 0)">
+                        @if (loadingModels) { <option value="">正在载入模型</option> }
+                        else if (availableModels.Count == 0) { <option value="">当前 Key 没有可用模型</option> }
+                        @foreach (var model in availableModels) { <option value="@model.Id">@model.Id</option> }
+                    </select>
+                    <ValidationMessage For="() => createForm.Model" />
+                    @if (!string.IsNullOrWhiteSpace(modelError)) { <span class="field-hint error-text">@modelError</span> }
+                </div>
+                <div class="form-field"><label>图片尺寸</label><input value="1K" readonly /><span class="field-hint">批量任务当前固定使用 1K。</span></div>
+                <div class="form-field"><label for="batch-create-format">输出格式</label><InputSelect id="batch-create-format" @bind-Value="createForm.ResponseMimeType"><option value="image/png">PNG</option><option value="image/jpeg">JPEG</option><option value="image/webp">WebP</option></InputSelect></div>
+                <div class="form-field"><label>预计输出</label><input value="@($"{EstimatedOutputCount} 张图片 / {promptRows.Count} 条提示词")" readonly /></div>
+            </div>
+
+            <div class="batch-prompt-editor">
+                <div class="section-header"><div><h3>Prompt</h3><p>每条最多生成 4 张，单个任务最多生成 200 张。</p></div><span class="status-badge neutral">已添加 @promptRows.Count 条</span></div>
+                <textarea @bind="promptDraft" rows="4" placeholder="输入完整图片提示词"></textarea>
+                <div class="batch-prompt-controls">
+                    <input @bind="customIdDraft" maxlength="255" placeholder="Custom ID（可选）" />
+                    <select @bind="outputCountDraft" title="每条提示词输出数量"><option value="1">1 张</option><option value="2">2 张</option><option value="3">3 张</option><option value="4">4 张</option></select>
+                    <label class="button secondary compact batch-file-button @(ReferenceImageLimit == 0 ? "disabled" : string.Empty)">
+                        <Icon Name="image" Size="15" /> 参考图
+                        <InputFile @key="referenceInputKey" OnChange="ReadReferenceImagesAsync" accept="image/png,image/jpeg,image/webp" multiple disabled="@(ReferenceImageLimit == 0)" />
+                    </label>
+                    <button type="button" class="button secondary compact" disabled="@string.IsNullOrWhiteSpace(promptDraft)" @onclick="AddPromptRow"><Icon Name="plus" Size="14" /> 添加</button>
+                </div>
+                @if (referenceDrafts.Count > 0)
+                {
+                    <div class="batch-reference-list">
+                        @for (var i = 0; i < referenceDrafts.Count; i++)
+                        {
+                            var index = i; var reference = referenceDrafts[i];
+                            <span title="@reference.Name">@reference.Name <small>@FormatBytes(reference.Size)</small><button type="button" title="移除" @onclick="() => RemoveReference(index)"><Icon Name="x" Size="12" /></button></span>
+                        }
+                    </div>
+                }
+                <p class="field-hint">当前模型每条最多 @ReferenceImageLimit 张参考图；单文件不超过 10MB。参考图只保存在本次提交草稿中。</p>
+
+                @if (promptRows.Count == 0)
+                {
+                    <div class="batch-prompt-empty">尚未添加提示词。</div>
+                }
+                else
+                {
+                    <div class="batch-prompt-rows">
+                        @for (var i = 0; i < promptRows.Count; i++)
+                        {
+                            var index = i; var row = promptRows[i];
+                            <div><code>@row.CustomId</code><span title="@row.Prompt">@row.Prompt</span><small>×@row.OutputCount@if (row.ReferenceImages.Count > 0) { <text> · @row.ReferenceImages.Count 张参考图</text> }</small><button type="button" class="icon-button danger" title="删除提示词" @onclick="() => RemovePrompt(index)"><Icon Name="trash" Size="14" /></button></div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="inline-alert warning"><Icon Name="alert" Size="17" /><span>提交成功后可关闭页面，任务会继续在服务器运行；仅尚未提交的浏览器请求会因离开页面而取消。</span></div>
+            @if (!string.IsNullOrWhiteSpace(createError)) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@createError</span></div> }
+        </EditForm>
+    </ChildContent>
+    <Footer>
+        <button type="button" class="button secondary" disabled="@submitting" @onclick="CloseCreate">取消</button>
+        <button type="button" class="button primary" disabled="@(submitting || loadingModels || SelectedCreateKey is null || string.IsNullOrWhiteSpace(createForm.Model) || (promptRows.Count == 0 && string.IsNullOrWhiteSpace(promptDraft)))" @onclick="SubmitJobAsync">@if (submitting) { <span class="spinner light"></span> }<Icon Name="plus" Size="16" /> @(submitting ? "正在提交" : "提交任务")</button>
+    </Footer>
+</AppModal>
+
+<AppModal Open="@(selectedJob is not null)" Title="批量任务详情" MaxWidth="1120px" OnClose="CloseDetail">
+    <ChildContent>
+        @if (selectedJob is not null)
+        {
+            <div class="batch-detail-summary">
+                <div><span>状态</span><strong><span class="status-badge @StatusClass(DisplayStatus(selectedJob))">@StatusLabel(DisplayStatus(selectedJob))</span></strong></div>
+                <div><span>结果</span><strong><b class="success">@DisplaySuccess(selectedJob)</b> / <b class="@(DisplayFail(selectedJob) > 0 ? "failed" : string.Empty)">@DisplayFail(selectedJob)</b></strong></div>
+                <div><span>费用</span><strong>@CostLabel(selectedJob)</strong></div>
+                <div><span>下载状态</span><strong>@DownloadLabel(selectedJob)</strong></div>
+            </div>
+            <div class="section-header batch-detail-heading"><div><h3>任务项目</h3><p>@selectedJob.TaskName · @selectedJob.Model</p></div><button type="button" class="button secondary compact" disabled="@(detailLoading || refreshingDetail)" @onclick="RefreshDetailAsync"><Icon Name="refresh" Size="14" /> 刷新</button></div>
+            @if (detailLoading)
+            {
+                <LoadingState Text="正在载入任务项目" />
+            }
+            else if (detailItems.Count == 0)
+            {
+                <EmptyState Title="暂无项目结果" Description="任务开始处理后，这里会显示每条提示词的状态。" />
+            }
+            else
+            {
+                <div class="batch-detail-table-wrap">
+                    <table class="batch-detail-table">
+                        <thead><tr><th>Custom ID</th><th>Prompt</th><th>状态</th><th>预览</th><th>结果</th></tr></thead>
+                        <tbody>
+                            @foreach (var item in detailItems)
+                            {
+                                var previewKey = ItemPreviewKey(item);
+                                <tr>
+                                    <td><code title="@item.CustomId">@item.CustomId</code>@if (!string.IsNullOrWhiteSpace(item.SourceTaskName)) { <small>@item.SourceTaskName</small> }</td>
+                                    <td><div class="batch-prompt-preview" title="@(item.PromptPreview ?? string.Empty)">@(item.PromptPreview ?? "-")</div><button type="button" class="copy-link" disabled="@string.IsNullOrWhiteSpace(item.PromptPreview)" @onclick="() => CopyPromptAsync(item)">复制</button></td>
+                                    <td><span class="status-badge @ItemStatusClass(item.Status)">@ItemStatusLabel(item.Status)</span></td>
+                                    <td>
+                                        <div class="batch-thumbnail">
+                                            @if (previewUris.TryGetValue(previewKey, out var previewUri))
+                                            {
+                                                <button type="button" title="查看大图" @onclick="() => OpenPreview(item, previewUri)"><img src="@previewUri" alt="@item.CustomId" /></button>
+                                            }
+                                            else if (CanPreview(item))
+                                            {
+                                                <button type="button" disabled="@previewLoadingIds.Contains(previewKey)" title="载入预览" @onclick="() => LoadPreviewAsync(item)"><Icon Name="@(previewLoadingIds.Contains(previewKey) ? "refresh" : "eye")" Size="16" /></button>
+                                            }
+                                            else
+                                            {
+                                                <Icon Name="image" Size="16" />
+                                            }
+                                        </div>
+                                    </td>
+                                    <td><span class="batch-item-result @ItemResultClass(item)">@ItemResultLabel(item)</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            @if (!string.IsNullOrWhiteSpace(detailError)) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@detailError</span></div> }
+        }
+    </ChildContent>
+    <Footer>
+        @if (selectedJob is not null)
+        {
+            <button type="button" class="button secondary" disabled="@(IsTerminal(selectedJob.Status) || cancelling)" @onclick="CancelSelectedAsync">@(cancelling ? "正在取消" : "取消任务")</button>
+            <button type="button" class="button secondary" disabled="@(!CanRetry(selectedJob) || retryingJobId.Length > 0)" @onclick="() => RetryFailedAsync(selectedJob)"><Icon Name="refresh" Size="15" /> 重试失败项目</button>
+            <button type="button" class="button primary" disabled="@(!CanDownload(selectedJob) || downloadingJobId.Length > 0)" @onclick="() => DownloadJobAsync(selectedJob)"><Icon Name="download" Size="15" /> 下载 ZIP</button>
+        }
+    </Footer>
+</AppModal>
+
+<AppModal Open="@(previewItem is not null)" Title="@(previewItem?.CustomId ?? "图片预览")" MaxWidth="1180px" OnClose="ClosePreview">
+    <ChildContent>
+        <div class="inline-alert warning"><Icon Name="alert" Size="17" /><span>预览只加载第一张结果图，完整文件请下载 ZIP。</span></div>
+        @if (!string.IsNullOrWhiteSpace(previewLargeUri)) { <div class="batch-large-preview"><img src="@previewLargeUri" alt="@(previewItem?.CustomId ?? string.Empty)" /></div> }
+    </ChildContent>
+</AppModal>
+
+<AppModal Open="@showGuide" Title="批量生图使用指南" MaxWidth="920px" OnClose="CloseGuide">
+    <ChildContent>
+        <div class="batch-guide-steps">
+            <h3>页面操作</h3>
+            <ol><li>先在“API Key”页面创建并绑定允许批量生图的 Gemini 分组。</li><li>创建任务时选择 Key 和后端实时返回的模型，再逐条添加 Prompt。</li><li>提交后在任务详情查看进度、项目状态和图片预览。</li><li>完成后下载 ZIP；失败项目可自动组成子任务重试。</li></ol>
+        </div>
+        <div class="section-header"><div><h3>Agent / CLI 调用说明</h3><p>可复制给自动化 Agent，直接通过 API 提交和恢复任务。</p></div></div>
+        <textarea class="batch-guide-text" readonly rows="20">@AgentInstruction</textarea>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseGuide">关闭</button><button type="button" class="button primary" @onclick="CopyGuideAsync"><Icon Name="copy" Size="15" /> 复制调用说明</button></Footer>
+</AppModal>
+
+@code {
+    private const int MaxOutputsPerItem = 4;
+    private const int MaxOutputsPerJob = 200;
+    private const long MaxReferenceBytes = 10 * 1024 * 1024;
+    private static readonly HashSet<string> TerminalStatuses = new(StringComparer.OrdinalIgnoreCase) { "completed", "failed", "cancelled", "output_deleted" };
+
+    private List<ApiKeyDto> apiKeys = [];
+    private List<BatchImageJobRow> jobs = [];
+    private readonly HashSet<string> selectedJobIds = new(StringComparer.Ordinal);
+    private readonly HashSet<string> expandedParentIds = new(StringComparer.Ordinal);
+    private string taskNameFilter = string.Empty;
+    private string apiKeyFilter = string.Empty;
+    private string statusFilter = string.Empty;
+    private string downloadedFilter = string.Empty;
+    private int page = 1;
+    private int pageSize = 20;
+    private bool hasMore;
+    private bool loadingKeys;
+    private bool loadingJobs;
+    private string? error;
+
+    private bool showCreate;
+    private BatchImageSubmitRequest createForm = NewCreateForm();
+    private string createApiKeyId = string.Empty;
+    private List<BatchImageModelDto> availableModels = [];
+    private bool loadingModels;
+    private string? modelError;
+    private string? createError;
+    private string promptDraft = string.Empty;
+    private string customIdDraft = string.Empty;
+    private int outputCountDraft = 1;
+    private readonly List<PromptDraftRow> promptRows = [];
+    private readonly List<ReferenceImageDraft> referenceDrafts = [];
+    private Guid referenceInputKey = Guid.NewGuid();
+    private bool submitting;
+
+    private BatchImageJobRow? selectedJob;
+    private List<BatchImageItemDto> detailItems = [];
+    private bool detailLoading;
+    private bool refreshingDetail;
+    private bool cancelling;
+    private string? detailError;
+    private readonly Dictionary<string, string> previewUris = new(StringComparer.Ordinal);
+    private readonly HashSet<string> previewLoadingIds = new(StringComparer.Ordinal);
+    private BatchImageItemDto? previewItem;
+    private string previewLargeUri = string.Empty;
+    private string downloadingJobId = string.Empty;
+    private string retryingJobId = string.Empty;
+    private string deletingJobId = string.Empty;
+    private bool bulkDownloading;
+    private bool bulkDeleting;
+    private bool showGuide;
+
+    private CancellationTokenSource? pollingCancellation;
+    private Task? pollingTask;
+    private readonly SemaphoreSlim pollingGate = new(1, 1);
+
+    private List<ApiKeyDto> EligibleKeys => apiKeys
+        .Where(key => key.IsActive
+            && !string.IsNullOrWhiteSpace(key.Secret)
+            && string.Equals(key.GroupPlatform, "gemini", StringComparison.OrdinalIgnoreCase)
+            && key.GroupAllowsBatchImageGeneration)
+        .OrderByDescending(key => key.CreatedAt)
+        .ToList();
+
+    private ApiKeyDto? SelectedCreateKey => EligibleKeys.FirstOrDefault(key => key.Id == createApiKeyId);
+    private int EstimatedOutputCount => promptRows.Sum(row => row.OutputCount);
+    private int ReferenceImageLimit => ReferenceLimitForModel(createForm.Model);
+    private List<BatchImageJobRow> VisibleJobs
+    {
+        get
+        {
+            var rows = new List<BatchImageJobRow>();
+            foreach (var parent in jobs.Where(item => string.IsNullOrWhiteSpace(item.ParentBatchId)))
+            {
+                rows.Add(parent with { IsChild = false });
+                if (expandedParentIds.Contains(parent.Id))
+                    rows.AddRange(jobs.Where(item => item.ParentBatchId == parent.Id).OrderBy(item => item.CreatedAt).Select(item => item with { IsChild = true }));
+            }
+            return rows;
+        }
+    }
+    private bool AllVisibleSelected => VisibleJobs.Count > 0 && VisibleJobs.All(row => selectedJobIds.Contains(row.Id));
+    private List<BatchImageJobRow> SelectedDownloadableRows => jobs.Where(row => selectedJobIds.Contains(row.Id) && CanDownload(row)).ToList();
+
+    protected override async Task OnInitializedAsync() => await RefreshPageAsync();
+
+    private async Task RefreshPageAsync()
+    {
+        await LoadApiKeysAsync();
+        await LoadJobsAsync();
+    }
+
+    private async Task LoadApiKeysAsync()
+    {
+        loadingKeys = true;
+        error = null;
+        try
+        {
+            apiKeys = await Api.GetMyApiKeysAsync();
+            if (EligibleKeys.All(key => key.Id != createApiKeyId)) createApiKeyId = EligibleKeys.FirstOrDefault()?.Id ?? string.Empty;
+            if (EligibleKeys.All(key => key.Id != apiKeyFilter)) apiKeyFilter = string.Empty;
+        }
+        catch (ApiException ex) { error = ex.Message; apiKeys = []; }
+        finally { loadingKeys = false; }
+    }
+
+    private async Task LoadJobsAsync()
+    {
+        var keys = string.IsNullOrWhiteSpace(apiKeyFilter) ? EligibleKeys : EligibleKeys.Where(key => key.Id == apiKeyFilter).ToList();
+        if (keys.Count == 0) { jobs = []; hasMore = false; return; }
+        loadingJobs = true;
+        error = null;
+        try
+        {
+            var cursor = ((page - 1) * pageSize).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var results = await Task.WhenAll(keys.Select(async key =>
+            {
+                var response = await Api.GetBatchImageJobsAsync(key.Secret!, pageSize, statusFilter, cursor, taskNameFilter, downloadedFilter);
+                return (response.HasMore, Rows: response.Data.Select(job => ToRow(job, key)).ToList());
+            }));
+            jobs = results.SelectMany(result => result.Rows).OrderByDescending(row => row.CreatedAt).Take(pageSize).ToList();
+            ApplyChildCounts();
+            hasMore = results.Any(result => result.HasMore);
+            selectedJobIds.RemoveWhere(id => jobs.All(row => row.Id != id));
+        }
+        catch (ApiException ex) { error = ex.Message; jobs = []; hasMore = false; }
+        finally { loadingJobs = false; }
+    }
+
+    private void ApplyChildCounts()
+    {
+        var counts = jobs.Where(row => !string.IsNullOrWhiteSpace(row.ParentBatchId)).GroupBy(row => row.ParentBatchId!).ToDictionary(group => group.Key, group => group.Count());
+        jobs = jobs.Select(row => row with { ChildCount = counts.GetValueOrDefault(row.Id) }).ToList();
+    }
+
+    private async Task ApplyFiltersAsync() { page = 1; selectedJobIds.Clear(); await LoadJobsAsync(); }
+    private async Task ResetFiltersAsync() { taskNameFilter = apiKeyFilter = statusFilter = downloadedFilter = string.Empty; await ApplyFiltersAsync(); }
+    private async Task ApiKeyFilterChangedAsync(ChangeEventArgs e) { apiKeyFilter = e.Value?.ToString() ?? string.Empty; await ApplyFiltersAsync(); }
+    private async Task StatusFilterChangedAsync(ChangeEventArgs e) { statusFilter = e.Value?.ToString() ?? string.Empty; await ApplyFiltersAsync(); }
+    private async Task DownloadedFilterChangedAsync(ChangeEventArgs e) { downloadedFilter = e.Value?.ToString() ?? string.Empty; await ApplyFiltersAsync(); }
+    private async Task HandleSearchKeyAsync(KeyboardEventArgs e) { if (e.Key == "Enter") await ApplyFiltersAsync(); }
+    private async Task PreviousPageAsync() { if (page <= 1) return; page--; selectedJobIds.Clear(); await LoadJobsAsync(); }
+    private async Task NextPageAsync() { if (!hasMore) return; page++; selectedJobIds.Clear(); await LoadJobsAsync(); }
+    private async Task PageSizeChangedAsync(ChangeEventArgs e) { if (!int.TryParse(e.Value?.ToString(), out var value)) return; pageSize = Math.Clamp(value, 1, 100); page = 1; selectedJobIds.Clear(); await LoadJobsAsync(); }
+
+    private void ToggleSelection(string id, ChangeEventArgs e) { if (e.Value is true) selectedJobIds.Add(id); else selectedJobIds.Remove(id); }
+    private void ToggleAllVisible(ChangeEventArgs e) { var check = e.Value is true; foreach (var row in VisibleJobs) { if (check) selectedJobIds.Add(row.Id); else selectedJobIds.Remove(row.Id); } }
+    private void ClearSelection() => selectedJobIds.Clear();
+    private void ToggleChildren(string parentId) { if (!expandedParentIds.Add(parentId)) expandedParentIds.Remove(parentId); }
+
+    private async Task OpenCreateAsync()
+    {
+        showCreate = true;
+        createError = null;
+        if (string.IsNullOrWhiteSpace(createApiKeyId)) createApiKeyId = EligibleKeys.FirstOrDefault()?.Id ?? string.Empty;
+        await LoadModelsAsync();
+    }
+
+    private Task CloseCreate()
+    {
+        if (submitting) return Task.CompletedTask;
+        showCreate = false;
+        ResetCreateDraft();
+        return Task.CompletedTask;
+    }
+
+    private async Task CreateKeyChangedAsync(ChangeEventArgs e) { createApiKeyId = e.Value?.ToString() ?? string.Empty; await LoadModelsAsync(); }
+
+    private async Task LoadModelsAsync()
+    {
+        availableModels = [];
+        createForm.Model = string.Empty;
+        modelError = null;
+        var key = SelectedCreateKey;
+        if (key?.Secret is null) return;
+        loadingModels = true;
+        try
+        {
+            availableModels = (await Api.GetBatchImageModelsAsync(key.Secret)).Data
+                .Where(model => !string.IsNullOrWhiteSpace(model.Id))
+                .DistinctBy(model => model.Id, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            createForm.Model = availableModels.FirstOrDefault()?.Id ?? string.Empty;
+        }
+        catch (ApiException ex) { modelError = ex.Message; }
+        finally { loadingModels = false; }
+    }
+
+    private async Task ReadReferenceImagesAsync(InputFileChangeEventArgs e)
+    {
+        createError = null;
+        var slots = Math.Max(0, ReferenceImageLimit - referenceDrafts.Count);
+        if (slots == 0) { createError = "当前模型不支持更多参考图。"; return; }
+        IReadOnlyList<IBrowserFile> files;
+        try { files = e.GetMultipleFiles(100); }
+        catch (InvalidOperationException ex) { createError = ex.Message; return; }
+        if (files.Count > slots) createError = $"当前模型每条最多 {ReferenceImageLimit} 张参考图，多余文件已忽略。";
+        foreach (var file in files.Take(slots))
+        {
+            if (file.ContentType is not ("image/png" or "image/jpeg" or "image/webp")) { createError = $"不支持参考图格式：{file.Name}"; continue; }
+            if (file.Size > MaxReferenceBytes) { createError = $"参考图 {file.Name} 超过 10MB。"; continue; }
+            try
+            {
+                await using var stream = file.OpenReadStream(MaxReferenceBytes);
+                using var memory = new MemoryStream();
+                await stream.CopyToAsync(memory);
+                referenceDrafts.Add(new ReferenceImageDraft(file.Name, file.ContentType, Convert.ToBase64String(memory.ToArray()), file.Size));
+            }
+            catch (Exception ex) { createError = $"读取 {file.Name} 失败：{ex.Message}"; }
+        }
+        referenceInputKey = Guid.NewGuid();
+    }
+
+    private void AddPromptRow()
+    {
+        var prompt = promptDraft.Trim();
+        if (prompt.Length == 0) return;
+        var used = promptRows.Select(row => row.CustomId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var id = UniqueCustomId(customIdDraft, used, promptRows.Count);
+        promptRows.Add(new PromptDraftRow(id, prompt, Math.Clamp(outputCountDraft, 1, MaxOutputsPerItem), referenceDrafts.Select(item => item.ToDto()).ToList()));
+        promptDraft = customIdDraft = string.Empty;
+        outputCountDraft = 1;
+        referenceDrafts.Clear();
+        referenceInputKey = Guid.NewGuid();
+    }
+
+    private void RemovePrompt(int index) { if (index >= 0 && index < promptRows.Count) promptRows.RemoveAt(index); }
+    private void RemoveReference(int index) { if (index >= 0 && index < referenceDrafts.Count) referenceDrafts.RemoveAt(index); }
+
+    private async Task SubmitJobAsync()
+    {
+        if (submitting) return;
+        if (!string.IsNullOrWhiteSpace(promptDraft)) AddPromptRow();
+        var key = SelectedCreateKey;
+        if (key?.Secret is null) { createError = "请选择可用的 API Key。"; return; }
+        if (string.IsNullOrWhiteSpace(createForm.Model)) { createError = "请选择模型。"; return; }
+        if (promptRows.Count == 0) { createError = "请至少添加一条 Prompt。"; return; }
+        if (EstimatedOutputCount > MaxOutputsPerJob) { createError = $"预计输出 {EstimatedOutputCount} 张，单个任务最多 200 张，请拆分任务。"; return; }
+        if (promptRows.Any(row => row.ReferenceImages.Count > ReferenceImageLimit)) { createError = "参考图数量超过当前模型限制。"; return; }
+
+        submitting = true;
+        createError = null;
+        try
+        {
+            var request = new BatchImageSubmitRequest
+            {
+                Model = createForm.Model,
+                TaskName = string.IsNullOrWhiteSpace(createForm.TaskName) ? $"批量生图 {DateTime.Now:yyyy-MM-dd HH:mm}" : createForm.TaskName.Trim(),
+                ImageSize = "1K",
+                ResponseMimeType = createForm.ResponseMimeType,
+                Items = promptRows.Select(row => new BatchImageSubmitItem { CustomId = row.CustomId, Prompt = row.Prompt, OutputCount = row.OutputCount, ReferenceImages = row.ReferenceImages.Count == 0 ? null : row.ReferenceImages }).ToList()
+            };
+            var job = await Api.SubmitBatchImageAsync(key.Secret, request, $"paragateway-ui-{Guid.NewGuid():N}");
+            var row = ToRow(job, key);
+            UpsertJob(row);
+            showCreate = false;
+            ResetCreateDraft();
+            Toasts.Success("批量任务已提交");
+            await OpenDetailAsync(row);
+        }
+        catch (ApiException ex) { createError = ex.Message; }
+        finally { submitting = false; }
+    }
+
+    private void ResetCreateDraft()
+    {
+        var model = createForm.Model;
+        createForm = NewCreateForm();
+        createForm.Model = model;
+        promptDraft = customIdDraft = string.Empty;
+        outputCountDraft = 1;
+        promptRows.Clear();
+        referenceDrafts.Clear();
+        referenceInputKey = Guid.NewGuid();
+        createError = null;
+    }
+
+    private async Task OpenDetailAsync(BatchImageJobRow row)
+    {
+        StopPolling();
+        selectedJob = row;
+        detailItems = [];
+        previewUris.Clear();
+        previewLoadingIds.Clear();
+        detailError = null;
+        detailLoading = true;
+        try
+        {
+            await RefreshSelectedStatusAsync();
+            await LoadDetailItemsAsync();
+            if (selectedJob is not null && !IsTerminal(selectedJob.Status)) StartPolling();
+        }
+        finally { detailLoading = false; }
+    }
+
+    private async Task RefreshDetailAsync()
+    {
+        if (selectedJob is null) return;
+        refreshingDetail = true;
+        detailError = null;
+        try { await RefreshSelectedStatusAsync(); await LoadDetailItemsAsync(); }
+        finally { refreshingDetail = false; }
+    }
+
+    private async Task RefreshSelectedStatusAsync()
+    {
+        if (selectedJob is null) return;
+        var key = KeyForRow(selectedJob);
+        if (key?.Secret is null) { detailError = "找不到该任务对应的 API Key。"; return; }
+        try
+        {
+            var updated = await Api.GetBatchImageJobAsync(key.Secret, selectedJob.Id);
+            selectedJob = selectedJob with { Job = updated };
+            UpsertJob(selectedJob);
+            if (IsTerminal(updated.Status)) StopPolling();
+        }
+        catch (ApiException ex) { detailError = ex.Message; }
+    }
+
+    private async Task LoadDetailItemsAsync()
+    {
+        if (selectedJob is null) return;
+        var rootId = selectedJob.ParentBatchId ?? selectedJob.Id;
+        var related = jobs.Where(row => row.Id == rootId || row.ParentBatchId == rootId).ToList();
+        if (related.Count == 0) related.Add(selectedJob);
+        try
+        {
+            var results = await Task.WhenAll(related.Select(async row =>
+            {
+                var key = KeyForRow(row) ?? KeyForRow(selectedJob);
+                if (key?.Secret is null) return new List<BatchImageItemDto>();
+                var response = await Api.GetBatchImageItemsAsync(key.Secret, row.Id);
+                foreach (var item in response.Data) { item.BatchId ??= row.Id; item.SourceTaskName ??= row.Id == rootId ? $"主任务：{row.TaskName}" : $"重试任务：{row.TaskName}"; }
+                return response.Data;
+            }));
+            detailItems = results.SelectMany(items => items).ToList();
+        }
+        catch (ApiException ex) { detailError = ex.Message; detailItems = []; }
+    }
+
+    private Task CloseDetail()
+    {
+        StopPolling();
+        selectedJob = null;
+        detailItems = [];
+        previewUris.Clear();
+        detailError = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task CancelSelectedAsync()
+    {
+        if (selectedJob is null || IsTerminal(selectedJob.Status) || !await Js.InvokeAsync<bool>("confirm", "确认取消该批量任务？已开始的上游请求可能仍会完成。")) return;
+        var key = KeyForRow(selectedJob);
+        if (key?.Secret is null) return;
+        cancelling = true;
+        try
+        {
+            var updated = await Api.CancelBatchImageAsync(key.Secret, selectedJob.Id);
+            selectedJob = selectedJob with { Job = updated };
+            UpsertJob(selectedJob);
+            StopPolling();
+            Toasts.Success("取消请求已提交");
+        }
+        catch (ApiException ex) { detailError = ex.Message; }
+        finally { cancelling = false; }
+    }
+
+    private async Task RetryFailedAsync(BatchImageJobRow row)
+    {
+        if (!CanRetry(row) || retryingJobId.Length > 0) return;
+        var key = KeyForRow(row);
+        if (key?.Secret is null) { error = "找不到任务对应的 API Key。"; return; }
+        retryingJobId = row.Id;
+        try
+        {
+            var source = (await Api.GetBatchImageItemsAsync(key.Secret, row.Id, "failed")).Data;
+            var failed = source.Where(item => string.Equals(item.Status, "failed", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(item.PromptPreview)).ToList();
+            if (failed.Count == 0) { error = "失败项目没有可用于重试的 Prompt。"; return; }
+            var retry = await Api.SubmitBatchImageAsync(key.Secret, new BatchImageSubmitRequest
+            {
+                Model = row.Model,
+                TaskName = $"{row.TaskName}（失败重试）",
+                ParentBatchId = row.ParentBatchId ?? row.Id,
+                Provider = row.Provider,
+                ImageSize = "1K",
+                ResponseMimeType = "image/png",
+                Items = failed.Select(item => new BatchImageSubmitItem { CustomId = RetryCustomId(item.CustomId), Prompt = item.PromptPreview!, OutputCount = 1 }).ToList()
+            }, $"paragateway-ui-retry-{Guid.NewGuid():N}");
+            var retryRow = ToRow(retry, key);
+            UpsertJob(retryRow);
+            expandedParentIds.Add(retryRow.ParentBatchId ?? row.Id);
+            Toasts.Success("失败项目重试任务已提交");
+            await OpenDetailAsync(retryRow);
+        }
+        catch (ApiException ex) { error = ex.Message; detailError = ex.Message; }
+        finally { retryingJobId = string.Empty; }
+    }
+
+    private async Task DownloadJobAsync(BatchImageJobRow row)
+    {
+        if (!CanDownload(row) || downloadingJobId.Length > 0) return;
+        var key = KeyForRow(row);
+        if (key?.Secret is null) return;
+        downloadingJobId = row.Id;
+        try
+        {
+            var file = await Api.DownloadBatchImageAsync(key.Secret, row.Id);
+            await Js.InvokeVoidAsync("paraGateway.downloadBytes", Convert.ToBase64String(file.Content), file.ContentType, file.FileName);
+            row.Job.DownloadedAtUnix ??= DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            Toasts.Success("结果下载已开始");
+        }
+        catch (ApiException ex) { error = ex.Message; detailError = ex.Message; }
+        finally { downloadingJobId = string.Empty; }
+    }
+
+    private async Task DownloadSelectedJobsAsync()
+    {
+        if (bulkDownloading || SelectedDownloadableRows.Count == 0) return;
+        bulkDownloading = true;
+        try
+        {
+            foreach (var row in SelectedDownloadableRows)
+            {
+                var key = KeyForRow(row);
+                if (key?.Secret is null) continue;
+                var file = await Api.DownloadBatchImageAsync(key.Secret, row.Id);
+                await Js.InvokeVoidAsync("paraGateway.downloadBytes", Convert.ToBase64String(file.Content), file.ContentType, file.FileName);
+                row.Job.DownloadedAtUnix ??= DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            }
+            Toasts.Success("所选任务下载已开始");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { bulkDownloading = false; }
+    }
+
+    private async Task DeleteJobAsync(BatchImageJobRow row)
+    {
+        if (!IsTerminal(row.Status) || deletingJobId.Length > 0 || !await Js.InvokeAsync<bool>("confirm", $"确认删除任务记录“{row.TaskName}”？服务器上的任务记录将不可恢复。")) return;
+        var key = KeyForRow(row);
+        if (key?.Secret is null) return;
+        deletingJobId = row.Id;
+        try
+        {
+            await Api.DeleteBatchImageAsync(key.Secret, row.Id);
+            RemoveJob(row.Id);
+            Toasts.Success("任务记录已删除");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { deletingJobId = string.Empty; }
+    }
+
+    private async Task DeleteSelectedJobsAsync()
+    {
+        var deletable = jobs.Where(row => selectedJobIds.Contains(row.Id) && IsTerminal(row.Status)).ToList();
+        if (bulkDeleting || deletable.Count == 0) { Toasts.Info("所选任务中没有可删除的终态记录"); return; }
+        if (!await Js.InvokeAsync<bool>("confirm", $"确认删除选中的 {deletable.Count} 条终态任务记录？")) return;
+        bulkDeleting = true;
+        try
+        {
+            foreach (var row in deletable)
+            {
+                var key = KeyForRow(row);
+                if (key?.Secret is null) continue;
+                await Api.DeleteBatchImageAsync(key.Secret, row.Id);
+                RemoveJob(row.Id);
+            }
+            Toasts.Success("所选任务记录已删除");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { bulkDeleting = false; }
+    }
+
+    private async Task LoadPreviewAsync(BatchImageItemDto item)
+    {
+        if (!CanPreview(item)) return;
+        var previewKey = ItemPreviewKey(item);
+        if (!previewLoadingIds.Add(previewKey)) return;
+        try
+        {
+            var row = jobs.FirstOrDefault(candidate => candidate.Id == item.BatchId) ?? selectedJob;
+            var key = row is null ? null : KeyForRow(row);
+            if (key?.Secret is null || string.IsNullOrWhiteSpace(item.BatchId)) return;
+            var file = await Api.GetBatchImageItemContentAsync(key.Secret, item.BatchId, item.CustomId);
+            previewUris[previewKey] = $"data:{file.ContentType};base64,{Convert.ToBase64String(file.Content)}";
+        }
+        catch (ApiException ex) { detailError = ex.Message; }
+        finally { previewLoadingIds.Remove(previewKey); }
+    }
+
+    private void OpenPreview(BatchImageItemDto item, string uri) { previewItem = item; previewLargeUri = uri; }
+    private Task ClosePreview() { previewItem = null; previewLargeUri = string.Empty; return Task.CompletedTask; }
+    private async Task CopyPromptAsync(BatchImageItemDto item) { if (string.IsNullOrWhiteSpace(item.PromptPreview)) return; await Js.InvokeVoidAsync("navigator.clipboard.writeText", item.PromptPreview); Toasts.Success("Prompt 已复制"); }
+
+    private void UpsertJob(BatchImageJobRow row)
+    {
+        var index = jobs.FindIndex(item => item.Id == row.Id);
+        if (index >= 0) jobs[index] = row;
+        else jobs.Insert(0, row);
+        jobs = jobs.OrderByDescending(item => item.CreatedAt).Take(pageSize).ToList();
+        ApplyChildCounts();
+        if (selectedJob?.Id == row.Id) selectedJob = jobs.FirstOrDefault(item => item.Id == row.Id) ?? row;
+    }
+
+    private void RemoveJob(string id)
+    {
+        jobs.RemoveAll(row => row.Id == id);
+        selectedJobIds.Remove(id);
+        if (selectedJob?.Id == id) _ = CloseDetail();
+        ApplyChildCounts();
+    }
+
+    private void StartPolling()
+    {
+        StopPolling();
+        pollingCancellation = new CancellationTokenSource();
+        pollingTask = PollSelectedAsync(pollingCancellation.Token);
+    }
+
+    private async Task PollSelectedAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested && selectedJob is not null && !IsTerminal(selectedJob.Status))
+            {
+                await Task.Delay(TimeSpan.FromSeconds(8), cancellationToken);
+                if (!await pollingGate.WaitAsync(0, cancellationToken)) continue;
+                try { await InvokeAsync(RefreshSelectedStatusAsync); }
+                finally { pollingGate.Release(); }
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void StopPolling()
+    {
+        pollingCancellation?.Cancel();
+        pollingCancellation?.Dispose();
+        pollingCancellation = null;
+        pollingTask = null;
+    }
+
+    private void OpenGuide() => showGuide = true;
+    private Task CloseGuide() { showGuide = false; return Task.CompletedTask; }
+    private async Task CopyGuideAsync() { await Js.InvokeVoidAsync("navigator.clipboard.writeText", AgentInstruction); Toasts.Success("调用说明已复制"); }
+
+    private string AgentInstruction => $$"""
+        ParaGateway 批量生图 API：{{Navigation.BaseUri.TrimEnd('/')}}
+
+        1. GET /v1/images/batches/models 获取当前 API Key 可用模型。
+        2. POST /v1/images/batches 提交任务，请设置唯一 Idempotency-Key。
+        3. GET /v1/images/batches/{id} 查询状态；GET /v1/images/batches/{id}/items 查询明细。
+        4. GET /v1/images/batches/{id}/download 下载 ZIP；POST /v1/images/batches/{id}/cancel 取消任务。
+        5. 单条 prompt 的 output_count 为 1-4，单任务所有 output_count 合计不能超过 200。
+        6. Gemini 2.5 Flash Image 每条最多 3 张参考图；Gemini 3 Pro Image 每条最多 14 张。inline base64 参考图单文件建议不超过 10MB。
+        7. 失败重试时读取失败 item 的 prompt_preview，新任务设置 parent_batch_id 为原始根任务 ID。
+
+        请求示例：
+        {
+          "model": "<从 models 接口选择>",
+          "task_name": "任务名称",
+          "image_size": "1K",
+          "response_mime_type": "image/png",
+          "items": [{ "custom_id": "img_001", "prompt": "完整提示词", "output_count": 1 }]
+        }
+        """;
+
+    private static BatchImageSubmitRequest NewCreateForm() => new() { ImageSize = "1K", ResponseMimeType = "image/png" };
+    private static BatchImageJobRow ToRow(BatchImageJobDto job, ApiKeyDto key) => new(job, key.Id, string.IsNullOrWhiteSpace(key.Name) ? $"API Key #{key.Id}" : key.Name, 0, false);
+    private ApiKeyDto? KeyForRow(BatchImageJobRow row) => EligibleKeys.FirstOrDefault(key => key.Id == row.ApiKeyId);
+    private IEnumerable<BatchImageJobRow> ChildrenOf(BatchImageJobRow row) => jobs.Where(item => item.ParentBatchId == row.Id);
+    private int DisplaySuccess(BatchImageJobRow row) => row.ParentBatchId is not null ? row.SuccessCount : Math.Min(row.ItemCount, row.SuccessCount + ChildrenOf(row).Sum(child => child.SuccessCount));
+    private int DisplayFail(BatchImageJobRow row) => row.ParentBatchId is not null ? row.FailCount : Math.Max(0, row.ItemCount - DisplaySuccess(row));
+    private string DisplayStatus(BatchImageJobRow row) => row.ParentBatchId is null && ChildrenOf(row).Any() && DisplayFail(row) == 0 && IsTerminal(row.Status) ? "completed" : row.Status;
+    private double? DisplayActualCost(BatchImageJobRow row) { if (row.ParentBatchId is not null) return row.ActualCost; var children = ChildrenOf(row).ToList(); if (row.ActualCost is null && children.Any(child => child.ActualCost is null)) return null; return (row.ActualCost ?? 0) + children.Sum(child => child.ActualCost ?? 0); }
+    private double DisplayEstimatedCost(BatchImageJobRow row) => row.EstimatedCost + (row.ParentBatchId is null ? ChildrenOf(row).Sum(child => child.EstimatedCost) : 0);
+    private bool CanDownload(BatchImageJobRow row) => DisplayStatus(row) == "completed" && DisplaySuccess(row) > 0;
+    private bool CanRetry(BatchImageJobRow row) => IsTerminal(DisplayStatus(row)) && DisplayFail(row) > 0;
+    private static bool IsTerminal(string status) => TerminalStatuses.Contains(status);
+    private string CostLabel(BatchImageJobRow row) => DisplayActualCost(row) is { } actual ? $"${actual:0.######}" : $"预估 ${DisplayEstimatedCost(row):0.######}";
+    private static string DownloadLabel(BatchImageJobRow row) => row.DownloadedAt is { } at ? at.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "未下载";
+    private static string StatusLabel(string status) => status switch { "queued" => "排队中", "running" or "indexing" => "运行中", "processing_results" => "处理结果", "settling" => "结算中", "completed" => "已完成", "failed" => "失败", "cancelled" => "已取消", "output_deleted" => "结果已删除", _ => status };
+    private static string StatusClass(string status) => status switch { "completed" => "success", "failed" or "cancelled" => "danger", "queued" or "running" or "indexing" or "processing_results" or "settling" => "warning", _ => "neutral" };
+    private static string ItemStatusLabel(string status) => status switch { "succeeded" or "success" => "成功", "failed" => "失败", "cancelled" => "已取消", "running" => "处理中", "pending" => "等待中", _ => status };
+    private static string ItemStatusClass(string status) => status switch { "succeeded" or "success" => "success", "failed" or "cancelled" => "danger", _ => "warning" };
+    private static string ItemResultLabel(BatchImageItemDto item) => item.Error is not null ? $"{item.Error.Code}: {item.Error.Message}" : item.ImageCount > 0 ? $"{item.ImageCount} 张图片" : "暂无输出";
+    private static string ItemResultClass(BatchImageItemDto item) => item.Error is not null || item.Status is "failed" or "cancelled" ? "failed" : item.ImageCount > 0 ? "success" : "pending";
+    private static bool CanPreview(BatchImageItemDto item) => item.ImageCount > 0 && item.Status is "succeeded" or "success";
+    private static string ItemPreviewKey(BatchImageItemDto item) => $"{item.BatchId}:{item.CustomId}:0";
+    private static int ReferenceLimitForModel(string model) { var normalized = model.ToLowerInvariant(); if (normalized.Contains("pro-image")) return 14; if (normalized.Contains("flash-image")) return 3; return 0; }
+    private static string KeyLabel(ApiKeyDto key) => string.IsNullOrWhiteSpace(key.GroupName) ? key.Name : $"{key.Name} · {key.GroupName}";
+    private static string UniqueCustomId(string draft, HashSet<string> used, int index) { var baseId = string.IsNullOrWhiteSpace(draft) ? $"img_{index + 1:000}" : new string(draft.Trim().Select(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.' ? ch : '_').ToArray()).Trim('_'); if (baseId.Length == 0) baseId = $"img_{index + 1:000}"; var candidate = baseId; var suffix = 2; while (!used.Add(candidate)) candidate = $"{baseId}_{suffix++}"; return candidate; }
+    private static string RetryCustomId(string customId) { var baseId = new string((string.IsNullOrWhiteSpace(customId) ? "item" : customId).Select(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-' or '.' ? ch : '_').ToArray()).Trim('_'); return $"{(baseId.Length == 0 ? "item" : baseId)}_retry_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds():x}"; }
+    private static string FormatBytes(long value) => value >= 1024 * 1024 ? $"{value / 1024d / 1024d:0.#}MB" : $"{Math.Max(1, value / 1024d):0.#}KB";
+
+    public async ValueTask DisposeAsync()
+    {
+        var task = pollingTask;
+        StopPolling();
+        if (task is not null) { try { await task; } catch (OperationCanceledException) { } }
+        pollingGate.Dispose();
+    }
+
+    private sealed record BatchImageJobRow(BatchImageJobDto Job, string ApiKeyId, string ApiKeyName, int ChildCount, bool IsChild)
+    {
+        public string Id => Job.Id;
+        public string TaskName => string.IsNullOrWhiteSpace(Job.TaskName) ? $"批量任务 {Job.CreatedAt.ToLocalTime():yyyy-MM-dd HH:mm}" : Job.TaskName;
+        public string? ParentBatchId => Job.ParentBatchId;
+        public string Status => Job.Status;
+        public string Model => Job.Model;
+        public string Provider => Job.Provider;
+        public int ItemCount => Job.ItemCount;
+        public int SuccessCount => Job.SuccessCount;
+        public int FailCount => Job.FailCount;
+        public double EstimatedCost => Job.EstimatedCost;
+        public double? ActualCost => Job.ActualCost;
+        public DateTimeOffset CreatedAt => Job.CreatedAt;
+        public DateTimeOffset? DownloadedAt => Job.DownloadedAt;
+    }
+    private sealed record PromptDraftRow(string CustomId, string Prompt, int OutputCount, List<BatchImageReferenceImageDto> ReferenceImages);
+    private sealed record ReferenceImageDraft(string Name, string MimeType, string Data, long Size)
+    {
+        public BatchImageReferenceImageDto ToDto() => new() { Id = Name, Type = "reference", MimeType = MimeType, Data = Data };
+    }
+}

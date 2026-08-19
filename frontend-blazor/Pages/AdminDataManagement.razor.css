@@ -1,0 +1,32 @@
+.agent-health-card,
+.data-card,
+.source-inline-card {
+    display: grid;
+    gap: 1rem;
+}
+
+.agent-state { display: inline-flex; padding: .3rem .55rem; border-radius: 999px; font-size: .65rem; font-weight: 750; }
+.agent-state.success { color: #047857; background: #d1fae5; }
+.agent-state.danger { color: #b91c1c; background: #fee2e2; }
+.source-inline-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 1rem; }
+.source-inline-card { padding: 1rem; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
+.source-inline-card h3 { margin: 0; font-size: .88rem; }
+.sub-card-heading,
+.card-actions,
+.row-actions { display: flex; align-items: center; gap: .55rem; }
+.sub-card-heading { justify-content: space-between; }
+.sub-card-heading p { margin: .2rem 0 0; color: var(--muted); font-size: .7rem; }
+.card-actions { flex-wrap: wrap; justify-content: flex-end; }
+.backup-job-form { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: .8rem; padding: .9rem; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
+.modal-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: .9rem; }
+
+@media (max-width: 1000px) {
+    .backup-job-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+    .source-inline-grid,
+    .modal-form-grid,
+    .backup-job-form { grid-template-columns: 1fr; }
+    .sub-card-heading { align-items: flex-start; flex-direction: column; }
+}

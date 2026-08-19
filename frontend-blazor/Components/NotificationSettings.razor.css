@@ -1,0 +1,35 @@
+.notification-card,
+.notify-email-list {
+    display: grid;
+    gap: 1rem;
+}
+
+.notify-email-row {
+    display: grid;
+    grid-template-columns: auto minmax(180px, 1fr) auto auto;
+    align-items: center;
+    gap: .7rem;
+    padding: .7rem;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--surface-soft);
+}
+
+.notify-enabled {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    color: var(--muted);
+    font-size: .68rem;
+}
+
+.notify-enabled input { width: 17px; height: 17px; accent-color: var(--primary); }
+.notify-email-row > input { width: 100%; height: var(--form-control-height); padding: 7px 10px; color: var(--form-control-color); background: var(--form-control-bg); border: 1px solid var(--form-control-border); border-radius: var(--form-control-radius); }
+.notify-email-row > input:focus { border-color: var(--form-control-focus); outline: 0; box-shadow: 0 0 0 3px var(--form-control-focus-ring); }
+.verified-badge { padding: .2rem .45rem; color: #047857; background: #d1fae5; border-radius: 999px; font-size: .6rem; white-space: nowrap; }
+.add-email { width: fit-content; }
+
+@media (max-width: 640px) {
+    .notify-email-row { grid-template-columns: auto 1fr auto; }
+    .verified-badge { grid-column: 2; width: fit-content; }
+}

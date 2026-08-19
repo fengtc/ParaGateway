@@ -1,0 +1,13 @@
+.custom-navigation-settings { display:grid; gap:16px; }
+.custom-navigation-settings > section { overflow:hidden; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.custom-navigation-settings > section > header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding:18px 20px; border-bottom:1px solid var(--line); }
+.custom-navigation-settings h2 { margin:0; color:var(--text); font-size:.98rem; }
+.custom-navigation-settings header p { margin:5px 0 0; color:var(--muted); font-size:.76rem; }
+.empty-copy { margin:0; padding:20px; color:var(--muted); font-size:.76rem; }
+.custom-list { display:grid; gap:10px; padding:16px 20px 20px; }
+.custom-list article { display:flex; align-items:flex-start; gap:10px; padding:14px; border:1px solid var(--line); border-radius:7px; background:var(--surface-soft); }
+.endpoint-grid,.menu-grid { display:grid; flex:1; min-width:0; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:13px 16px; }
+.menu-order { display:grid; gap:5px; }
+.custom-list ::deep input,.custom-list ::deep select,.custom-list ::deep textarea { width:100%; }
+.custom-list ::deep textarea { resize:vertical; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+@media(max-width:760px){.custom-navigation-settings > section > header{flex-direction:column}.custom-navigation-settings > section > header .button{width:100%}.custom-list article{flex-wrap:wrap}.endpoint-grid,.menu-grid{grid-template-columns:1fr}.menu-order{display:flex}.custom-list article>.icon-button:last-child{margin-left:auto}}

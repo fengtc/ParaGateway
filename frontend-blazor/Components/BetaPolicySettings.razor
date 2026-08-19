@@ -1,0 +1,90 @@
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<section class="beta-policy-card" data-testid="beta-policy-settings">
+    <header>
+        <div><h2>Beta 请求策略</h2><p>按 Anthropic Beta 标记决定透传、过滤或阻止，并可按账号类型和模型范围限制。</p></div>
+        <button type="button" class="button primary small" disabled="@(loading || saving)" @onclick="SaveAsync">@(saving ? "保存中…" : "保存策略")</button>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="beta-alert" role="alert"><Icon Name="alert" Size="16" />@error</div>
+    }
+    @if (loading)
+    {
+        <LoadingState Text="正在加载 Beta 策略" />
+    }
+    else if (settings.Rules.Count == 0)
+    {
+        <EmptyState Title="暂无 Beta 策略" Description="服务端未返回内置 Beta 标记规则。" />
+    }
+    else
+    {
+        <div class="beta-rules">
+            @for (var index = 0; index < settings.Rules.Count; index++)
+            {
+                var rule = settings.Rules[index];
+                <article @key="rule.BetaToken">
+                    <header><div><strong>@DisplayName(rule.BetaToken)</strong><code>@rule.BetaToken</code></div><span class="action-badge @rule.Action">@ActionLabel(rule.Action)</span></header>
+                    <div class="beta-grid">
+                        <Field Label="处理动作"><select @bind="rule.Action"><option value="pass">透传</option><option value="filter">过滤标记</option><option value="block">阻止请求</option></select></Field>
+                        <Field Label="适用凭据"><select @bind="rule.Scope"><option value="all">全部账号</option><option value="oauth">仅 OAuth</option><option value="apikey">仅 API Key</option><option value="bedrock">仅 Bedrock</option></select></Field>
+                        @if (rule.Action == "block")
+                        {
+                            <Field Label="阻止提示" Hint="留空使用服务端默认提示" Full="true"><input @bind="rule.ErrorMessage" @bind:event="oninput" /></Field>
+                        }
+                        <Field Label="允许模型" Hint="每行一个模型或通配模式；留空表示所有模型" Full="true"><textarea rows="4" value="@JoinLines(rule.ModelWhitelist)" @onchange="args => rule.ModelWhitelist = SplitLines(args.Value?.ToString())"></textarea></Field>
+                        <Field Label="非白名单回退动作"><select @bind="rule.FallbackAction"><option value="pass">透传</option><option value="filter">过滤标记</option><option value="block">阻止请求</option></select></Field>
+                        @if (rule.FallbackAction == "block")
+                        {
+                            <Field Label="回退阻止提示"><input @bind="rule.FallbackErrorMessage" @bind:event="oninput" /></Field>
+                        }
+                    </div>
+                </article>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private BetaPolicySettingsDto settings = new();
+    private bool loading = true, saving;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { settings = await Api.GetBetaPolicySettingsAsync(); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task SaveAsync()
+    {
+        saving = true; error = null;
+        try
+        {
+            foreach (var rule in settings.Rules)
+            {
+                rule.ModelWhitelist = rule.ModelWhitelist.Select(x => x.Trim()).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                rule.ErrorMessage = rule.ErrorMessage.Trim();
+                rule.FallbackErrorMessage = rule.FallbackErrorMessage.Trim();
+            }
+            settings = await Api.UpdateBetaPolicySettingsAsync(settings);
+            Toasts.Success("Beta 请求策略已保存");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private static List<string> SplitLines(string? value) => (value ?? string.Empty).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    private static string JoinLines(IEnumerable<string> values) => string.Join(Environment.NewLine, values);
+    private static string ActionLabel(string action) => action switch { "block" => "阻止", "filter" => "过滤", _ => "透传" };
+    private static string DisplayName(string token) => token switch
+    {
+        "interleaved-thinking-2025-05-14" => "交错思考",
+        "fine-grained-tool-streaming-2025-05-14" => "细粒度工具流",
+        "context-1m-2025-08-07" => "百万上下文",
+        _ => token
+    };
+}

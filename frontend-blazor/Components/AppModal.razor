@@ -1,0 +1,33 @@
+@if (Open)
+{
+    <div class="modal-backdrop" role="presentation" @onclick="CloseAsync">
+        <section class="modal-dialog" style="max-width: @MaxWidth" role="dialog" aria-modal="true" aria-labelledby="@titleId" @onclick:stopPropagation="true">
+            <header class="modal-header">
+                <h2 id="@titleId">@Title</h2>
+                <button type="button" class="icon-button" title="关闭" aria-label="关闭" @onclick="CloseAsync">
+                    <Icon Name="x" />
+                </button>
+            </header>
+            <div class="modal-body">
+                @ChildContent
+            </div>
+            @if (Footer is not null)
+            {
+                <footer class="modal-footer">@Footer</footer>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private readonly string titleId = $"modal-title-{Guid.NewGuid():N}";
+
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public string Title { get; set; } = string.Empty;
+    [Parameter] public string MaxWidth { get; set; } = "560px";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Footer { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+}

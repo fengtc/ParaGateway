@@ -1,0 +1,168 @@
+@page "/announcements"
+@implements IDisposable
+
+@inject AnnouncementService Announcements
+@inject AuthSession Auth
+@inject ToastService Toasts
+
+<PageTitle>公告 · ParaGateway</PageTitle>
+
+<div class="page-header announcements-page-header">
+    <div>
+        <h1>公告中心</h1>
+        <p>查看平台最新通知与服务动态</p>
+    </div>
+    <div class="button-row">
+        @if (Announcements.UnreadCount > 0)
+        {
+            <button type="button" class="button secondary" disabled="@Announcements.Loading" @onclick="MarkAllReadAsync"><Icon Name="check" Size="15" /> 全部标记已读</button>
+        }
+        <button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@Announcements.Loading" @onclick="RefreshAsync"><Icon Name="refresh" Size="17" /></button>
+    </div>
+</div>
+
+<section class="announcement-summary-strip">
+    <article><span><Icon Name="bell" Size="18" /></span><div><strong>@Announcements.Items.Count</strong><small>公告总数</small></div></article>
+    <article class="unread"><span><Icon Name="info" Size="18" /></span><div><strong>@Announcements.UnreadCount</strong><small>未读公告</small></div></article>
+    <div class="segmented-control compact" role="tablist" aria-label="公告筛选">
+        <button type="button" role="tab" aria-selected="@(!unreadOnly)" class="@(!unreadOnly ? "active" : null)" @onclick="() => unreadOnly = false">全部</button>
+        <button type="button" role="tab" aria-selected="@unreadOnly" class="@(unreadOnly ? "active" : null)" @onclick="() => unreadOnly = true">仅看未读</button>
+    </div>
+</section>
+
+@if (Announcements.Loading && Announcements.Items.Count == 0)
+{
+    <LoadingState Text="正在载入公告" />
+}
+else if (error is not null && Announcements.Items.Count == 0)
+{
+    <ErrorState Message="@error" OnRetry="RefreshAsync" />
+}
+else if (VisibleItems.Count == 0)
+{
+    <EmptyState Title="@(unreadOnly ? "没有未读公告" : "暂无公告")" Description="@(unreadOnly ? "所有公告均已阅读。" : "当前没有需要查看的通知。")" />
+}
+else
+{
+    @if (error is not null)
+    {
+        <div class="inline-alert warning" role="status"><Icon Name="alert" Size="17" /><span>@error</span></div>
+    }
+    <div class="user-announcement-list">
+        @foreach (var item in VisibleItems)
+        {
+            <article class="user-announcement-card @(item.ReadAt is null ? "unread" : null)" @key="item.Id">
+                <button type="button" class="announcement-card-main" @onclick="() => OpenDetailAsync(item)">
+                    <span class="announcement-card-icon"><Icon Name="@(item.ReadAt is null ? "info" : "circle-check")" Size="20" /></span>
+                    <span class="announcement-card-copy">
+                        <span class="announcement-card-title">
+                            <strong>@item.Title</strong>
+                            @if (item.ReadAt is null) { <em><i></i>未读</em> } else { <em class="read">已读</em> }
+                            @if (string.Equals(item.NotifyMode, "popup", StringComparison.OrdinalIgnoreCase)) { <small>重要通知</small> }
+                        </span>
+                        <time><Icon Name="clock" Size="13" /> @UiFormat.RelativeDateTime(item.CreatedAt)</time>
+                        <span class="announcement-card-preview">@Preview(item.Content)</span>
+                    </span>
+                    <Icon Name="chevron-right" Size="18" />
+                </button>
+                @if (item.ReadAt is null)
+                {
+                    <button type="button" class="announcement-card-read" @onclick="() => MarkReadAsync(item)"><Icon Name="check" Size="14" />标记已读</button>
+                }
+            </article>
+        }
+    </div>
+}
+
+<AppModal Open="@(detailOpen && selected is not null)" Title="@(selected?.Title ?? "公告详情")" MaxWidth="780px" OnClose="CloseDetail">
+    <ChildContent>
+        @if (selected is not null)
+        {
+            <div class="announcement-detail-meta">
+                <span class="status-badge">公告</span>
+                @if (string.Equals(selected.NotifyMode, "popup", StringComparison.OrdinalIgnoreCase)) { <span class="status-badge warning">重要通知</span> }
+                <span><Icon Name="clock" Size="14" /> @UiFormat.RelativeDateTime(selected.CreatedAt)</span>
+                <span>@(selected.ReadAt is null ? "未读" : "已读")</span>
+            </div>
+            <article class="announcement-page-markdown markdown-body">@((MarkupString)MarkdownRenderer.ToSafeHtml(selected.Content))</article>
+        }
+    </ChildContent>
+    <Footer>
+        @if (selected?.ReadAt is null)
+        {
+            <button type="button" class="button primary" @onclick="MarkSelectedReadAsync"><Icon Name="check" Size="15" /> 标记已读</button>
+        }
+        <button type="button" class="button secondary" @onclick="CloseDetail">关闭</button>
+    </Footer>
+</AppModal>
+
+@code {
+    private bool unreadOnly;
+    private bool detailOpen;
+    private string? error;
+    private UserAnnouncementDto? selected;
+
+    private List<UserAnnouncementDto> VisibleItems => Announcements.Items
+        .Where(item => !unreadOnly || item.ReadAt is null)
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Announcements.Changed += OnAnnouncementsChanged;
+        Announcements.SetViewer(Auth.User?.Id);
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        error = null;
+        try { await Announcements.FetchAsync(force: true); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task OpenDetailAsync(UserAnnouncementDto item)
+    {
+        selected = item;
+        detailOpen = true;
+        if (item.ReadAt is null) await MarkReadAsync(item, showToast: false);
+    }
+
+    private void CloseDetail() { detailOpen = false; selected = null; }
+
+    private Task MarkSelectedReadAsync() => selected is null ? Task.CompletedTask : MarkReadAsync(selected);
+
+    private async Task MarkReadAsync(UserAnnouncementDto item, bool showToast = true)
+    {
+        error = null;
+        try
+        {
+            await Announcements.MarkReadAsync(item.Id);
+            if (showToast) Toasts.Success("已标记为已读");
+        }
+        catch (ApiException ex) { error = ex.Message; Toasts.Error(ex.Message); }
+    }
+
+    private async Task MarkAllReadAsync()
+    {
+        error = null;
+        try
+        {
+            await Announcements.MarkAllReadAsync();
+            Toasts.Success("全部公告已标记为已读");
+        }
+        catch (ApiException ex) { error = ex.Message; Toasts.Error(ex.Message); }
+    }
+
+    private static string Preview(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return "暂无内容";
+        var safeHtml = MarkdownRenderer.ToSafeHtml(content);
+        var value = System.Text.RegularExpressions.Regex.Replace(safeHtml, "<[^>]+>", " ");
+        value = System.Net.WebUtility.HtmlDecode(value);
+        value = System.Text.RegularExpressions.Regex.Replace(value, @"\s+", " ").Trim();
+        return value.Length <= 150 ? value : $"{value[..150]}…";
+    }
+
+    private void OnAnnouncementsChanged() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Announcements.Changed -= OnAnnouncementsChanged;
+}

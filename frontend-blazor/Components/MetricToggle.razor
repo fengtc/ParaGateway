@@ -1,0 +1,10 @@
+<div class="metric-toggle" role="group" aria-label="统计指标">
+    <button type="button" class="@(Value == "tokens" ? "active" : null)" @onclick='() => ChangeAsync("tokens")'>Token</button>
+    <button type="button" class="@(Value == "actual_cost" ? "active" : null)" @onclick='() => ChangeAsync("actual_cost")'>费用</button>
+</div>
+
+@code {
+    [Parameter] public string Value { get; set; } = "tokens";
+    [Parameter] public EventCallback<string> OnChange { get; set; }
+    private Task ChangeAsync(string value) => OnChange.InvokeAsync(value);
+}

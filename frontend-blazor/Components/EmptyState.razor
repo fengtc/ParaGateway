@@ -1,0 +1,18 @@
+<div class="state-panel empty-state">
+    <span class="state-icon"><Icon Name="inbox" Size="24" /></span>
+    <strong>@Title</strong>
+    @if (!string.IsNullOrWhiteSpace(Description))
+    {
+        <span>@Description</span>
+    }
+    @if (Action is not null)
+    {
+        <div class="state-action">@Action</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "暂无数据";
+    [Parameter] public string? Description { get; set; }
+    [Parameter] public RenderFragment? Action { get; set; }
+}

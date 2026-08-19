@@ -1,0 +1,50 @@
+@page "/admin/error-passthrough"
+@using System.Globalization
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>错误透传规则 · ParaGateway</PageTitle>
+<div class="page-header"><div><h1>错误透传规则</h1><p>按错误码、关键词和平台控制上游错误是否原样返回。</p></div><button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 新建规则</button></div>
+
+@if (loading) { <LoadingState Text="正在载入规则" /> }
+else if (error is not null) { <ErrorState Message="@error" OnRetry="LoadAsync" /> }
+else if (rules.Count == 0) { <EmptyState Title="暂无错误透传规则" Description="创建规则后，Go 网关会按优先级匹配。"><Action><button type="button" class="button primary small" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> 新建规则</button></Action></EmptyState> }
+else
+{
+    <DxGrid Data="@rules" KeyFieldName="Id" ShowFilterRow="true" ShowSearchPanel="true" PageSize="20" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer">
+        <Columns>
+            <DxGridDataColumn FieldName="Name" Caption="名称" MinWidth="180" />
+            <DxGridDataColumn FieldName="Priority" Caption="优先级" Width="90" />
+            <DxGridDataColumn Caption="匹配条件" MinWidth="220"><CellDisplayTemplate Context="context">@{ var row = (ErrorPassthroughRuleDto)context.DataItem; }<span>@(row.ErrorCodes.Count == 0 ? "任意错误码" : string.Join(", ", row.ErrorCodes))</span><small class="cell-subtext">@(row.Keywords.Count == 0 ? "无关键词" : string.Join(", ", row.Keywords))</small></CellDisplayTemplate></DxGridDataColumn>
+            <DxGridDataColumn FieldName="MatchMode" Caption="模式" Width="90" />
+            <DxGridDataColumn Caption="状态" Width="95"><CellDisplayTemplate Context="context">@{ var row = (ErrorPassthroughRuleDto)context.DataItem; }<span class="status-badge @(row.Enabled ? "success" : "neutral")">@(row.Enabled ? "启用" : "停用")</span></CellDisplayTemplate></DxGridDataColumn>
+            <DxGridDataColumn Caption="透传" Width="130"><CellDisplayTemplate Context="context">@{ var row = (ErrorPassthroughRuleDto)context.DataItem; }@(row.PassthroughCode ? "状态码" : "自定义码") / @(row.PassthroughBody ? "响应体" : "自定义消息")</CellDisplayTemplate></DxGridDataColumn>
+            <DxGridDataColumn Caption="操作" Width="145"><CellDisplayTemplate Context="context">@{ var row = (ErrorPassthroughRuleDto)context.DataItem; }<button type="button" class="icon-button" title="编辑" aria-label="编辑" @onclick="() => OpenEdit(row)"><Icon Name="pencil" Size="16" /></button><button type="button" class="icon-button danger" title="删除" aria-label="删除" @onclick="() => DeleteAsync(row)"><Icon Name="trash" Size="16" /></button></CellDisplayTemplate></DxGridDataColumn>
+        </Columns>
+    </DxGrid>
+}
+
+<AppModal Open="editorOpen" Title="@(editing is null ? "新建错误透传规则" : "编辑错误透传规则")" MaxWidth="760px" OnClose="CloseEditor">
+    <ChildContent><EditForm id="error-rule-editor" Model="form" OnValidSubmit="SaveAsync" FormName="error-rule-editor"><DataAnnotationsValidator />@if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }<div class="form-grid"><div class="form-field full"><label for="error-rule-name">名称</label><InputText id="error-rule-name" @bind-Value="form.Name" /></div><div class="form-field"><label for="error-rule-priority">优先级</label><InputNumber id="error-rule-priority" @bind-Value="form.Priority" /></div><div class="form-field"><label for="error-rule-mode">匹配模式</label><InputSelect id="error-rule-mode" @bind-Value="form.MatchMode"><option value="any">任一条件</option><option value="all">全部条件</option></InputSelect></div><div class="form-field full"><label for="error-rule-codes">错误码（逗号分隔）</label><InputText id="error-rule-codes" @bind-Value="form.ErrorCodes" placeholder="429, 500, 529" /></div><div class="form-field full"><label for="error-rule-keywords">关键词（逗号分隔）</label><InputText id="error-rule-keywords" @bind-Value="form.Keywords" /></div><div class="form-field full"><label for="error-rule-platforms">平台（逗号分隔，留空表示全部）</label><InputText id="error-rule-platforms" @bind-Value="form.Platforms" placeholder="openai, anthropic" /></div><div class="form-field"><label for="error-rule-response">自定义响应码</label><InputNumber id="error-rule-response" @bind-Value="form.ResponseCode" /></div><div class="form-field full"><label for="error-rule-message">自定义消息</label><InputTextArea id="error-rule-message" @bind-Value="form.CustomMessage" rows="2" /></div><div class="form-field full"><label for="error-rule-description">说明</label><InputTextArea id="error-rule-description" @bind-Value="form.Description" rows="2" /></div><label class="toggle-row"><InputCheckbox @bind-Value="form.Enabled" /> 启用</label><label class="toggle-row"><InputCheckbox @bind-Value="form.PassthroughCode" /> 透传上游状态码</label><label class="toggle-row"><InputCheckbox @bind-Value="form.PassthroughBody" /> 透传上游响应体</label><label class="toggle-row"><InputCheckbox @bind-Value="form.SkipMonitoring" /> 跳过渠道监控</label></div></EditForm></ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseEditor">取消</button><button type="submit" form="error-rule-editor" class="button primary" disabled="@saving">保存</button></Footer>
+</AppModal>
+
+@code {
+    private List<ErrorPassthroughRuleDto> rules = [];
+    private ErrorPassthroughRuleDto? editing;
+    private ErrorPassthroughRuleForm form = new();
+    private bool loading = true, saving, editorOpen;
+    private string? error, modalError;
+    protected override Task OnInitializedAsync() => LoadAsync();
+    private async Task LoadAsync() { loading = true; error = null; try { rules = await Api.GetErrorPassthroughRulesAsync(); } catch (ApiException ex) { error = ex.Message; } finally { loading = false; } }
+    private void OpenCreate() { editing = null; form = new(); modalError = null; editorOpen = true; }
+    private void OpenEdit(ErrorPassthroughRuleDto row) { editing = row; form = ErrorPassthroughRuleForm.From(row); modalError = null; editorOpen = true; }
+    private void CloseEditor() => editorOpen = false;
+    private async Task SaveAsync() { saving = true; modalError = null; try { var payload = new Dictionary<string, object?> { ["name"] = form.Name.Trim(), ["enabled"] = form.Enabled, ["priority"] = form.Priority, ["error_codes"] = ParseInts(form.ErrorCodes), ["keywords"] = Split(form.Keywords), ["match_mode"] = form.MatchMode, ["platforms"] = Split(form.Platforms), ["passthrough_code"] = form.PassthroughCode, ["response_code"] = form.ResponseCode, ["passthrough_body"] = form.PassthroughBody, ["custom_message"] = NullIfEmpty(form.CustomMessage), ["skip_monitoring"] = form.SkipMonitoring, ["description"] = NullIfEmpty(form.Description) }; if (editing is null) await Api.CreateErrorPassthroughRuleAsync(payload); else await Api.UpdateErrorPassthroughRuleAsync(editing.Id, payload); editorOpen = false; Toasts.Success("错误透传规则已保存"); await LoadAsync(); } catch (ApiException ex) { modalError = ex.Message; } finally { saving = false; } }
+    private async Task DeleteAsync(ErrorPassthroughRuleDto row) { if (!await JS.InvokeAsync<bool>("confirm", $"确认删除规则“{row.Name}”？")) return; try { await Api.DeleteErrorPassthroughRuleAsync(row.Id); Toasts.Success("规则已删除"); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } }
+    private static string? NullIfEmpty(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static List<string> Split(string value) => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    private static List<int> ParseInts(string value) => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => int.TryParse(x, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 0).Where(x => x > 0).Distinct().ToList();
+}

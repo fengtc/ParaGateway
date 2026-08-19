@@ -1,0 +1,28 @@
+.distribution-legend {
+    display: grid;
+    gap: 5px;
+    margin-top: -8px;
+}
+
+.distribution-legend > div {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    color: var(--muted);
+    font-size: .68rem;
+}
+
+.distribution-legend span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.distribution-legend strong {
+    flex: 0 0 auto;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+}

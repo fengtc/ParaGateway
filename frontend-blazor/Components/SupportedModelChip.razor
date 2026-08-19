@@ -1,0 +1,114 @@
+@using System.Globalization
+
+<span class="supported-model-host platform-@PlatformTone(EffectivePlatform)">
+    <button type="button"
+            class="supported-model-chip"
+            aria-label="@($"查看 {Model.Name} 定价")">
+        <Icon Name="sparkles" Size="12" />
+        <span>@Model.Name</span>
+    </button>
+    <span class="supported-model-popover" role="tooltip">
+        <span class="pricing-popover-header">
+            <strong>@Model.Name</strong>
+            <span>@(string.IsNullOrWhiteSpace(Model.Platform) ? EffectivePlatform : Model.Platform)</span>
+        </span>
+        <span class="pricing-popover-body">
+            @if (Model.Pricing is null)
+            {
+                <span class="pricing-empty">未配置定价</span>
+            }
+            else
+            {
+                var pricing = Model.Pricing;
+                <span class="pricing-row"><span>计费模式</span><strong>@BillingModeLabel(pricing.BillingMode)</strong></span>
+                @if (pricing.BillingMode == "token")
+                {
+                    <span class="pricing-row"><span>输入</span><strong>@FormatPrice(pricing.InputPrice, PerMillion) <small>/ 1M token</small></strong></span>
+                    <span class="pricing-row"><span>输出</span><strong>@FormatPrice(pricing.OutputPrice, PerMillion) <small>/ 1M token</small></strong></span>
+                    <span class="pricing-row"><span>缓存写入</span><strong>@FormatPrice(pricing.CacheWritePrice, PerMillion) <small>/ 1M token</small></strong></span>
+                    <span class="pricing-row"><span>缓存读取</span><strong>@FormatPrice(pricing.CacheReadPrice, PerMillion) <small>/ 1M token</small></strong></span>
+                    @if (pricing.ImageInputPrice is > 0)
+                    {
+                        <span class="pricing-row"><span>图片输入</span><strong>@FormatPrice(pricing.ImageInputPrice, PerMillion) <small>/ 1M token</small></strong></span>
+                    }
+                    @if (pricing.ImageOutputPrice is > 0)
+                    {
+                        <span class="pricing-row"><span>图片输出</span><strong>@FormatPrice(pricing.ImageOutputPrice, PerMillion) <small>/ 1M token</small></strong></span>
+                    }
+                }
+                else if (pricing.BillingMode == "per_request")
+                {
+                    <span class="pricing-row"><span>每次请求</span><strong>@FormatPrice(pricing.PerRequestPrice, 1) <small>/ 次</small></strong></span>
+                }
+                else if (pricing.BillingMode is "image" or "video")
+                {
+                    var unitPrice = pricing.ImageOutputPrice ?? pricing.PerRequestPrice;
+                    <span class="pricing-row"><span>@(pricing.BillingMode == "video" ? "视频输出" : "图片输出")</span><strong>@FormatPrice(unitPrice, 1) <small>/ 次</small></strong></span>
+                }
+
+                @if (pricing.Intervals.Count > 0)
+                {
+                    <span class="pricing-intervals">
+                        <strong>阶梯定价</strong>
+                        @foreach (var interval in pricing.Intervals)
+                        {
+                            <span class="pricing-row interval-row">
+                                <span>@IntervalLabel(interval)</span>
+                                <strong>@FormatInterval(interval, pricing.BillingMode)</strong>
+                            </span>
+                        }
+                    </span>
+                }
+            }
+        </span>
+    </span>
+</span>
+
+@code {
+    private const double PerMillion = 1_000_000;
+
+    [Parameter, EditorRequired]
+    public UserSupportedModelDto Model { get; set; } = new();
+
+    [Parameter]
+    public string PlatformHint { get; set; } = string.Empty;
+
+    private string EffectivePlatform => string.IsNullOrWhiteSpace(Model.Platform) ? PlatformHint : Model.Platform;
+
+    private static string BillingModeLabel(string? mode) => mode switch
+    {
+        "token" => "按 Token",
+        "per_request" => "按次",
+        "image" => "按图片",
+        "video" => "按视频",
+        _ => "-"
+    };
+
+    private static string FormatPrice(double? value, double scale)
+    {
+        if (!value.HasValue) return "-";
+        return $"${(value.Value * scale).ToString("0.##########", CultureInfo.InvariantCulture)}";
+    }
+
+    private static string IntervalLabel(UserPricingIntervalDto interval) =>
+        !string.IsNullOrWhiteSpace(interval.TierLabel)
+            ? interval.TierLabel
+            : $"({interval.MinTokens}, {(interval.MaxTokens.HasValue ? interval.MaxTokens.Value.ToString(CultureInfo.InvariantCulture) : "∞")}]";
+
+    private static string FormatInterval(UserPricingIntervalDto interval, string mode)
+    {
+        if (mode is "per_request" or "image" or "video") return FormatPrice(interval.PerRequestPrice, 1);
+        return $"{FormatPrice(interval.InputPrice, PerMillion)} / {FormatPrice(interval.OutputPrice, PerMillion)}";
+    }
+
+    private static string PlatformTone(string? platform) => platform?.Trim().ToLowerInvariant() switch
+    {
+        "anthropic" => "anthropic",
+        "openai" => "openai",
+        "gemini" => "gemini",
+        "antigravity" => "antigravity",
+        "grok" => "grok",
+        "composite" => "composite",
+        _ => "default"
+    };
+}

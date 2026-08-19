@@ -1,0 +1,17 @@
+.quota-section {
+    display: grid;
+    gap: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+}
+
+.quota-heading h3 { margin: 0; font-size: .9rem; }
+.quota-heading p { margin: .2rem 0 0; color: var(--muted); font-size: .72rem; line-height: 1.5; }
+.quota-table-wrap { overflow-x: auto; }
+.quota-table { width: 100%; min-width: 560px; border-collapse: collapse; }
+.quota-table th,
+.quota-table td { padding: .5rem; text-align: left; border-bottom: 1px solid var(--line); }
+.quota-table th { color: var(--muted); font-size: .65rem; font-weight: 700; }
+.quota-table code { color: var(--ink); font-size: .7rem; }
+.quota-table input { width: 100%; height: var(--form-control-height); padding: 7px 10px; color: var(--form-control-color); background: var(--form-control-bg); border: 1px solid var(--form-control-border); border-radius: var(--form-control-radius); }
+.quota-table input:focus { border-color: var(--form-control-focus); outline: 0; box-shadow: 0 0 0 3px var(--form-control-focus-ring); }

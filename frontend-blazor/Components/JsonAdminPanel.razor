@@ -1,0 +1,96 @@
+@inject ToastService Toasts
+
+<div class="page-header">
+    <div>
+        <h1>@Title</h1>
+        <p>@Description</p>
+    </div>
+    <div class="page-actions">
+        <button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button>
+        @if (Save is not null)
+        {
+            <button type="button" class="button primary" disabled="@(loading || saving || string.IsNullOrWhiteSpace(json))" @onclick="SaveAsync">
+                <Icon Name="save" Size="16" /> 保存 JSON
+            </button>
+        }
+    </div>
+</div>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入配置" />
+}
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else
+{
+    <section class="content-section json-panel">
+        <div class="section-header">
+            <div><h2>官方数据</h2><p>字段按 Go API 原样保留，未知字段不会被前端丢弃。</p></div>
+            <button type="button" class="button secondary small" @onclick="FormatJson">格式化</button>
+        </div>
+        @if (modalError is not null)
+        {
+            <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div>
+        }
+        <textarea class="json-editor" @bind="json" spellcheck="false" aria-label="JSON 配置"></textarea>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Description { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public Func<Task<JsonElement>> Load { get; set; } = default!;
+    [Parameter] public Func<JsonElement, Task<JsonElement>>? Save { get; set; }
+
+    private bool loading = true;
+    private bool saving;
+    private string? error;
+    private string? modalError;
+    private string json = "{}";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            var value = await Load();
+            json = JsonSerializer.Serialize(value, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private void FormatJson()
+    {
+        modalError = null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            json = JsonSerializer.Serialize(document.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (JsonException ex) { modalError = $"JSON 格式不正确：{ex.Message}"; }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Save is null) return;
+        modalError = null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            saving = true;
+            var result = await Save(document.RootElement.Clone());
+            json = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+            Toasts.Success("配置已保存");
+        }
+        catch (JsonException ex) { modalError = $"JSON 格式不正确：{ex.Message}"; }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+}

@@ -1,0 +1,274 @@
+@using System.ComponentModel.DataAnnotations
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<AppModal Open="Open" Title="用户属性配置" MaxWidth="820px" OnClose="CloseAsync">
+    <ChildContent>
+        <div class="attribute-config-header">
+            <p>配置用户的自定义属性字段。</p>
+            <button type="button" class="button primary small" @onclick="OpenCreate">
+                <Icon Name="plus" Size="15" /> 添加属性
+            </button>
+        </div>
+
+        @if (loading)
+        {
+            <LoadingState Text="正在载入用户属性" />
+        }
+        else if (error is not null)
+        {
+            <ErrorState Message="@error" OnRetry="LoadAsync" />
+        }
+        else if (definitions.Count == 0)
+        {
+            <EmptyState Title="暂无自定义属性" Description="点击上方按钮添加自定义属性。" />
+        }
+        else
+        {
+            <div class="attribute-definition-list">
+                @foreach (var definition in definitions.OrderBy(x => x.DisplayOrder))
+                {
+                    <div class="attribute-definition-row" @key="definition.Id">
+                        <span class="drag-handle" title="属性展示顺序"><Icon Name="menu" Size="16" /></span>
+                        <div class="attribute-definition-info">
+                            <div>
+                                <strong>@definition.Name</strong>
+                                <code>@definition.Key</code>
+                                @if (definition.Required) { <span class="status-badge danger">必填</span> }
+                                @if (!definition.Enabled) { <span class="status-badge neutral">已停用</span> }
+                            </div>
+                            <small><span class="attribute-type">@TypeLabel(definition.Type)</span>@if (!string.IsNullOrWhiteSpace(definition.Description)) { <span>@definition.Description</span> }</small>
+                        </div>
+                        <div class="attribute-definition-actions">
+                            <button type="button" class="icon-button" title="编辑" aria-label="编辑 @definition.Name" @onclick="() => OpenEdit(definition)"><Icon Name="pencil" Size="15" /></button>
+                            <button type="button" class="icon-button danger-text" title="删除" aria-label="删除 @definition.Name" @onclick="() => DeleteAsync(definition)"><Icon Name="trash" Size="15" /></button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseAsync">关闭</button></Footer>
+</AppModal>
+
+<AppModal Open="editorOpen" Title="@(editingDefinition is null ? "添加属性" : "编辑属性")" MaxWidth="560px" OnClose="CloseEditor">
+    <ChildContent>
+        <EditForm id="attribute-config-form" Model="attributeForm" OnValidSubmit="SaveAsync" FormName="attribute-config-form">
+            <DataAnnotationsValidator />
+            <div class="form-grid attribute-form-grid">
+                <div class="form-field full">
+                    <label for="attribute-config-key">属性键</label>
+                    <InputText id="attribute-config-key" @bind-Value="attributeForm.Key" disabled="@(editingDefinition is not null)" placeholder="例如：company_name" />
+                    <small class="field-hint">以字母开头，只能包含字母、数字和下划线。</small>
+                    <ValidationMessage For="() => attributeForm.Key" />
+                </div>
+                <div class="form-field full"><label for="attribute-config-name">显示名称</label><InputText id="attribute-config-name" @bind-Value="attributeForm.Name" placeholder="例如：公司名称" /><ValidationMessage For="() => attributeForm.Name" /></div>
+                <div class="form-field full"><label for="attribute-config-type">字段类型</label><InputSelect id="attribute-config-type" @bind-Value="attributeForm.Type"><option value="text">文本</option><option value="textarea">多行文本</option><option value="number">数字</option><option value="email">邮箱</option><option value="url">网址</option><option value="date">日期</option><option value="select">单选</option><option value="multi_select">多选</option></InputSelect></div>
+
+                @if (attributeForm.Type is "select" or "multi_select")
+                {
+                    <div class="attribute-options-editor full">
+                        <div class="attribute-options-heading"><label>选项</label><button type="button" class="button secondary small" @onclick="AddOption"><Icon Name="plus" Size="14" /> 添加选项</button></div>
+                        @for (var index = 0; index < attributeForm.Options.Count; index++)
+                        {
+                            var optionIndex = index;
+                            <div class="attribute-option-row" @key="attributeForm.Options[optionIndex]">
+                                <InputText @bind-Value="attributeForm.Options[optionIndex].Value" placeholder="选项值" />
+                                <InputText @bind-Value="attributeForm.Options[optionIndex].Label" placeholder="显示文字" />
+                                <button type="button" class="icon-button danger-text" title="删除选项" @onclick="() => RemoveOption(optionIndex)"><Icon Name="x" Size="15" /></button>
+                            </div>
+                        }
+                        @if (attributeForm.Options.Count == 0) { <small class="field-hint">单选或多选属性至少需要一个选项。</small> }
+                    </div>
+                }
+
+                <div class="form-field full"><label for="attribute-config-description">字段说明</label><InputText id="attribute-config-description" @bind-Value="attributeForm.Description" /></div>
+                <div class="form-field full"><label for="attribute-config-placeholder">占位提示</label><InputText id="attribute-config-placeholder" @bind-Value="attributeForm.Placeholder" /></div>
+                <label class="toggle-row"><InputCheckbox @bind-Value="attributeForm.Required" /><span><strong>必填</strong><small>编辑用户时提示必须填写</small></span></label>
+                <label class="toggle-row"><InputCheckbox @bind-Value="attributeForm.Enabled" /><span><strong>启用</strong><small>在用户列表和编辑表单中显示</small></span></label>
+            </div>
+            @if (modalError is not null) { <div class="inline-alert danger"><Icon Name="alert" Size="16" /><span>@modalError</span></div> }
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" disabled="@saving" @onclick="CloseEditor">取消</button><button type="submit" form="attribute-config-form" class="button primary" disabled="@saving">@(saving ? "保存中…" : editingDefinition is null ? "创建" : "更新")</button></Footer>
+</AppModal>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private readonly string[] supportedTypes = ["text", "textarea", "number", "email", "url", "date", "select", "multi_select"];
+    private List<UserAttributeDefinitionDto> definitions = [];
+    private bool loading;
+    private bool saving;
+    private bool editorOpen;
+    private bool wasOpen;
+    private string? error;
+    private string? modalError;
+    private UserAttributeDefinitionDto? editingDefinition;
+    private AttributeDefinitionForm attributeForm = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Open && !wasOpen) await LoadAsync();
+        if (!Open) editorOpen = false;
+        wasOpen = Open;
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try { definitions = await Api.GetUserAttributeDefinitionsAsync(); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private void OpenCreate()
+    {
+        editingDefinition = null;
+        attributeForm = new();
+        modalError = null;
+        editorOpen = true;
+    }
+
+    private void OpenEdit(UserAttributeDefinitionDto definition)
+    {
+        editingDefinition = definition;
+        attributeForm = new AttributeDefinitionForm
+        {
+            Key = definition.Key,
+            Name = definition.Name,
+            Type = supportedTypes.Contains(definition.Type) ? definition.Type : "text",
+            Description = definition.Description,
+            Placeholder = definition.Placeholder,
+            Required = definition.Required,
+            Enabled = definition.Enabled,
+            Options = definition.Options.Select(x => new AttributeOptionForm { Value = x.Value, Label = x.Label }).ToList()
+        };
+        modalError = null;
+        editorOpen = true;
+    }
+
+    private void CloseEditor()
+    {
+        if (!saving) editorOpen = false;
+    }
+
+    private void AddOption() => attributeForm.Options.Add(new());
+    private void RemoveOption(int index)
+    {
+        if (index >= 0 && index < attributeForm.Options.Count) attributeForm.Options.RemoveAt(index);
+    }
+
+    private async Task SaveAsync()
+    {
+        modalError = null;
+        attributeForm.Key = attributeForm.Key.Trim();
+        attributeForm.Name = attributeForm.Name.Trim();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(attributeForm.Key, "^[a-zA-Z][a-zA-Z0-9_]*$")) { modalError = "属性键格式不正确"; return; }
+        if (!supportedTypes.Contains(attributeForm.Type)) { modalError = "字段类型不受支持"; return; }
+        if (attributeForm.Type is "select" or "multi_select")
+        {
+            if (attributeForm.Options.Count == 0) { modalError = "请至少添加一个选项"; return; }
+            if (attributeForm.Options.Any(x => string.IsNullOrWhiteSpace(x.Value) || string.IsNullOrWhiteSpace(x.Label))) { modalError = "请完整填写每个选项的值和显示文字"; return; }
+            if (attributeForm.Options.Select(x => x.Value.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count() != attributeForm.Options.Count) { modalError = "选项值不能重复"; return; }
+        }
+
+        saving = true;
+        try
+        {
+            var options = attributeForm.Type is "select" or "multi_select"
+                ? attributeForm.Options.Select(x => new { value = x.Value.Trim(), label = x.Label.Trim() }).ToArray()
+                : [];
+            if (editingDefinition is null)
+            {
+                await Api.CreateUserAttributeDefinitionAsync(new
+                {
+                    key = attributeForm.Key,
+                    name = attributeForm.Name,
+                    type = attributeForm.Type,
+                    description = attributeForm.Description.Trim(),
+                    placeholder = attributeForm.Placeholder.Trim(),
+                    required = attributeForm.Required,
+                    enabled = attributeForm.Enabled,
+                    options
+                });
+                Toasts.Success("用户属性已创建");
+            }
+            else
+            {
+                await Api.UpdateUserAttributeDefinitionAsync(editingDefinition.Id, new
+                {
+                    name = attributeForm.Name,
+                    type = attributeForm.Type,
+                    description = attributeForm.Description.Trim(),
+                    placeholder = attributeForm.Placeholder.Trim(),
+                    required = attributeForm.Required,
+                    enabled = attributeForm.Enabled,
+                    options
+                });
+                Toasts.Success("用户属性已更新");
+            }
+            editorOpen = false;
+            await LoadAsync();
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task DeleteAsync(UserAttributeDefinitionDto definition)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认删除属性“{definition.Name}”？该属性已保存的用户值也会被删除。")) return;
+        try
+        {
+            await Api.DeleteUserAttributeDefinitionAsync(definition.Id);
+            Toasts.Success("用户属性已删除");
+            await LoadAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task CloseAsync()
+    {
+        if (saving) return;
+        editorOpen = false;
+        await OnClose.InvokeAsync();
+    }
+
+    private static string TypeLabel(string type) => type switch
+    {
+        "text" => "文本",
+        "textarea" => "多行文本",
+        "number" => "数字",
+        "email" => "邮箱",
+        "url" => "网址",
+        "date" => "日期",
+        "select" => "单选",
+        "multi_select" => "多选",
+        _ => type
+    };
+
+    private sealed class AttributeDefinitionForm
+    {
+        [Required(ErrorMessage = "请输入属性键")]
+        public string Key { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "请输入显示名称")]
+        public string Name { get; set; } = string.Empty;
+
+        public string Type { get; set; } = "text";
+        public string Description { get; set; } = string.Empty;
+        public string Placeholder { get; set; } = string.Empty;
+        public bool Required { get; set; }
+        public bool Enabled { get; set; } = true;
+        public List<AttributeOptionForm> Options { get; set; } = [];
+    }
+
+    private sealed class AttributeOptionForm
+    {
+        public string Value { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+    }
+}

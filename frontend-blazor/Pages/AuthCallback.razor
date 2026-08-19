@@ -1,0 +1,677 @@
+@page "/auth/callback"
+@page "/auth/oauth/callback"
+@page "/auth/linuxdo/callback"
+@page "/auth/wechat/callback"
+@page "/auth/dingtalk/callback"
+@page "/auth/dingtalk/email-completion"
+@page "/auth/oidc/callback"
+@implements IDisposable
+@inject ApiClient Api
+@inject IJSRuntime Js
+@inject NavigationManager Navigation
+@inject ToastService Toasts
+@inject AuthSession Auth
+
+<PageTitle>OAuth 回调 · ParaGateway</PageTitle>
+
+@if (userFlow)
+{
+<div class="public-tool-page narrow-content oauth-user-callback">
+    <div>
+        <h1>正在完成登录</h1>
+        <p>正在验证第三方授权信息，请稍候。</p>
+    </div>
+    @if (processing) { <LoadingState Text="正在验证授权信息" /> }
+    else
+    {
+        @if (needsRegistration)
+        {
+            <CaptchaChallenge @ref="captcha" TurnstileEnabled="publicSettings.TurnstileEnabled" TurnstileSiteKey="publicSettings.TurnstileSiteKey" TencentEnabled="publicSettings.TencentCaptchaEnabled" TencentAppId="publicSettings.TencentCaptchaAppId" TencentRegion="publicSettings.TencentCaptchaRegion" AliyunEnabled="publicSettings.AliyunCaptchaEnabled" AliyunSceneId="publicSettings.AliyunCaptchaSceneId" AliyunPrefix="publicSettings.AliyunCaptchaPrefix" AliyunRegion="publicSettings.AliyunCaptchaRegion" />
+        }
+        @if (!string.IsNullOrWhiteSpace(userError))
+        {
+            <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@userError</span></div>
+        }
+        @if (adoptionRequired && (suggestedDisplayName is not null || suggestedAvatarUrl is not null))
+        {
+            <section class="content-section oauth-profile-choice">
+                <div class="section-header"><div><h2>使用第三方资料</h2><p>请选择是否将第三方资料用于本地账户。</p></div></div>
+                @if (!string.IsNullOrWhiteSpace(suggestedDisplayName)) { <label class="check-row"><input type="checkbox" @bind="adoptDisplayName" /><span>使用显示名称：@suggestedDisplayName</span></label> }
+                @if (!string.IsNullOrWhiteSpace(suggestedAvatarUrl)) { <label class="check-row"><input type="checkbox" @bind="adoptAvatar" /><span>使用头像地址：@suggestedAvatarUrl</span></label> }
+            </section>
+        }
+        @if (needsAdoptionConfirmation)
+        {
+            <section class="content-section"><div class="section-header"><div><h2>确认登录</h2><p>确认资料选择后继续登录。</p></div></div><button type="button" class="button primary" @onclick="ContinueAdoptionAsync" disabled="@busy">@(busy ? "正在继续…" : "继续登录")</button></section>
+        }
+        else if (needsChooser)
+        {
+            <section class="content-section"><div class="section-header"><div><h2>选择账户操作</h2><p>该第三方身份尚未绑定，请选择创建新账户或绑定已有账户。</p></div></div><div class="button-row"><button type="button" class="button primary" @onclick="ChooseCreateAccount" disabled="@busy">创建新账户</button><button type="button" class="button secondary" @onclick="ChooseBindLogin" disabled="@busy">绑定已有账户</button></div></section>
+        }
+        else if (needsProviderRegistration)
+        {
+            <section class="content-section"><div class="section-header"><div><h2>完成账户注册</h2><p>请输入邀请码以完成 @provider OAuth 注册。</p></div></div><EditForm Model="invitation" OnValidSubmit="CompleteProviderRegistrationAsync" FormName="oauth-provider-registration"><DataAnnotationsValidator /><div class="form-field"><label for="oauth-invitation-only">邀请码</label><InputText id="oauth-invitation-only" @bind-Value="invitation.Code" /></div><button type="submit" class="button primary" disabled="@busy">@(busy ? "正在完成…" : "完成注册")</button></EditForm></section>
+        }
+        else if (needsEmailRegistration)
+        {
+            <section class="content-section"><div class="section-header"><div><h2>完成账户注册</h2><p>第三方邮箱已验证，请设置本地登录密码。</p></div></div><EditForm Model="registration" OnValidSubmit="CreatePendingAccountAsync" FormName="oauth-email-registration"><DataAnnotationsValidator /><div class="form-grid"><div class="form-field full"><label for="oauth-email">邮箱</label><InputText id="oauth-email" @bind-Value="registration.Email" type="email" readonly="@registrationEmailReadOnly" /></div><div class="form-field"><label for="oauth-password">密码</label><InputText id="oauth-password" @bind-Value="registration.Password" type="password" autocomplete="new-password" /></div><div class="form-field"><label for="oauth-confirm">确认密码</label><InputText id="oauth-confirm" @bind-Value="registration.ConfirmPassword" type="password" autocomplete="new-password" /></div><div class="form-field"><label for="oauth-invitation">邀请码（如需要）</label><InputText id="oauth-invitation" @bind-Value="registration.InvitationCode" /></div></div><button type="submit" class="button primary" disabled="@busy">@(busy ? "正在创建…" : "完成注册")</button></EditForm></section>
+        }
+        else if (needsRegistration)
+        {
+            <section class="content-section"><div class="section-header"><div><h2>创建新账户</h2><p>请填写邮箱、密码和必要的验证码。</p></div></div><EditForm Model="registration" OnValidSubmit="CreatePendingAccountAsync" FormName="oauth-registration"><DataAnnotationsValidator /><div class="form-grid"><div class="form-field full"><label for="oauth-email">邮箱</label><InputText id="oauth-email" @bind-Value="registration.Email" type="email" readonly="@registrationEmailReadOnly" /></div><div class="form-field"><label for="oauth-password">密码</label><InputText id="oauth-password" @bind-Value="registration.Password" type="password" autocomplete="new-password" /></div><div class="form-field"><label for="oauth-confirm">确认密码</label><InputText id="oauth-confirm" @bind-Value="registration.ConfirmPassword" type="password" autocomplete="new-password" /></div><div class="form-field"><label for="oauth-verify">邮箱验证码</label><InputText id="oauth-verify" @bind-Value="registration.VerifyCode" /></div><div class="form-field"><label for="oauth-invitation">邀请码（如需要）</label><InputText id="oauth-invitation" @bind-Value="registration.InvitationCode" /></div></div><div class="button-row"><button type="button" class="button secondary" @onclick="SendPendingVerifyCodeAsync" disabled="@(busy || sendingVerify)">@(sendingVerify ? "正在发送…" : verifyCountdown > 0 ? $"重新发送（{verifyCountdown}s）" : "发送邮箱验证码")</button><button type="submit" class="button primary" disabled="@busy">@(busy ? "正在创建…" : "完成注册")</button></div></EditForm></section>
+        }
+        else if (needsBindLogin)
+        {
+            <section class="content-section"><div class="section-header"><div><h2>绑定已有账户</h2><p>请输入本地账户密码以确认绑定。</p></div></div><EditForm Model="binding" OnValidSubmit="BindPendingAsync" FormName="oauth-bind"><DataAnnotationsValidator /><div class="form-grid"><div class="form-field"><label for="bind-email">邮箱</label><InputText id="bind-email" @bind-Value="binding.Email" type="email" /></div><div class="form-field"><label for="bind-password">密码</label><InputText id="bind-password" @bind-Value="binding.Password" type="password" autocomplete="current-password" /></div></div><button type="submit" class="button primary" disabled="@busy">@(busy ? "正在绑定…" : "绑定并登录")</button></EditForm></section>
+        }
+        else if (needsTotp)
+        {
+            <section class="content-section"><div class="section-header"><div><h2>需要二次验证</h2><p>请输入验证器中的 6 位验证码。</p></div></div><EditForm Model="totp" OnValidSubmit="CompleteTotpAsync" FormName="oauth-totp"><div class="form-field"><label for="oauth-totp-code">TOTP 验证码</label><InputText id="oauth-totp-code" @bind-Value="totp.Code" inputmode="numeric" autocomplete="one-time-code" /></div><button type="submit" class="button primary" disabled="@busy">验证并登录</button></EditForm></section>
+        }
+        else if (!string.IsNullOrWhiteSpace(userSuccess)) { <div class="inline-alert success" role="status">@userSuccess</div> }
+    }
+</div>
+}
+else
+{
+<div class="page-header">
+    <div><h1>完成 OAuth 授权</h1><p>管理员平台账号导入使用官方 Go 后端，不在浏览器保存 OAuth 密钥。</p></div>
+    <a class="button secondary" href="/provider-oauth"><Icon Name="chevron-left" Size="17" /> 返回 OAuth 管理</a>
+</div>
+<section class="content-section oauth-callback-panel">
+    <div class="section-header"><div><h2>授权信息</h2><p>部分官方客户端不会回到当前地址，可粘贴完整回调 URL 或填写 code/state。</p></div></div>
+    <EditForm Model="form" OnValidSubmit="CompleteAdminAsync" FormName="oauth-callback">
+        <DataAnnotationsValidator /><div class="form-grid">
+            <div class="form-field"><label for="oauth-platform">平台</label><InputSelect id="oauth-platform" @bind-Value="form.Platform"><option value="openai">OpenAI / Codex</option><option value="anthropic">Claude / Anthropic</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option></InputSelect></div>
+            <div class="form-field"><label for="oauth-name">账号名称</label><InputText id="oauth-name" @bind-Value="form.Name" /><ValidationMessage For="() => form.Name" /></div>
+            <div class="form-field"><label for="oauth-concurrency">并发上限</label><InputNumber id="oauth-concurrency" @bind-Value="form.Concurrency" /></div>
+            <div class="form-field"><label for="oauth-priority">优先级</label><InputNumber id="oauth-priority" @bind-Value="form.Priority" /></div>
+            <div class="form-field full"><label for="oauth-redirect">完整回调 URL（可选）</label><InputText id="oauth-redirect" @bind-Value="form.CallbackUrl" placeholder="https://.../auth/callback?code=...&state=..." /></div>
+            <div class="form-field full"><label for="oauth-code">授权码 code（也可粘贴完整回调 URL）</label><InputText id="oauth-code" @bind-Value="form.Code" placeholder="code 或 http://localhost:1455/auth/callback?code=...&state=..." /></div>
+            <div class="form-field full"><label for="oauth-state">@(form.Platform == "anthropic" ? "state（Claude 无需填写）" : "state")</label><InputText id="oauth-state" @bind-Value="form.State" /></div>
+            <div class="form-field full"><label for="oauth-session">session_id</label><InputText id="oauth-session" @bind-Value="form.SessionId" /></div>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(error)) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@error</span></div> }
+        @if (!string.IsNullOrWhiteSpace(success))
+        {
+            <div class="inline-alert success" role="status"><Icon Name="circle-check" Size="18" /><span>@success</span></div>
+            <a class="button secondary" href="/admin/accounts"><Icon Name="box" Size="16" /> 返回账号管理</a>
+        }
+        <div class="button-row callback-actions"><button type="submit" class="button primary" disabled="@busy">@(busy ? "正在交换并创建…" : "交换并创建账号")</button><button type="button" class="button secondary" @onclick="LoadPendingAsync">读取待处理会话</button></div>
+    </EditForm>
+</section>
+}
+
+@code {
+    private readonly CallbackForm form = new();
+    private OAuthPendingState? pendingState;
+    private string? error;
+    private string? success;
+    private bool busy;
+    private bool userFlow;
+    private bool processing;
+    private bool needsRegistration;
+    private bool needsEmailRegistration;
+    private bool needsProviderRegistration;
+    private bool needsChooser;
+    private bool needsAdoptionConfirmation;
+    private bool needsBindLogin;
+    private bool needsTotp;
+    private bool adoptionRequired;
+    private bool adoptDisplayName = true;
+    private bool adoptAvatar = true;
+    private bool registrationEmailReadOnly;
+    private bool sendingVerify;
+    private int verifyCountdown;
+    private CancellationTokenSource? verifyCountdownCancellation;
+    private string? userError;
+    private string? userSuccess;
+    private string redirectTo = "/dashboard";
+    private string provider = string.Empty;
+    private string? bindInitiatedProvider;
+    private string? suggestedDisplayName;
+    private string? suggestedAvatarUrl;
+    private PublicSettingsDto publicSettings = new();
+    private CaptchaChallenge? captcha;
+    private readonly OAuthRegistrationForm registration = new();
+    private readonly OAuthBindingForm binding = new();
+    private readonly OAuthTotpForm totp = new();
+    private readonly OAuthInvitationForm invitation = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { publicSettings = await Api.GetPublicSettingsAsync(); } catch (ApiException) { }
+        LoadQuery();
+        await LoadPendingAsync();
+        // 管理员上游 OAuth 回调带有 session_id；普通用户 OAuth 回调没有 session_id。
+        // /auth/callback 是旧版官方回调地址：没有 session_id 时仍按普通用户 OAuth 处理。
+        var callbackPath = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
+        userFlow = callbackPath.Equals("auth/oauth/callback", StringComparison.OrdinalIgnoreCase)
+            || callbackPath.EndsWith("/linuxdo/callback", StringComparison.OrdinalIgnoreCase)
+            || callbackPath.EndsWith("/wechat/callback", StringComparison.OrdinalIgnoreCase)
+            || callbackPath.EndsWith("/dingtalk/callback", StringComparison.OrdinalIgnoreCase)
+            || callbackPath.EndsWith("/oidc/callback", StringComparison.OrdinalIgnoreCase)
+            || (callbackPath.Equals("auth/callback", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(form.SessionId));
+        provider = ProviderFromCallbackPath(callbackPath);
+        await LoadBindingMarkerAsync();
+        if (userFlow) await ProcessUserCallbackAsync();
+    }
+
+    private bool IsUserCallbackPath()
+    {
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
+        return path.Equals("auth/callback", StringComparison.OrdinalIgnoreCase)
+            || path.Equals("auth/oauth/callback", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/linuxdo/callback", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/wechat/callback", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/dingtalk/callback", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith("/oidc/callback", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task ProcessUserCallbackAsync()
+    {
+        processing = true; userError = null;
+        try
+        {
+            var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+            var query = ParseQuery(uri.Query);
+            if (query.TryGetValue("error", out var queryError))
+            {
+                throw new ApiException(query.TryGetValue("error_description", out var queryDescription) ? queryDescription : queryError, System.Net.HttpStatusCode.BadRequest);
+            }
+            var fragment = ParseQuery(uri.Fragment.TrimStart('#'));
+            if (fragment.TryGetValue("error", out var fragmentError)) throw new ApiException(fragment.TryGetValue("error_description", out var desc) ? desc : fragmentError, System.Net.HttpStatusCode.BadRequest);
+            if (fragment.TryGetValue("access_token", out var accessToken) && !string.IsNullOrWhiteSpace(accessToken))
+            {
+                await Api.AcceptOAuthTokensAsync(new OAuthTokenResponseDto { AccessToken = accessToken, RefreshToken = fragment.GetValueOrDefault("refresh_token"), ExpiresIn = ParseInt(fragment.GetValueOrDefault("expires_in")), TokenType = fragment.GetValueOrDefault("token_type") ?? "Bearer" });
+                await Auth.RefreshAsync();
+                await ClearBindingMarkerAsync();
+                redirectTo = SafeRedirect(fragment.GetValueOrDefault("redirect"));
+                Navigation.NavigateTo(redirectTo, replace: true);
+                return;
+            }
+            if (await RedirectEmailProviderCallbackIfNeededAsync()) return;
+            var completion = await Api.ExchangePendingOAuthCompletionAsync();
+            await ApplyCompletionAsync(completion);
+        }
+        catch (ApiException ex)
+        {
+            userError = ex.Message;
+            if (bindInitiatedProvider is not null) await ClearBindingMarkerAsync();
+        }
+        finally { processing = false; }
+    }
+
+    private async Task CreatePendingAccountAsync()
+    {
+        busy = true; userError = null;
+        try
+        {
+            OAuthCompletionDto result;
+            if (needsEmailRegistration && IsEmailOAuthProvider(provider))
+            {
+                result = await Api.CompleteEmailOAuthRegistrationAsync(provider, registration.Password, registration.InvitationCode, null);
+            }
+            else
+            {
+                var proof = captcha is null ? null : await captcha.GetProofAsync();
+                result = await Api.CreatePendingOAuthAccountAsync(new
+                {
+                    email = registration.Email.Trim(), password = registration.Password,
+                    verify_code = registration.VerifyCode.Trim(), invitation_code = registration.InvitationCode.Trim(),
+                    adopt_display_name = adoptDisplayName, adopt_avatar = adoptAvatar,
+                    turnstile_token = proof?.TurnstileToken,
+                    tencent_captcha_ticket = proof?.TencentCaptchaTicket,
+                    tencent_captcha_randstr = proof?.TencentCaptchaRandstr
+                });
+            }
+            await ApplyCompletionAsync(result);
+        }
+        catch (ApiException ex) { userError = ex.Message; }
+        finally { if (needsRegistration && captcha is not null) await captcha.ResetAsync(); busy = false; }
+    }
+
+    private async Task CompleteProviderRegistrationAsync()
+    {
+        busy = true; userError = null;
+        try
+        {
+            var result = await Api.CompleteProviderOAuthRegistrationAsync(provider, invitation.Code, null, adoptDisplayName, adoptAvatar);
+            await ApplyCompletionAsync(result);
+        }
+        catch (ApiException ex) { userError = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task BindPendingAsync()
+    {
+        busy = true; userError = null;
+        try
+        {
+            var result = await Api.BindPendingOAuthLoginAsync(new { email = binding.Email.Trim(), password = binding.Password, adopt_display_name = adoptDisplayName, adopt_avatar = adoptAvatar });
+            await ApplyCompletionAsync(result);
+        }
+        catch (ApiException ex) { userError = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task ContinueAdoptionAsync()
+    {
+        busy = true; userError = null;
+        try { await ApplyCompletionAsync(await Api.ExchangePendingOAuthCompletionAsync(adoptDisplayName, adoptAvatar), adoptionDecisionSubmitted: true); }
+        catch (ApiException ex) { userError = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private void ChooseCreateAccount()
+    {
+        userError = null;
+        needsChooser = false;
+        needsRegistration = true;
+        needsProviderRegistration = false;
+        needsEmailRegistration = false;
+        registration.Email = FirstNonEmpty(registration.Email, binding.Email);
+        registrationEmailReadOnly = false;
+    }
+
+    private void ChooseBindLogin()
+    {
+        userError = null;
+        needsChooser = false;
+        needsBindLogin = true;
+        binding.Email = FirstNonEmpty(binding.Email, registration.Email);
+    }
+
+    private async Task SendPendingVerifyCodeAsync()
+    {
+        if (sendingVerify || verifyCountdown > 0 || string.IsNullOrWhiteSpace(registration.Email)) return;
+        sendingVerify = true; userError = null;
+        try
+        {
+            var request = new SendVerifyCodeRequest { Email = registration.Email.Trim() };
+            request.ApplyCaptcha(captcha is null ? null : await captcha.GetProofAsync());
+            var response = await Api.SendPendingOAuthVerifyCodeAsync(request);
+            if (IsPendingOAuthContinuation(response))
+            {
+                verifyCountdown = 0;
+                verifyCountdownCancellation?.Cancel();
+                await ApplyCompletionAsync(response);
+                return;
+            }
+            verifyCountdown = Math.Max(1, response.Countdown);
+            verifyCountdownCancellation?.Cancel();
+            verifyCountdownCancellation = new CancellationTokenSource();
+            _ = RunVerifyCountdownAsync(verifyCountdownCancellation.Token);
+        }
+        catch (ApiException ex) { userError = ex.Message; }
+        finally { if (captcha is not null) await captcha.ResetAsync(); sendingVerify = false; }
+    }
+
+    private async Task RunVerifyCountdownAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (verifyCountdown > 0)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                verifyCountdown--;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task CompleteTotpAsync()
+    {
+        busy = true; userError = null;
+        try { var result = await Api.Login2FAAsync(totp.TempToken, totp.Code); await Api.AcceptOAuthTokensAsync(result); await Auth.RefreshAsync(); Navigation.NavigateTo(redirectTo, replace: true); }
+        catch (ApiException ex) { userError = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task ApplyCompletionAsync(OAuthCompletionDto result, bool adoptionDecisionSubmitted = false)
+    {
+        userError = null;
+        userSuccess = null;
+        redirectTo = SafeRedirect(result.Redirect ?? redirectTo);
+        provider = FirstNonEmpty(result.Provider, provider, ProviderFromCallbackPath(CurrentCallbackPath()));
+        suggestedDisplayName = result.SuggestedDisplayName;
+        suggestedAvatarUrl = result.SuggestedAvatarUrl;
+        adoptionRequired = result.AdoptionRequired || HasChoiceStep(result.Step);
+        ResetUserStates();
+
+        if (!string.IsNullOrWhiteSpace(result.AccessToken))
+        {
+            await Api.AcceptOAuthTokensAsync(result.ToTokenResponse());
+            await Auth.RefreshAsync();
+            await ClearBindingMarkerAsync();
+            userSuccess = "登录成功，正在跳转。";
+            Navigation.NavigateTo(redirectTo, replace: true);
+            return;
+        }
+        if (result.Requires2FA && !string.IsNullOrWhiteSpace(result.TempToken))
+        {
+            needsTotp = true;
+            totp.TempToken = result.TempToken;
+            return;
+        }
+        if (result.RequiresEmailCompletion || string.Equals(result.Step, "email_completion", StringComparison.OrdinalIgnoreCase))
+        {
+            needsRegistration = true;
+            registration.Email = FirstNonEmpty(result.ResolvedEmail, result.Email, result.PendingEmail, result.SuggestedEmail);
+            registrationEmailReadOnly = false;
+            return;
+        }
+        if (IsInvitationRequired(result) && IsProviderOAuthRegistrationProvider(provider))
+        {
+            needsProviderRegistration = true;
+            invitation.Code = string.Empty;
+            return;
+        }
+        if (IsEmailOAuthProvider(provider) && IsEmailRegistrationRequired(result))
+        {
+            needsEmailRegistration = true;
+            registration.Email = FirstNonEmpty(result.ResolvedEmail, result.Email, result.PendingEmail);
+            registrationEmailReadOnly = true;
+            return;
+        }
+        if (HasChoiceStep(result.Step))
+        {
+            needsChooser = true;
+            registration.Email = FirstNonEmpty(result.PendingEmail, result.Email, result.ResolvedEmail);
+            binding.Email = FirstNonEmpty(result.ExistingAccountEmail, result.PendingEmail, result.Email, result.ResolvedEmail);
+            return;
+        }
+        if (IsBindRequired(result))
+        {
+            needsBindLogin = true;
+            binding.Email = FirstNonEmpty(result.ExistingAccountEmail, result.PendingEmail, result.Email, result.ResolvedEmail);
+            return;
+        }
+        if (!adoptionDecisionSubmitted && adoptionRequired && (!string.IsNullOrWhiteSpace(suggestedDisplayName) || !string.IsNullOrWhiteSpace(suggestedAvatarUrl)))
+        {
+            needsAdoptionConfirmation = true;
+            return;
+        }
+        if (IsGenericRegistrationRequired(result))
+        {
+            needsRegistration = true;
+            registration.Email = FirstNonEmpty(result.ResolvedEmail, result.Email, result.PendingEmail);
+            registrationEmailReadOnly = !string.IsNullOrWhiteSpace(registration.Email) && result.ForceEmailOnSignup;
+            return;
+        }
+        if (IsExplicitBindCompletion(result, bindInitiatedProvider))
+        {
+            var bindRedirect = SafeRedirect(result.Redirect ?? "/profile");
+            userSuccess = "第三方账户绑定成功，正在跳转。";
+            Toasts.Success("第三方账户绑定成功");
+            await ClearBindingMarkerAsync();
+            Navigation.NavigateTo(bindRedirect, replace: true);
+            return;
+        }
+        userError = result.ErrorMessage ?? result.Message ?? result.Detail ?? result.Error ?? "OAuth 登录尚未完成，请返回登录页重试。";
+    }
+
+    private void ResetUserStates()
+    {
+        needsRegistration = false; needsEmailRegistration = false; needsProviderRegistration = false;
+        needsChooser = false; needsAdoptionConfirmation = false; needsBindLogin = false; needsTotp = false;
+    }
+
+    private static bool IsInvitationRequired(OAuthCompletionDto result) =>
+        result.InvitationRequired || string.Equals(result.Error, "invitation_required", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsEmailRegistrationRequired(OAuthCompletionDto result) =>
+        string.Equals(result.Error, "registration_completion_required", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(result.Step, "create_account", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(result.Step, "email_required", StringComparison.OrdinalIgnoreCase)
+        || IsInvitationRequired(result);
+
+    private static bool IsGenericRegistrationRequired(OAuthCompletionDto result) =>
+        string.Equals(result.Step, "create_account", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(result.Step, "email_required", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(result.Error, "registration_completion_required", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsBindRequired(OAuthCompletionDto result) =>
+        result.ExistingAccountBindable
+        || string.Equals(result.Step, "bind_login", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(result.Step, "bind_login_required", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(result.Error, "bind_login_required", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasChoiceStep(string? value) => value is not null && (value.Equals("choice", StringComparison.OrdinalIgnoreCase) || value.Equals("choose_account_action_required", StringComparison.OrdinalIgnoreCase) || value.Equals("choose_account_action", StringComparison.OrdinalIgnoreCase) || value.Equals("choose_account", StringComparison.OrdinalIgnoreCase) || value.Equals("choose", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsPendingOAuthContinuation(OAuthCompletionDto result) =>
+        string.Equals(result.AuthResult, "pending_session", StringComparison.OrdinalIgnoreCase)
+        || HasChoiceStep(result.Step)
+        || IsBindRequired(result)
+        || IsGenericRegistrationRequired(result)
+        || result.RequiresEmailCompletion
+        || result.Requires2FA;
+
+    private static bool IsExplicitBindCompletion(OAuthCompletionDto result, string? initiatedProvider) =>
+        (string.Equals(result.Intent, "bind_current_user", StringComparison.OrdinalIgnoreCase)
+            || IsBindingProvider(initiatedProvider, result.Provider))
+        && !string.Equals(result.AuthResult, "pending_session", StringComparison.OrdinalIgnoreCase)
+        && string.IsNullOrWhiteSpace(result.Error)
+        && string.IsNullOrWhiteSpace(result.ErrorMessage)
+        && string.IsNullOrWhiteSpace(result.Detail)
+        && string.IsNullOrWhiteSpace(result.Step)
+        && !result.Requires2FA
+        && !result.RequiresEmailCompletion;
+
+    private static bool IsBindingProvider(string? initiatedProvider, string? resultProvider) =>
+        !string.IsNullOrWhiteSpace(initiatedProvider)
+        && (string.IsNullOrWhiteSpace(resultProvider)
+            || string.Equals(initiatedProvider, resultProvider, StringComparison.OrdinalIgnoreCase));
+
+    private async Task LoadBindingMarkerAsync()
+    {
+        try
+        {
+            bindInitiatedProvider = await Js.InvokeAsync<string?>("sessionStorage.getItem", "paragateway.oauth.binding_provider");
+            if (!IsProviderOAuthRegistrationProvider(bindInitiatedProvider))
+            {
+                bindInitiatedProvider = null;
+            }
+        }
+        catch (JSException)
+        {
+            bindInitiatedProvider = null;
+        }
+    }
+
+    private async Task ClearBindingMarkerAsync()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("sessionStorage.removeItem", "paragateway.oauth.binding_provider");
+        }
+        catch (JSException)
+        {
+        }
+        bindInitiatedProvider = null;
+    }
+
+    private static bool IsEmailOAuthProvider(string? value) => value is not null && (value.Equals("github", StringComparison.OrdinalIgnoreCase) || value.Equals("google", StringComparison.OrdinalIgnoreCase));
+    private static bool IsProviderOAuthRegistrationProvider(string? value) => value is not null && (value.Equals("linuxdo", StringComparison.OrdinalIgnoreCase) || value.Equals("wechat", StringComparison.OrdinalIgnoreCase) || value.Equals("oidc", StringComparison.OrdinalIgnoreCase) || value.Equals("dingtalk", StringComparison.OrdinalIgnoreCase));
+
+    private string CurrentCallbackPath() => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
+
+    private async Task<bool> RedirectEmailProviderCallbackIfNeededAsync()
+    {
+        if (!CurrentCallbackPath().Equals("auth/oauth/callback", StringComparison.OrdinalIgnoreCase)) return false;
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var query = ParseQuery(uri.Query);
+        if (!query.ContainsKey("code") || !query.ContainsKey("state")) return false;
+        try
+        {
+            var pendingProvider = await Js.InvokeAsync<string?>("sessionStorage.getItem", "email_oauth_pending_provider");
+            if (!IsEmailOAuthProvider(pendingProvider)) return false;
+            Navigation.NavigateTo($"/api/v1/auth/oauth/{pendingProvider}/callback{uri.Query}", forceLoad: true);
+            return true;
+        }
+        catch (JSException) { return false; }
+    }
+
+    private static string ProviderFromCallbackPath(string path) =>
+        path.Contains("linuxdo", StringComparison.OrdinalIgnoreCase) ? "linuxdo" :
+        path.Contains("wechat", StringComparison.OrdinalIgnoreCase) ? "wechat" :
+        path.Contains("dingtalk", StringComparison.OrdinalIgnoreCase) ? "dingtalk" :
+        path.Contains("oidc", StringComparison.OrdinalIgnoreCase) ? "oidc" : string.Empty;
+
+    private void LoadQuery()
+    {
+        var uri = Navigation.ToAbsoluteUri(Navigation.Uri);
+        var query = ParseQuery(uri.Query);
+        SetIfPresent(query, "code", value => form.Code = value);
+        SetIfPresent(query, "state", value => form.State = value);
+        SetIfPresent(query, "session_id", value => form.SessionId = value);
+        if (query.TryGetValue("error", out var oauthError)) error = oauthError.ToString();
+    }
+
+    private async Task LoadPendingAsync()
+    {
+        try
+        {
+            var json = await Js.InvokeAsync<string?>("sessionStorage.getItem", "paragateway.oauth.pending");
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                var pending = JsonSerializer.Deserialize<OAuthPendingState>(json);
+                if (pending is not null)
+                {
+                    pendingState = pending;
+                    // Callback URLs do not carry the provider consistently. The
+                    // pending browser session is authoritative for the platform.
+                    if (!string.IsNullOrWhiteSpace(pending.Platform)) form.Platform = pending.Platform;
+                    if (string.IsNullOrWhiteSpace(form.SessionId)) form.SessionId = pending.SessionId;
+                    if (string.IsNullOrWhiteSpace(form.State)) form.State = pending.State;
+                    form.RedirectUri = pending.RedirectUri;
+                    if (string.IsNullOrWhiteSpace(form.Name))
+                    {
+                        form.Name = !string.IsNullOrWhiteSpace(pending.AccountName)
+                            ? pending.AccountName.Trim()
+                            : pending.Platform switch { "anthropic" => "Claude OAuth", "gemini" => "Gemini OAuth", "antigravity" => "Antigravity OAuth", "grok" => "Grok OAuth", _ => "OpenAI OAuth" };
+                    }
+                }
+            }
+        }
+        catch (JSException) { }
+    }
+
+    private async Task CompleteAdminAsync()
+    {
+        busy = true; error = null; success = null;
+        try
+        {
+            var normalized = OAuthCallbackInputParser.Normalize(form.CallbackUrl, form.Code, form.State, form.SessionId);
+            form.Code = normalized.Code;
+            form.State = normalized.State;
+            form.SessionId = normalized.SessionId;
+            var input = new OAuthExchangeInput { SessionId = normalized.SessionId, Code = normalized.Code, State = normalized.State, RedirectUri = form.RedirectUri };
+            if (string.IsNullOrWhiteSpace(input.Code) || string.IsNullOrWhiteSpace(input.SessionId))
+                throw new ApiException("code、session_id 均不能为空。", System.Net.HttpStatusCode.BadRequest);
+            if (form.Platform != "anthropic" && string.IsNullOrWhiteSpace(input.State))
+                throw new ApiException("state 不能为空。", System.Net.HttpStatusCode.BadRequest);
+
+            AccountDto account;
+            if (form.Platform is "openai" or "grok")
+            {
+                account = await Api.CreateAccountFromOAuthAsync(form.Platform, input, form.Name, form.Concurrency, form.Priority, []);
+            }
+            else
+            {
+                var token = form.Platform switch
+                {
+                    "anthropic" => await Api.ExchangeAnthropicOAuthAsync(input),
+                    "gemini" => await Api.ExchangeGeminiOAuthAsync(input, ReadPendingOAuthType(), ReadPendingTierId()),
+                    _ => await Api.ExchangeAntigravityOAuthAsync(input)
+                };
+                var credentials = ApiClient.BuildOAuthCredentials(form.Platform, token);
+                account = await Api.CreateAccountAsync(new AccountInput
+                {
+                    Name = form.Name.Trim(), Platform = form.Platform, Type = "oauth",
+                    CredentialsJson = JsonSerializer.Serialize(credentials),
+                    Concurrency = form.Concurrency, Priority = form.Priority
+                });
+            }
+            success = $"账号“{account.Name}”已创建（ID {account.Id}）。";
+            await Js.InvokeVoidAsync("sessionStorage.removeItem", "paragateway.oauth.pending");
+            Toasts.Success("OAuth 账号已创建");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        catch (FormatException ex) { error = ex.Message; }
+        catch (JsonException ex) { error = $"授权响应格式不正确：{ex.Message}"; }
+        finally { busy = false; }
+    }
+
+    private string ReadPendingOAuthType() => pendingState?.OAuthType ?? "code_assist";
+
+    private string? ReadPendingTierId() => pendingState?.TierId;
+
+    private static Dictionary<string, string> ParseQuery(string queryString)
+    {
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in queryString.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            var key = Uri.UnescapeDataString(parts[0].Replace('+', ' '));
+            var value = parts.Length == 1 ? string.Empty : Uri.UnescapeDataString(parts[1].Replace('+', ' '));
+            if (!string.IsNullOrWhiteSpace(key)) values[key] = value;
+        }
+        return values;
+    }
+
+    private static void SetIfPresent(IReadOnlyDictionary<string, string> query, string key, Action<string> setter)
+    {
+        if (query.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)) setter(value);
+    }
+
+    private static int ParseInt(string? value) => int.TryParse(value, out var number) ? number : 0;
+    private static string FirstNonEmpty(params string?[] values) => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+    private static string SafeRedirect(string? value) => !string.IsNullOrWhiteSpace(value) && value.StartsWith('/') && !value.StartsWith("//") && !value.Contains("://", StringComparison.Ordinal) ? value : "/dashboard";
+
+    private sealed class CallbackForm
+    {
+        [Required] public string Platform { get; set; } = string.Empty;
+        [Required(ErrorMessage = "请输入账号名称")] public string Name { get; set; } = string.Empty;
+        [Required] public string SessionId { get; set; } = string.Empty;
+        public string Code { get; set; } = string.Empty;
+        public string State { get; set; } = string.Empty;
+        public string? RedirectUri { get; set; }
+        public string CallbackUrl { get; set; } = string.Empty;
+        [Range(1, 100000)] public int Concurrency { get; set; } = 8;
+        [Range(0, 100000)] public int Priority { get; set; } = 100;
+    }
+
+    private sealed class OAuthRegistrationForm
+    {
+        [Required, EmailAddress] public string Email { get; set; } = string.Empty;
+        [Required, MinLength(6)] public string Password { get; set; } = string.Empty;
+        [Required, Compare(nameof(Password))] public string ConfirmPassword { get; set; } = string.Empty;
+        public string VerifyCode { get; set; } = string.Empty;
+        public string InvitationCode { get; set; } = string.Empty;
+    }
+
+    private sealed class OAuthBindingForm
+    {
+        [Required, EmailAddress] public string Email { get; set; } = string.Empty;
+        [Required] public string Password { get; set; } = string.Empty;
+    }
+
+    private sealed class OAuthTotpForm
+    {
+        public string TempToken { get; set; } = string.Empty;
+        [Required, StringLength(6, MinimumLength = 6)] public string Code { get; set; } = string.Empty;
+    }
+
+    private sealed class OAuthInvitationForm
+    {
+        [Required(ErrorMessage = "请输入邀请码")] public string Code { get; set; } = string.Empty;
+    }
+
+    public void Dispose()
+    {
+        verifyCountdownCancellation?.Cancel();
+        verifyCountdownCancellation?.Dispose();
+    }
+}

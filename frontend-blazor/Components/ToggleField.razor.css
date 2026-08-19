@@ -1,0 +1,42 @@
+.settings-toggle-field {
+    display: flex;
+    min-width: 0;
+    min-height: 66px;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 13px 14px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--surface);
+    cursor: pointer;
+}
+
+.settings-toggle-control {
+    display: flex;
+    flex: 0 0 auto;
+    padding-top: 2px;
+}
+
+.settings-toggle-control ::deep input[type="checkbox"] {
+    width: 17px;
+    height: 17px;
+    accent-color: var(--primary);
+}
+
+.settings-toggle-copy {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+
+.settings-toggle-copy strong {
+    color: var(--text);
+    font-size: .8rem;
+    line-height: 1.35;
+}
+
+.settings-toggle-copy small {
+    color: var(--muted);
+    font-size: .71rem;
+    line-height: 1.5;
+}

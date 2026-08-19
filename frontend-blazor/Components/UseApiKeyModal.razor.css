@@ -1,0 +1,14 @@
+.use-key-layout { display: grid; gap: 15px; }
+.use-key-description { margin: 0; color: var(--muted); font-size: .75rem; line-height: 1.55; }
+.config-tabs { display: flex; overflow-x: auto; gap: 18px; border-bottom: 1px solid var(--line); }
+.config-tabs button { display: inline-flex; min-width: max-content; padding: 9px 2px; align-items: center; gap: 6px; color: var(--muted); background: transparent; border: 0; border-bottom: 2px solid transparent; font: inherit; font-size: .7rem; font-weight: 700; cursor: pointer; }
+.config-tabs button.active { color: var(--primary); border-bottom-color: var(--primary); }
+.shell-tabs { gap: 13px; }
+.shell-tabs button { padding-block: 7px; font-size: .66rem; }
+.auth-mode-card { display: grid; padding: 12px; gap: 10px; border: 1px solid var(--line); border-radius: 8px; }
+.auth-mode-card > div:first-child { display: grid; gap: 3px; }.auth-mode-card strong { font-size: .7rem; }.auth-mode-card small { color: var(--muted); font-size: .62rem; }
+.segmented { display: grid; grid-template-columns: repeat(2, 1fr); padding: 3px; background: var(--surface-soft); border-radius: 7px; }
+.segmented button { padding: 7px; color: var(--muted); background: transparent; border: 0; border-radius: 5px; font: inherit; font-size: .66rem; font-weight: 700; cursor: pointer; }.segmented button.active { color: var(--primary); background: var(--surface); box-shadow: 0 1px 3px rgb(15 23 42 / 10%); }
+.restart-note { display: flex; padding: 8px 10px; align-items: flex-start; gap: 7px; color: #92400e; background: #fffbeb; border-left: 2px solid #f59e0b; font-size: .62rem; line-height: 1.5; }
+.config-files { display: grid; gap: 13px; }.config-file { min-width: 0; }.config-file > header { display: flex; padding: 8px 11px; align-items: center; justify-content: space-between; gap: 10px; color: #cbd5e1; background: #1f2937; border-bottom: 1px solid #374151; border-radius: 8px 8px 0 0; }.config-file header code { min-width: 0; overflow: hidden; font-size: .62rem; text-overflow: ellipsis; white-space: nowrap; }.config-file header button { display: inline-flex; padding: 4px 7px; align-items: center; gap: 5px; color: #e5e7eb; background: #374151; border: 0; border-radius: 5px; font: inherit; font-size: .6rem; cursor: pointer; }.config-file pre { max-height: 360px; margin: 0; padding: 13px; overflow: auto; color: #e5e7eb; background: #111827; border-radius: 0 0 8px 8px; font-size: .65rem; line-height: 1.55; white-space: pre; }.config-hint { display: flex; margin: 0 0 5px; align-items: center; gap: 5px; color: #b45309; font-size: .61rem; }
+@media (max-width: 640px) { .config-tabs { gap: 12px; }.config-file pre { font-size: .58rem; } }

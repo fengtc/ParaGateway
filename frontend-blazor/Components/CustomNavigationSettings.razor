@@ -1,0 +1,48 @@
+<div class="custom-navigation-settings" data-testid="custom-navigation-settings">
+    <section>
+        <header><div><h2>自定义 API 端点</h2><p>在用户工作台展示可复制的兼容 API 地址。</p></div><button type="button" class="button secondary small" @onclick="AddEndpoint"><Icon Name="plus" Size="14" />添加端点</button></header>
+        @if (Endpoints.Count == 0) { <p class="empty-copy">暂无自定义端点。</p> }
+        else
+        {
+            <div class="custom-list">
+                @foreach (var item in Endpoints)
+                {
+                    <article @key="item"><div class="endpoint-grid"><Field Label="名称"><input @bind="item.Name" /></Field><Field Label="端点地址"><input @bind="item.Endpoint" /></Field><Field Label="说明" Full="true"><input @bind="item.Description" /></Field></div><button type="button" class="icon-button" title="删除端点" @onclick="() => Endpoints.Remove(item)"><Icon Name="trash" Size="15" /></button></article>
+                }
+            </div>
+        }
+    </section>
+    <section>
+        <header><div><h2>自定义菜单</h2><p>扩展侧栏入口，可限定用户或管理员可见，并调整顺序。</p></div><button type="button" class="button secondary small" @onclick="AddMenuItem"><Icon Name="plus" Size="14" />添加菜单</button></header>
+        @if (MenuItems.Count == 0) { <p class="empty-copy">暂无自定义菜单项。</p> }
+        else
+        {
+            <div class="custom-list">
+                @for (var index = 0; index < MenuItems.Count; index++)
+                {
+                    var item = MenuItems[index];
+                    <article @key="item">
+                        <div class="menu-order"><button type="button" class="icon-button" disabled="@(index == 0)" title="上移" @onclick="() => Move(index, -1)"><Icon Name="chevron-up" Size="15" /></button><button type="button" class="icon-button" disabled="@(index == MenuItems.Count - 1)" title="下移" @onclick="() => Move(index, 1)"><Icon Name="chevron-down" Size="15" /></button></div>
+                        <div class="menu-grid"><Field Label="名称"><input @bind="item.Label" /></Field><Field Label="可见范围"><select @bind="item.Visibility"><option value="user">用户</option><option value="admin">管理员</option></select></Field><Field Label="URL" Full="true"><input @bind="item.Url" /></Field><Field Label="SVG 图标" Hint="可留空使用默认图标" Full="true"><textarea rows="3" @bind="item.IconSvg"></textarea></Field></div>
+                        <button type="button" class="icon-button" title="删除菜单" @onclick="() => MenuItems.Remove(item)"><Icon Name="trash" Size="15" /></button>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<CustomEndpointDto> Endpoints { get; set; } = [];
+    [Parameter, EditorRequired] public List<CustomMenuItemDto> MenuItems { get; set; } = [];
+
+    private void AddEndpoint() => Endpoints.Add(new CustomEndpointDto());
+    private void AddMenuItem() => MenuItems.Add(new CustomMenuItemDto { Id = $"menu-{Guid.NewGuid():N}", SortOrder = MenuItems.Count, Visibility = "user" });
+    private void Move(int index, int delta)
+    {
+        var target = index + delta;
+        if (index < 0 || index >= MenuItems.Count || target < 0 || target >= MenuItems.Count) return;
+        (MenuItems[index], MenuItems[target]) = (MenuItems[target], MenuItems[index]);
+        for (var i = 0; i < MenuItems.Count; i++) MenuItems[i].SortOrder = i;
+    }
+}

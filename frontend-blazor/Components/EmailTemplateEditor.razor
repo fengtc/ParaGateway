@@ -1,0 +1,200 @@
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<section class="email-template-card" data-testid="email-template-editor">
+    <header>
+        <div>
+            <h2>通知邮件模板</h2>
+            <p>编辑每类通知事件和语言的主题与 HTML；预览在无脚本沙箱中渲染。</p>
+        </div>
+        <div class="template-actions">
+            <button type="button" class="button secondary small" disabled="@(!CanOperate || previewing)" @onclick="PreviewAsync">@(previewing ? "预览中…" : "刷新预览")</button>
+            <button type="button" class="button secondary small" disabled="@(!CanOperate || restoring)" @onclick="RestoreAsync">@(restoring ? "恢复中…" : "恢复官方模板")</button>
+            <button type="button" class="button primary small" disabled="@(!CanSave || saving)" @onclick="SaveAsync">@(saving ? "保存中…" : "保存模板")</button>
+        </div>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="template-alert" role="alert"><Icon Name="alert" Size="16" /><span>@error</span></div>
+    }
+
+    @if (loadingList)
+    {
+        <LoadingState Text="正在加载邮件模板" />
+    }
+    else if (catalog.Events.Count == 0 || catalog.Locales.Count == 0)
+    {
+        <EmptyState Title="暂无可编辑模板" Description="Go 后端没有返回邮件事件或语言目录。" />
+    }
+    else
+    {
+        <div class="template-body">
+            <div class="template-selectors">
+                <Field Label="通知事件">
+                    <select value="@selectedEvent" disabled="@loadingTemplate" @onchange="ChangeEventAsync">
+                        @foreach (var option in catalog.Events)
+                        {
+                            <option value="@option.Value">@EventLabel(option)</option>
+                        }
+                    </select>
+                </Field>
+                <Field Label="模板语言">
+                    <select value="@selectedLocale" disabled="@loadingTemplate" @onchange="ChangeLocaleAsync">
+                        @foreach (var locale in catalog.Locales)
+                        {
+                            <option value="@locale">@LocaleLabel(locale)</option>
+                        }
+                    </select>
+                </Field>
+            </div>
+
+            @if (SelectedEventOption is { } selectedOption)
+            {
+                <div class="event-summary">
+                    <div><strong>@EventLabel(selectedOption)</strong><span>@(string.IsNullOrWhiteSpace(selectedOption.Category) ? "通知" : selectedOption.Category)</span><span class="@(selectedOption.Optional ? "optional" : "transactional")">@(selectedOption.Optional ? "可退订通知" : "事务邮件")</span></div>
+                    @if (!string.IsNullOrWhiteSpace(selectedOption.Description)) { <p>@selectedOption.Description</p> }
+                </div>
+            }
+
+            @if (loadingTemplate)
+            {
+                <LoadingState Text="正在加载模板内容" />
+            }
+            else
+            {
+                <div class="template-editor-grid">
+                    <div class="template-source">
+                        <Field Label="邮件主题" Full="true"><input type="text" @bind="subject" @bind:event="oninput" /></Field>
+                        <Field Label="HTML 模板" Hint="支持下方列出的 {{placeholder}} 占位符。" Full="true"><textarea rows="20" spellcheck="false" @bind="html" @bind:event="oninput"></textarea></Field>
+                        <div class="placeholder-box">
+                            <strong>可用占位符</strong>
+                            <p>点击即可复制到剪贴板。</p>
+                            <div>
+                                @foreach (var placeholder in PlaceholderList)
+                                {
+                                    <button type="button" title="复制 @placeholder" @onclick="() => CopyPlaceholderAsync(placeholder)">@placeholder</button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    <div class="template-preview">
+                        <header><div><strong>实时预览</strong><small>@(string.IsNullOrWhiteSpace(previewSubject) ? "点击“刷新预览”生成" : previewSubject)</small></div>@if (isCustom) { <span>已自定义</span> }</header>
+                        <iframe sandbox="" srcdoc="@previewHtml" title="邮件模板安全预览"></iframe>
+                        <p>预览使用空 sandbox，模板中的脚本、表单和外部导航不会获得页面权限。</p>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private EmailTemplateListDto catalog = new();
+    private string selectedEvent = string.Empty, selectedLocale = string.Empty, subject = string.Empty, html = string.Empty;
+    private string previewSubject = string.Empty, previewHtml = string.Empty;
+    private bool loadingList = true, loadingTemplate, saving, restoring, previewing, isCustom;
+    private string? error;
+
+    private bool CanOperate => !loadingList && !loadingTemplate && !string.IsNullOrWhiteSpace(selectedEvent) && !string.IsNullOrWhiteSpace(selectedLocale);
+    private bool CanSave => CanOperate && !string.IsNullOrWhiteSpace(subject) && !string.IsNullOrWhiteSpace(html);
+    private EmailTemplateEventOptionDto? SelectedEventOption => catalog.Events.FirstOrDefault(x => x.Value == selectedEvent);
+    private IReadOnlyList<string> PlaceholderList => currentPlaceholders.Count > 0 ? currentPlaceholders : catalog.Placeholders;
+    private List<string> currentPlaceholders = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            catalog = await Api.GetEmailTemplatesAsync();
+            selectedEvent = catalog.Events.FirstOrDefault()?.Value ?? string.Empty;
+            selectedLocale = catalog.Locales.FirstOrDefault(x => x.Equals("zh-CN", StringComparison.OrdinalIgnoreCase))
+                ?? catalog.Locales.FirstOrDefault() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(selectedEvent) && !string.IsNullOrWhiteSpace(selectedLocale)) await LoadTemplateAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loadingList = false; }
+    }
+
+    private async Task ChangeEventAsync(ChangeEventArgs args)
+    {
+        selectedEvent = args.Value?.ToString() ?? string.Empty;
+        await LoadTemplateAsync();
+    }
+
+    private async Task ChangeLocaleAsync(ChangeEventArgs args)
+    {
+        selectedLocale = args.Value?.ToString() ?? string.Empty;
+        await LoadTemplateAsync();
+    }
+
+    private async Task LoadTemplateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(selectedEvent) || string.IsNullOrWhiteSpace(selectedLocale)) return;
+        loadingTemplate = true; error = null;
+        try
+        {
+            ApplyDetail(await Api.GetEmailTemplateAsync(selectedEvent, selectedLocale));
+            await PreviewAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loadingTemplate = false; }
+    }
+
+    private void ApplyDetail(EmailTemplateDetailDto detail)
+    {
+        subject = detail.Subject; html = detail.Html; isCustom = detail.IsCustom;
+        currentPlaceholders = detail.Placeholders.Count > 0 ? detail.Placeholders : catalog.Placeholders;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (!CanSave) return;
+        saving = true; error = null;
+        try
+        {
+            ApplyDetail(await Api.UpdateEmailTemplateAsync(selectedEvent, selectedLocale, subject.Trim(), html));
+            await PreviewAsync();
+            Toasts.Success("邮件模板已保存");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task RestoreAsync()
+    {
+        if (!CanOperate || !await JS.InvokeAsync<bool>("confirm", "恢复后将删除当前事件和语言的自定义模板。确认继续？")) return;
+        restoring = true; error = null;
+        try
+        {
+            ApplyDetail(await Api.RestoreOfficialEmailTemplateAsync(selectedEvent, selectedLocale));
+            await PreviewAsync();
+            Toasts.Success("已恢复官方邮件模板");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { restoring = false; }
+    }
+
+    private async Task PreviewAsync()
+    {
+        if (!CanOperate && !loadingTemplate) return;
+        previewing = true; error = null;
+        try
+        {
+            var preview = await Api.PreviewEmailTemplateAsync(selectedEvent, selectedLocale, subject, html);
+            previewSubject = preview.Subject; previewHtml = preview.Html;
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { previewing = false; }
+    }
+
+    private async Task CopyPlaceholderAsync(string placeholder)
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", placeholder);
+        Toasts.Success("占位符已复制");
+    }
+
+    private static string EventLabel(EmailTemplateEventOptionDto option) => string.IsNullOrWhiteSpace(option.Label) ? option.Value : $"{option.Label} · {option.Value}";
+    private static string LocaleLabel(string locale) => locale.ToLowerInvariant() switch { "zh-cn" => "简体中文（zh-CN）", "en-us" => "English (en-US)", _ => locale };
+}

@@ -1,0 +1,420 @@
+@page "/provider-oauth"
+@implements IAsyncDisposable
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime Js
+@inject NavigationManager Navigation
+
+<PageTitle>官方 OAuth · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>官方 OAuth 接入</h1>
+        <p>通过官方 Go 后端完成授权，凭据只保存在服务端。</p>
+    </div>
+    <a class="button secondary" href="/admin/accounts"><Icon Name="chevron-left" Size="17" /> 返回账号管理</a>
+</div>
+
+@if (error is not null)
+{
+    <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@error</span></div>
+}
+
+<section class="content-section">
+    <div class="section-header">
+        <div>
+            <h2>选择平台</h2>
+            <p>所有平台均需填写独立的账号名称；GitHub Copilot 使用设备码授权。</p>
+        </div>
+    </div>
+    <div class="button-row oauth-official-actions">
+        <button type="button" class="@PlatformButtonClass("openai")" disabled="@(busy || copilotBusy)" @onclick='() => SelectPlatform("openai")'><Icon Name="shield" Size="16" /> OpenAI / Codex</button>
+        <button type="button" class="@PlatformButtonClass("anthropic")" disabled="@(busy || copilotBusy)" @onclick='() => SelectPlatform("anthropic")'><Icon Name="shield" Size="16" /> Claude / Anthropic</button>
+        <button type="button" class="@PlatformButtonClass("gemini")" disabled="@(busy || copilotBusy)" @onclick='() => SelectPlatform("gemini")'><Icon Name="shield" Size="16" /> Gemini</button>
+        <button type="button" class="@PlatformButtonClass("antigravity")" disabled="@(busy || copilotBusy)" @onclick='() => SelectPlatform("antigravity")'><Icon Name="shield" Size="16" /> Antigravity</button>
+        <button type="button" class="@PlatformButtonClass("grok")" disabled="@(busy || copilotBusy)" @onclick='() => SelectPlatform("grok")'><Icon Name="shield" Size="16" /> Grok</button>
+        <button type="button" class="@PlatformButtonClass("copilot")" disabled="@(busy || copilotBusy)" @onclick='() => SelectPlatform("copilot")'><Icon Name="shield" Size="16" /> GitHub Copilot</button>
+    </div>
+</section>
+
+<section id="official-oauth" class="content-section official-oauth-panel" data-platform="@selectedPlatform" @key="selectedPlatform">
+    <div class="section-header">
+        <div>
+            <h2>@SelectedPlatformTitle</h2>
+            <p>@SelectedPlatformDescription</p>
+        </div>
+        <span class="status-badge">@SelectedPlatformProfile</span>
+    </div>
+
+    @if (selectedPlatform == "copilot" && copilotError is not null)
+    {
+        <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@copilotError</span></div>
+    }
+
+    @if (selectedPlatform == "copilot" && copilotFlow is not null)
+    {
+        <div class="copilot-device-flow" data-oauth-flow="device" aria-live="polite">
+            <div class="copilot-flow-status">
+                <span class="status-dot @(CopilotStatusClass)"></span>
+                <strong>@CopilotStatusText</strong>
+                @if (copilotFlow.Status == "pending")
+                {
+                    <span class="field-hint">下一次检查：@copilotFlow.NextPollAt.ToLocalTime().ToString("HH:mm:ss")</span>
+                }
+            </div>
+
+            @if (copilotFlow.Status == "pending")
+            {
+                <div class="copilot-code-box">
+                    <div>
+                        <span class="field-hint">在 GitHub 页面输入一次性设备码</span>
+                        <code class="copilot-user-code">@copilotFlow.UserCode</code>
+                    </div>
+                    <button type="button" class="icon-button" title="复制设备码" aria-label="复制设备码" @onclick="CopyCopilotCodeAsync">
+                        <Icon Name="copy" Size="17" />
+                    </button>
+                </div>
+                <div class="button-row">
+                    <a class="button primary" href="@copilotFlow.VerificationUri" target="_blank" rel="noopener noreferrer">
+                        <Icon Name="arrow-right" Size="16" /> 打开 GitHub 授权页
+                    </a>
+                    <button type="button" class="button secondary" disabled="@copilotBusy" @onclick="PollCopilotOnceAsync">
+                        <Icon Name="refresh" Size="16" /> 立即检查
+                    </button>
+                    <button type="button" class="button secondary" @onclick="ResetCopilotAsync">
+                        <Icon Name="x" Size="16" /> 取消
+                    </button>
+                </div>
+                <p class="field-hint">授权页完成后无需粘贴回调地址，页面会自动检查授权状态。</p>
+            }
+            else if (copilotFlow.Status == "completed")
+            {
+                <div class="inline-alert success"><Icon Name="circle-check" Size="18" /><span>Copilot 账号已创建，可以在“账号管理”中调整并发和分组。</span></div>
+                <div class="button-row">
+                    <a class="button primary" href="/admin/accounts"><Icon Name="box" Size="16" /> 查看账号</a>
+                    <button type="button" class="button secondary" @onclick="ResetCopilotAsync"><Icon Name="plus" Size="16" /> 再接入一个账号</button>
+                </div>
+            }
+            else
+            {
+                <div class="inline-alert warning"><Icon Name="alert" Size="18" /><span>@CopilotStatusText，请重新发起授权。</span></div>
+                <button type="button" class="button secondary" @onclick="ResetCopilotAsync"><Icon Name="refresh" Size="16" /> 重新授权</button>
+            }
+        </div>
+    }
+    else if (selectedPlatform != "copilot" && started is not null)
+    {
+        <div class="section-header"><div><h2>授权地址已生成</h2><p>在新窗口完成官方授权，再回到“账号管理”继续配置。</p></div></div>
+        <div class="inline-alert success"><Icon Name="circle-check" Size="18" /><span>@startedPlatform 授权地址已生成。</span></div>
+        <div class="button-row">
+            <a class="button primary" href="@started.AuthorizationUrl" target="_blank" rel="noopener noreferrer">打开官方授权页 <Icon Name="chevron-right" Size="16" /></a>
+            @if (selectedPlatform is "anthropic" or "openai")
+            {
+                <a class="button secondary" href="/auth/callback"><Icon Name="key" Size="16" /> @(selectedPlatform == "openai" ? "填写 OpenAI 回调地址" : "填写 Claude 授权码")</a>
+            }
+            <code class="oauth-session">会话：@started.SessionId</code>
+        </div>
+        @if (selectedPlatform == "anthropic")
+        {
+            <p class="field-hint">Claude 授权完成后会显示授权码；复制该授权码，再点击“填写 Claude 授权码”完成账号创建。</p>
+        }
+        else if (selectedPlatform == "openai")
+        {
+            <p class="field-hint">OpenAI 使用 Codex 官方 localhost:1455 回调；授权后即使回调页无法打开，也请复制浏览器地址栏中的完整 URL，再点击“填写 OpenAI 回调地址”。</p>
+        }
+    }
+    else
+    {
+        <EditForm Model="SelectedStart" OnValidSubmit="StartCurrentPlatformAsync" FormName="official-oauth-start" @key="selectedPlatform">
+            <DataAnnotationsValidator />
+            <div class="form-grid">
+                <div class="form-field full">
+                    <label for="official-oauth-account-name">账号名称</label>
+                    <input id="official-oauth-account-name"
+                           type="text"
+                           data-testid="oauth-account-name"
+                           data-platform="@selectedPlatform"
+                           aria-label="@($"{SelectedPlatformTitle} 账号名称")"
+                           @bind="SelectedStart.Name"
+                           @bind:event="oninput"
+                           autocomplete="off"
+                           placeholder="@SelectedPlatformNamePlaceholder" />
+                    <span class="field-hint">授权完成后，将使用该名称创建平台账号；切换平台不会共用该名称。</span>
+                    <ValidationMessage For="() => SelectedStart.Name" />
+                </div>
+            </div>
+            <div class="button-row">
+                <button type="submit" class="button primary" disabled="@(busy || copilotBusy)">
+                    @if (busy || copilotBusy) { <span class="spinner light"></span> }
+                    <Icon Name="shield" Size="16" /> @SelectedStartButtonText
+                </button>
+            </div>
+        </EditForm>
+    }
+</section>
+
+@code {
+    private string selectedPlatform = "openai";
+    private OfficialOAuthStartDto? started;
+    private string startedPlatform = string.Empty;
+    private string? error;
+    private bool busy;
+
+    // 所有平台使用完全相同的账号名称表单模型。每个平台仍保留独立实例，
+    // 避免切换平台时复用另一个平台已经填写的名称。
+    private readonly Dictionary<string, OfficialOAuthStartRequest> officialStarts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["openai"] = new(),
+        ["anthropic"] = new(),
+        ["gemini"] = new(),
+        ["antigravity"] = new(),
+        ["grok"] = new(),
+        ["copilot"] = new()
+    };
+    private CopilotOAuthFlowDto? copilotFlow;
+    private string? copilotError;
+    private bool copilotBusy;
+    private CancellationTokenSource? copilotPollingCancellation;
+    private Task? copilotPollingTask;
+    private readonly SemaphoreSlim copilotPollGate = new(1, 1);
+
+    private string CopilotStatusText => copilotFlow?.Status switch
+    {
+        "pending" => "等待 GitHub 授权",
+        "completed" => "授权完成",
+        "expired" => "设备码已过期",
+        "failed" => "授权失败",
+        _ => "未开始"
+    };
+
+    private string CopilotStatusClass => copilotFlow?.Status switch
+    {
+        "completed" => "success",
+        "failed" or "expired" => "danger",
+        _ => "pending"
+    };
+
+    private string PlatformButtonClass(string platform) =>
+        string.Equals(selectedPlatform, platform, StringComparison.OrdinalIgnoreCase)
+            ? "button primary"
+            : "button secondary";
+
+    private OfficialOAuthStartRequest SelectedStart => officialStarts.TryGetValue(selectedPlatform, out var request)
+        ? request
+        : officialStarts["openai"];
+
+    private string SelectedPlatformTitle => selectedPlatform switch
+    {
+        "anthropic" => "Claude / Anthropic",
+        "gemini" => "Gemini",
+        "antigravity" => "Antigravity",
+        "grok" => "Grok",
+        "copilot" => "GitHub Copilot",
+        _ => "OpenAI / Codex"
+    };
+
+    private string SelectedPlatformDescription => selectedPlatform switch
+    {
+        "anthropic" => "使用 Claude Code 官方 OAuth 授权；授权完成后复制 Claude 页面显示的授权码。",
+        "gemini" => "使用 Google Gemini Code Assist 官方 OAuth 授权。",
+        "antigravity" => "使用 Google Antigravity 官方 OAuth 授权。",
+        "grok" => "使用 Grok 官方 OAuth 授权。",
+        "copilot" => "使用 GitHub Device OAuth 授权，适用于 Copilot Chat 的 OpenAI 兼容接口。",
+        _ => "使用 OpenAI 官方 OAuth 授权，接入 ChatGPT / Codex 账号。"
+    };
+
+    private string SelectedPlatformProfile => selectedPlatform switch
+    {
+        "anthropic" => "claude_code",
+        "gemini" => "gemini",
+        "antigravity" => "antigravity",
+        "grok" => "grok",
+        "copilot" => "github_copilot",
+        _ => "openai"
+    };
+
+    private string SelectedPlatformNamePlaceholder => $"例如：{SelectedPlatformTitle} 主账号";
+
+    private string SelectedStartButtonText => selectedPlatform == "copilot"
+        ? "开始 GitHub 授权"
+        : $"开始 {SelectedPlatformTitle} 授权";
+
+    private void SelectPlatform(string platform)
+    {
+        if (!officialStarts.ContainsKey(platform))
+        {
+            return;
+        }
+
+        selectedPlatform = platform;
+        started = null;
+        error = null;
+        copilotError = null;
+        if (platform == "copilot" && copilotFlow?.Status == "pending")
+        {
+            StartCopilotPolling();
+        }
+        else
+        {
+            StopCopilotPolling();
+        }
+    }
+
+    private Task StartCurrentPlatformAsync() => selectedPlatform == "copilot"
+        ? StartCopilotAsync()
+        : StartAsync(selectedPlatform);
+
+    private async Task StartAsync(string platform)
+    {
+        selectedPlatform = platform;
+        StopCopilotPolling();
+        copilotError = null;
+        busy = true; error = null; started = null;
+        try
+        {
+            var startRequest = SelectedStart;
+            startRequest.Name = startRequest.Name.Trim();
+            var redirectUri = new Uri(new Uri(Navigation.BaseUri), "auth/callback").ToString();
+            started = platform switch
+            {
+                "anthropic" => await Api.StartAnthropicOAuthAsync(),
+                "gemini" => await Api.StartGeminiOAuthAsync("code_assist"),
+                "antigravity" => await Api.StartAntigravityOAuthAsync(),
+                "grok" => await Api.StartGrokOAuthAsync(redirectUri),
+                _ => await Api.StartOpenAIOAuthAsync()
+            };
+            startedPlatform = platform switch { "anthropic" => "Claude / Anthropic", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", _ => "OpenAI / Codex" };
+            var state = started.State;
+            if (string.IsNullOrWhiteSpace(state)) state = ReadQuery(started.AuthorizationUrl, "state");
+            await Js.InvokeVoidAsync("sessionStorage.setItem", "paragateway.oauth.pending", JsonSerializer.Serialize(new OAuthPendingState
+            {
+                Platform = platform, SessionId = started.SessionId, State = state,
+                RedirectUri = platform == "openai" ? string.Empty : redirectUri, AccountName = startRequest.Name,
+                OAuthType = platform == "gemini" ? "code_assist" : null
+            }));
+            Toasts.Success("官方授权地址已生成");
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { busy = false; }
+    }
+
+    private async Task StartCopilotAsync()
+    {
+        selectedPlatform = "copilot";
+        started = null;
+        error = null;
+        copilotBusy = true;
+        copilotError = null;
+        StopCopilotPolling();
+        try
+        {
+            var startRequest = SelectedStart;
+            startRequest.Name = startRequest.Name.Trim();
+            copilotFlow = await Api.StartCopilotOAuthAsync(startRequest.Name);
+            Toasts.Success("GitHub 设备授权已生成");
+            StartCopilotPolling();
+        }
+        catch (ApiException ex) { copilotError = ex.Message; }
+        finally { copilotBusy = false; }
+    }
+
+    private void StartCopilotPolling()
+    {
+        StopCopilotPolling();
+        copilotPollingCancellation = new CancellationTokenSource();
+        copilotPollingTask = PollCopilotLoopAsync(copilotPollingCancellation.Token);
+    }
+
+    private async Task PollCopilotLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested && copilotFlow?.Status == "pending")
+            {
+                var wait = copilotFlow.NextPollAt - DateTimeOffset.UtcNow;
+                if (wait < TimeSpan.FromSeconds(1)) wait = TimeSpan.FromSeconds(1);
+                await Task.Delay(wait, cancellationToken);
+                if (cancellationToken.IsCancellationRequested) break;
+                await InvokeAsync(PollCopilotOnceAsync);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task PollCopilotOnceAsync()
+    {
+        if (copilotFlow is null || copilotFlow.Status != "pending") return;
+        if (!await copilotPollGate.WaitAsync(0)) return;
+        copilotBusy = true;
+        copilotError = null;
+        try
+        {
+            copilotFlow = await Api.PollCopilotOAuthAsync(copilotFlow.FlowId);
+            if (copilotFlow.Status == "completed")
+            {
+                StopCopilotPolling();
+                Toasts.Success("GitHub Copilot 账号已创建");
+            }
+            else if (copilotFlow.Status is "failed" or "expired")
+            {
+                StopCopilotPolling();
+            }
+        }
+        catch (ApiException ex) { copilotError = ex.Message; }
+        finally
+        {
+            copilotBusy = false;
+            copilotPollGate.Release();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CopyCopilotCodeAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(copilotFlow?.UserCode))
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", copilotFlow.UserCode);
+            Toasts.Success("设备码已复制");
+        }
+    }
+
+    private Task ResetCopilotAsync()
+    {
+        StopCopilotPolling();
+        copilotFlow = null;
+        officialStarts["copilot"] = new OfficialOAuthStartRequest();
+        copilotError = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private void StopCopilotPolling()
+    {
+        copilotPollingCancellation?.Cancel();
+        copilotPollingCancellation?.Dispose();
+        copilotPollingCancellation = null;
+        copilotPollingTask = null;
+    }
+
+    private static string ReadQuery(string url, string key)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return string.Empty;
+        var query = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var pair in query)
+        {
+            var parts = pair.Split('=', 2);
+            if (parts.Length == 2 && string.Equals(Uri.UnescapeDataString(parts[0]), key, StringComparison.OrdinalIgnoreCase))
+                return Uri.UnescapeDataString(parts[1]);
+        }
+        return string.Empty;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        StopCopilotPolling();
+        if (copilotPollingTask is not null)
+        {
+            try { await copilotPollingTask; } catch (OperationCanceledException) { }
+        }
+        copilotPollGate.Dispose();
+    }
+}

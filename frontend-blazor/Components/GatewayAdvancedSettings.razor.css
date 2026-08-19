@@ -1,0 +1,19 @@
+.gateway-advanced-settings { display:grid; gap:16px; }
+.gateway-advanced-settings > section { overflow:hidden; border:1px solid var(--line); border-radius:8px; background:var(--surface); }
+.gateway-advanced-settings > section > header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding:18px 20px; border-bottom:1px solid var(--line); }
+.gateway-advanced-settings h2 { margin:0; color:var(--text); font-size:.98rem; }
+.gateway-advanced-settings header p { margin:5px 0 0; color:var(--muted); font-size:.76rem; }
+.advanced-grid,.scheduler-weights,.fast-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:16px 18px; padding:20px; }
+.advanced-grid ::deep input,.advanced-grid ::deep select,.advanced-grid ::deep textarea,.scheduler-weights ::deep input,.fast-grid ::deep input,.fast-grid ::deep select,.fast-grid ::deep textarea { width:100%; }
+.advanced-grid ::deep textarea,.fast-grid ::deep textarea { resize:vertical; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.74rem; }
+.thresholds { padding:0 20px 20px; }
+.thresholds h3 { margin:0; color:var(--text); font-size:.82rem; }
+.thresholds > p { margin:4px 0 12px; color:var(--muted); font-size:.69rem; }
+.thresholds > div { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+.scheduler-weights { padding-top:0; }
+.advanced-empty { margin:0; padding:20px; color:var(--muted); font-size:.76rem; }
+.fast-rules { display:grid; gap:12px; padding:20px; }
+.fast-rules article { overflow:hidden; border:1px solid var(--line); border-radius:7px; }
+.fast-rules article > header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 13px; border-bottom:1px solid var(--line); background:var(--surface-soft); }
+.fast-grid { padding:15px; }
+@media(max-width:760px){.gateway-advanced-settings > section > header{flex-direction:column}.gateway-advanced-settings > section > header .button{width:100%}.advanced-grid,.scheduler-weights,.fast-grid,.thresholds>div{grid-template-columns:1fr}}

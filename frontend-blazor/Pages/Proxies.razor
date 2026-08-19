@@ -1,0 +1,59 @@
+@page "/admin/proxies"
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<PageTitle>代理管理 · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div><h1>代理管理</h1><p>为上游账号配置 HTTP、HTTPS、SOCKS5 代理，并测试连通性。</p></div>
+    <button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 新建代理</button>
+</div>
+
+<div class="toolbar"><div class="search-box"><Icon Name="search" Size="17" /><input value="@search" @oninput="SearchChanged" placeholder="搜索代理" aria-label="搜索代理" /></div><span class="result-count">@Filtered.Count 个代理</span><button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button></div>
+
+@if (loading) { <LoadingState Text="正在载入代理" /> }
+else if (error is not null) { <ErrorState Message="@error" OnRetry="LoadAsync" /> }
+else if (Filtered.Count == 0) { <EmptyState Title="暂无代理" Description="添加代理后可在上游账号中绑定。"><Action><button type="button" class="button primary small" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> 新建代理</button></Action></EmptyState> }
+else
+{
+    <DxGrid Data="@Filtered" KeyFieldName="Id" ShowFilterRow="true" ShowSearchPanel="true" PageSize="25" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer">
+        <Columns>
+            <DxGridDataColumn FieldName="Name" Caption="名称" MinWidth="160" />
+            <DxGridDataColumn FieldName="Protocol" Caption="协议" Width="100" />
+            <DxGridDataColumn FieldName="Host" Caption="主机" MinWidth="180" />
+            <DxGridDataColumn FieldName="Port" Caption="端口" Width="90" />
+            <DxGridDataColumn FieldName="Status" Caption="状态" Width="100" />
+            <DxGridDataColumn FieldName="AccountCount" Caption="绑定账号" Width="100" />
+            <DxGridDataColumn FieldName="LatencyMs" Caption="延迟(ms)" Width="100" />
+            <DxGridDataColumn Caption="操作" Width="180"><CellDisplayTemplate Context="context">@{ var item = (ProxyDto)context.DataItem; }<button type="button" class="icon-button" title="编辑" aria-label="编辑" @onclick="() => OpenEdit(item)"><Icon Name="pencil" Size="16" /></button><button type="button" class="icon-button" title="测试" aria-label="测试" disabled="@testing.Contains(item.Id)" @onclick="() => TestAsync(item)"><Icon Name="play" Size="16" /></button><button type="button" class="icon-button danger" title="删除" aria-label="删除" @onclick="() => DeleteAsync(item)"><Icon Name="trash" Size="16" /></button></CellDisplayTemplate></DxGridDataColumn>
+        </Columns>
+    </DxGrid>
+}
+
+<AppModal Open="editorOpen" Title="@(editingId is null ? "新建代理" : "编辑代理")" OnClose="CloseEditor">
+    <ChildContent><EditForm id="proxy-editor" Model="form" OnValidSubmit="SaveAsync" FormName="proxy-editor"><DataAnnotationsValidator /><ValidationSummary />@if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }<div class="form-grid"><div class="form-field full"><label for="proxy-name">名称</label><InputText id="proxy-name" @bind-Value="form.Name" /><ValidationMessage For="() => form.Name" /></div><div class="form-field"><label for="proxy-protocol">协议</label><InputSelect id="proxy-protocol" @bind-Value="form.Protocol"><option value="http">HTTP</option><option value="https">HTTPS</option><option value="socks5">SOCKS5</option><option value="socks5h">SOCKS5H</option></InputSelect></div><div class="form-field"><label for="proxy-port">端口</label><InputNumber id="proxy-port" @bind-Value="form.Port" /></div><div class="form-field full"><label for="proxy-host">主机</label><InputText id="proxy-host" @bind-Value="form.Host" /><ValidationMessage For="() => form.Host" /></div><div class="form-field"><label for="proxy-user">用户名（可选）</label><InputText id="proxy-user" @bind-Value="form.Username" /></div><div class="form-field"><label for="proxy-password">密码（可选）</label><InputText id="proxy-password" type="password" @bind-Value="form.Password" autocomplete="new-password" /></div><div class="form-field"><label for="proxy-status">状态</label><InputSelect id="proxy-status" @bind-Value="form.Status"><option value="active">启用</option><option value="inactive">停用</option></InputSelect></div><div class="form-field"><label for="proxy-expires">到期时间（可选）</label><InputDate id="proxy-expires" @bind-Value="form.ExpiresAt" Type="InputDateType.DateTimeLocal" /></div></div></EditForm></ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseEditor">取消</button><button type="submit" form="proxy-editor" class="button primary" disabled="@saving">保存</button></Footer>
+</AppModal>
+
+@code {
+    private List<ProxyDto> proxies = [];
+    private ProxyInput form = new();
+    private string search = string.Empty;
+    private string? editingId;
+    private string? error;
+    private string? modalError;
+    private bool loading = true;
+    private bool saving;
+    private bool editorOpen;
+    private readonly HashSet<long> testing = [];
+    private List<ProxyDto> Filtered => proxies.Where(x => string.IsNullOrWhiteSpace(search) || x.Name.Contains(search, StringComparison.OrdinalIgnoreCase) || x.Host.Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
+    protected override Task OnInitializedAsync() => LoadAsync();
+    private async Task LoadAsync() { loading = true; error = null; try { proxies = await Api.GetProxiesAsync(); } catch (ApiException ex) { error = ex.Message; } finally { loading = false; } }
+    private void SearchChanged(ChangeEventArgs args) => search = args.Value?.ToString() ?? string.Empty;
+    private void OpenCreate() { editingId = null; form = new ProxyInput(); modalError = null; editorOpen = true; }
+    private void OpenEdit(ProxyDto item) { editingId = item.Id.ToString(); form = new ProxyInput { Name = item.Name, Protocol = item.Protocol, Host = item.Host, Port = item.Port, Username = item.Username, Status = item.Status, ExpiresAt = item.ExpiresAt }; modalError = null; editorOpen = true; }
+    private void CloseEditor() => editorOpen = false;
+    private async Task SaveAsync() { saving = true; modalError = null; try { if (editingId is null) await Api.CreateProxyAsync(form); else await Api.UpdateProxyAsync(editingId, form); editorOpen = false; Toasts.Success("代理已保存"); await LoadAsync(); } catch (ApiException ex) { modalError = ex.Message; } finally { saving = false; } }
+    private async Task TestAsync(ProxyDto item) { testing.Add(item.Id); try { var result = await Api.TestProxyAsync(item.Id.ToString()); if (result.Success) Toasts.Success($"代理连接成功{(result.LatencyMs.HasValue ? $"（{result.LatencyMs} ms）" : string.Empty)}"); else error = result.Message; await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } finally { testing.Remove(item.Id); } }
+    private async Task DeleteAsync(ProxyDto item) { try { await Api.DeleteProxyAsync(item.Id.ToString()); Toasts.Success("代理已删除"); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } }
+}

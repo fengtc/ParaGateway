@@ -1,0 +1,49 @@
+@page "/email-verify"
+@layout AuthLayout
+@inject ApiClient Api
+@inject NavigationManager Navigation
+
+<PageTitle>邮箱验证 · ParaGateway</PageTitle>
+
+<div class="login-page">
+    <div class="login-brand"><BrandMark /><span><strong>ParaGateway</strong><small>Gateway</small></span></div>
+    <section class="login-panel">
+        <header><h1>邮箱验证</h1><p>注册需要邮箱验证码时，在这里获取验证码。</p></header>
+        @if (message is not null) { <div class="inline-alert @(success ? "success" : "danger")" role="status"><Icon Name="@(success ? "circle-check" : "alert")" Size="18" /><span>@message</span></div> }
+        <EditForm Model="form" OnValidSubmit="SendAsync" FormName="email-verify">
+            <DataAnnotationsValidator />
+            <div class="form-field"><label for="verify-email">邮箱</label><InputText id="verify-email" @bind-Value="form.Email" type="email" autocomplete="email" /><ValidationMessage For="() => form.Email" /></div>
+            <CaptchaChallenge @ref="captcha" TurnstileEnabled="settings.TurnstileEnabled" TurnstileSiteKey="settings.TurnstileSiteKey" TencentEnabled="settings.TencentCaptchaEnabled" TencentAppId="settings.TencentCaptchaAppId" TencentRegion="settings.TencentCaptchaRegion" AliyunEnabled="settings.AliyunCaptchaEnabled" AliyunSceneId="settings.AliyunCaptchaSceneId" AliyunPrefix="settings.AliyunCaptchaPrefix" AliyunRegion="settings.AliyunCaptchaRegion" />
+            <button type="submit" class="button primary login-button" disabled="@busy">@(busy ? "正在发送…" : "发送验证码")</button>
+        </EditForm>
+        <div class="auth-footer"><a href="/register">返回注册</a><span> · </span><a href="/login">返回登录</a></div>
+    </section>
+</div>
+
+@code {
+    private readonly SendVerifyCodeRequest form = new();
+    private bool busy;
+    private bool success;
+    private string? message;
+    private PublicSettingsDto settings = new();
+    private CaptchaChallenge? captcha;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { settings = await Api.GetPublicSettingsAsync(); }
+        catch (ApiException) { }
+    }
+
+    private async Task SendAsync()
+    {
+        busy = true; message = null;
+        try
+        {
+            form.ApplyCaptcha(captcha is null ? null : await captcha.GetProofAsync());
+            var result = await Api.SendVerifyCodeAsync(form);
+            success = true; message = $"{result.Message}（{result.Countdown} 秒后可再次发送）";
+        }
+        catch (ApiException ex) { success = false; message = ex.Message; }
+        finally { if (captcha is not null) await captcha.ResetAsync(); busy = false; }
+    }
+}

@@ -1,0 +1,272 @@
+@page "/login"
+@layout AuthLayout
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject NavigationManager Navigation
+@inject IJSRuntime Js
+
+<PageTitle>登录 · ParaGateway</PageTitle>
+
+<div class="login-page">
+    <div class="login-brand">
+        <BrandMark />
+        <span><strong>ParaGateway</strong><small>Gateway</small></span>
+    </div>
+
+    <section class="login-panel">
+        <header>
+            <h1>登录</h1>
+            <p>使用 ParaGateway 账户继续</p>
+        </header>
+
+        @if (error is not null)
+        {
+            <div class="inline-alert danger" role="alert">
+                <Icon Name="alert" Size="18" />
+                <span>@error</span>
+            </div>
+        }
+
+        @if (needsTotp)
+        {
+            <div class="subform-panel auth-totp-panel">
+                <h2>二次验证</h2>
+                <p class="muted-text">请输入验证器中的 6 位代码@(string.IsNullOrWhiteSpace(totpMaskedEmail) ? "。" : $"，账户 {totpMaskedEmail}。")</p>
+                <div class="form-field"><label for="login-totp">TOTP 验证码</label><InputText id="login-totp" @bind-Value="totpCode" inputmode="numeric" autocomplete="one-time-code" /></div>
+                <button type="button" class="button primary login-button" disabled="@submitting" @onclick="CompleteTotpAsync">@(submitting ? "正在验证…" : "验证并登录")</button>
+            </div>
+        }
+        else
+        {
+
+        <EditForm Model="model" OnValidSubmit="LoginAsync" FormName="login">
+            <DataAnnotationsValidator />
+            <div class="form-field">
+                <label for="login-email">邮箱</label>
+                <InputText id="login-email" @bind-Value="model.Email" @oninput="UpdateEmail" autocomplete="username" placeholder="admin@example.com" />
+                <ValidationMessage For="() => model.Email" />
+            </div>
+            <div class="form-field">
+                <label for="login-password">密码</label>
+                <div class="password-input">
+                    <InputText id="login-password" @bind-Value="model.Password" @oninput="UpdatePassword" type="@(showPassword ? "text" : "password")" autocomplete="current-password" />
+                    <button type="button" class="icon-button" title="@(showPassword ? "隐藏密码" : "显示密码")" aria-label="@(showPassword ? "隐藏密码" : "显示密码")" @onclick="TogglePassword">
+                        <Icon Name="@(showPassword ? "eye-off" : "eye")" Size="17" />
+                    </button>
+                </div>
+                <ValidationMessage For="() => model.Password" />
+            </div>
+            <div class="auth-links"><a href="/forgot-password">忘记密码？</a><a href="/email-verify">邮箱验证</a></div>
+            <CaptchaChallenge @ref="captcha" TurnstileEnabled="turnstileEnabled" TurnstileSiteKey="turnstileSiteKey" TencentEnabled="tencentCaptchaEnabled" TencentAppId="tencentCaptchaAppId" TencentRegion="tencentCaptchaRegion" AliyunEnabled="aliyunCaptchaEnabled" AliyunSceneId="aliyunCaptchaSceneId" AliyunPrefix="aliyunCaptchaPrefix" AliyunRegion="aliyunCaptchaRegion" />
+            <button type="submit" class="button primary login-button" disabled="@submitting">
+                @if (submitting)
+                {
+                    <span class="spinner light"></span>
+                    <span>正在登录</span>
+                }
+                else
+                {
+                    <span>登录</span>
+                }
+            </button>
+        </EditForm>
+        @if (passkeyEnabled && passkeySupported)
+        {
+            <div class="oauth-divider"><span>或使用 Passkey</span></div>
+            <button type="button" class="button secondary login-button" disabled="@submitting" @onclick="LoginWithPasskeyAsync">
+                <Icon Name="key" Size="16" /> 使用 Passkey 登录
+            </button>
+        }
+        @if (oauthProviders.Count > 0)
+        {
+            <div class="oauth-divider"><span>或使用第三方登录</span></div>
+            <div class="button-row oauth-login-actions">
+                @foreach (var provider in oauthProviders)
+                {
+                    <button type="button" class="button secondary" disabled="@submitting" @onclick="() => StartOAuthAsync(provider.Key)">
+                        <Icon Name="shield" Size="16" /> @provider.Value
+                    </button>
+                }
+            </div>
+        }
+        <div class="auth-footer">还没有账户？<a href="/register">注册</a></div>
+        }
+    </section>
+</div>
+
+@code {
+    private readonly LoginRequest model = new();
+    private bool submitting;
+    private bool showPassword;
+    private string? error;
+    private bool passkeyEnabled;
+    private bool passkeySupported;
+    private bool turnstileEnabled;
+    private string turnstileSiteKey = string.Empty;
+    private bool tencentCaptchaEnabled;
+    private string tencentCaptchaAppId = string.Empty;
+    private string tencentCaptchaRegion = "cn";
+    private bool aliyunCaptchaEnabled;
+    private string aliyunCaptchaSceneId = string.Empty;
+    private string aliyunCaptchaPrefix = string.Empty;
+    private string aliyunCaptchaRegion = "cn";
+    private CaptchaChallenge? captcha;
+    private bool needsTotp;
+    private string totpTempToken = string.Empty;
+    private string totpCode = string.Empty;
+    private string? totpMaskedEmail;
+    private readonly Dictionary<string, string> oauthProviders = new(StringComparer.OrdinalIgnoreCase);
+
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Auth.IsAuthenticated)
+        {
+            Navigation.NavigateTo(Auth.User?.IsAdmin == true ? "/" : "/account", replace: true);
+            return;
+        }
+
+        try
+        {
+            var settings = await Api.GetPublicSettingsAsync();
+            passkeyEnabled = settings.PasskeyEnabled;
+            passkeySupported = await Js.InvokeAsync<bool>("paraGateway.isPasskeySupported");
+            turnstileEnabled = settings.TurnstileEnabled;
+            turnstileSiteKey = settings.TurnstileSiteKey;
+            tencentCaptchaEnabled = settings.TencentCaptchaEnabled;
+            tencentCaptchaAppId = settings.TencentCaptchaAppId;
+            tencentCaptchaRegion = settings.TencentCaptchaRegion;
+            aliyunCaptchaEnabled = settings.AliyunCaptchaEnabled;
+            aliyunCaptchaSceneId = settings.AliyunCaptchaSceneId;
+            aliyunCaptchaPrefix = settings.AliyunCaptchaPrefix;
+            aliyunCaptchaRegion = settings.AliyunCaptchaRegion;
+            if (settings.GitHubOAuthEnabled) oauthProviders["github"] = "GitHub";
+            if (settings.GoogleOAuthEnabled) oauthProviders["google"] = "Google";
+            if (settings.LinuxDoOAuthEnabled) oauthProviders["linuxdo"] = "LinuxDo";
+            if (settings.DingTalkOAuthEnabled) oauthProviders["dingtalk"] = "钉钉";
+            if (settings.WeChatOAuthEnabled || settings.WeChatOAuthOpenEnabled == true || settings.WeChatOAuthMpEnabled == true) oauthProviders["wechat"] = "微信";
+            if (settings.OidcOAuthEnabled) oauthProviders["oidc"] = string.IsNullOrWhiteSpace(settings.OidcOAuthProviderName) ? "OIDC" : settings.OidcOAuthProviderName;
+        }
+        catch (ApiException) { }
+    }
+
+    private void TogglePassword() => showPassword = !showPassword;
+
+    private void UpdateEmail(ChangeEventArgs args) => model.Email = args.Value?.ToString() ?? string.Empty;
+
+    private void UpdatePassword(ChangeEventArgs args) => model.Password = args.Value?.ToString() ?? string.Empty;
+
+    private async Task StartOAuthAsync(string provider)
+    {
+        if (provider is "github" or "google")
+        {
+            await Js.InvokeVoidAsync("sessionStorage.setItem", "email_oauth_pending_provider", provider);
+        }
+        else
+        {
+            await Js.InvokeVoidAsync("sessionStorage.removeItem", "email_oauth_pending_provider");
+        }
+        submitting = true;
+        error = null;
+        try
+        {
+            var proof = captcha is null ? null : await captcha.GetActionProofAsync();
+            var mode = provider.Equals("wechat", StringComparison.OrdinalIgnoreCase)
+                ? await ResolveWeChatModeAsync()
+                : null;
+            var start = await Api.StartOAuthLoginAsync(provider, "/dashboard", proof, mode);
+            if (string.IsNullOrWhiteSpace(start.AuthorizeUrl)) throw new ApiException("后端未返回 OAuth 授权地址。", System.Net.HttpStatusCode.BadGateway);
+            Navigation.NavigateTo(start.AuthorizeUrl, forceLoad: true);
+        }
+        catch (ApiException ex) { error = ex.Message; submitting = false; }
+    }
+
+    private async Task LoginAsync()
+    {
+        submitting = true;
+        error = null;
+        try
+        {
+            var proof = captcha is null ? null : await captcha.GetProofAsync();
+            model.ApplyCaptcha(proof);
+            var auth = await Auth.LoginPasswordAsync(model);
+            if (auth.Requires2FA && !string.IsNullOrWhiteSpace(auth.TempToken))
+            {
+                needsTotp = true;
+                totpTempToken = auth.TempToken;
+                totpMaskedEmail = auth.UserEmailMasked;
+                return;
+            }
+            if (auth.User is null) throw new ApiException("服务器未返回登录用户信息。", System.Net.HttpStatusCode.BadGateway);
+            await Api.AcceptOAuthTokensAsync(auth);
+            await Auth.RefreshAsync();
+            var target = Auth.User?.IsAdmin == true
+                ? ReturnUrlPolicy.GetSafeLocalPath(ReturnUrl, Navigation.BaseUri)
+                : UserTarget(ReturnUrl);
+            Navigation.NavigateTo(target, replace: true);
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            if (!needsTotp && captcha is not null) await captcha.ResetAsync();
+            submitting = false;
+        }
+    }
+
+    private async Task CompleteTotpAsync()
+    {
+        submitting = true; error = null;
+        try
+        {
+            await Auth.CompletePasswordTwoFactorAsync(totpTempToken, totpCode);
+            var target = Auth.User?.IsAdmin == true ? ReturnUrlPolicy.GetSafeLocalPath(ReturnUrl, Navigation.BaseUri) : UserTarget(ReturnUrl);
+            Navigation.NavigateTo(target, replace: true);
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { submitting = false; }
+    }
+
+    private async Task<string?> ResolveWeChatModeAsync()
+    {
+        var settings = await Api.GetPublicSettingsAsync();
+        var userAgent = await Js.InvokeAsync<string>("paraGateway.getUserAgent");
+        var inWeChat = userAgent.Contains("MicroMessenger", StringComparison.OrdinalIgnoreCase);
+        var mode = inWeChat ? "mp" : "open";
+        var enabled = inWeChat ? (settings.WeChatOAuthMpEnabled ?? settings.WeChatOAuthEnabled) : (settings.WeChatOAuthOpenEnabled ?? settings.WeChatOAuthEnabled);
+        if (!enabled) throw new ApiException(inWeChat ? "当前微信环境未启用公众号 OAuth。" : "当前浏览器未启用微信开放平台 OAuth。", System.Net.HttpStatusCode.BadRequest);
+        return mode;
+    }
+
+    private async Task LoginWithPasskeyAsync()
+    {
+        submitting = true;
+        error = null;
+        try
+        {
+            var proof = captcha is null ? null : await captcha.GetActionProofAsync();
+            var begin = await Api.BeginPasskeyLoginAsync(proof);
+            var session = begin.TryGetProperty("session_token", out var token) ? token.GetString() : null;
+            var options = begin.TryGetProperty("options", out var optionValue) ? optionValue : default;
+            if (string.IsNullOrWhiteSpace(session) || options.ValueKind == System.Text.Json.JsonValueKind.Undefined)
+                throw new ApiException("后端未返回 Passkey 登录参数。", System.Net.HttpStatusCode.BadGateway);
+            var credential = await Js.InvokeAsync<System.Text.Json.JsonElement>("paraGateway.passkeyGet", options.GetProperty("publicKey"));
+            await Auth.LoginWithPasskeyAsync(session!, credential);
+            Navigation.NavigateTo(Auth.User?.IsAdmin == true ? "/" : "/account", replace: true);
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        catch (JSException ex) { error = ex.Message; }
+        finally { if (captcha is not null) await captcha.ResetAsync(); submitting = false; }
+    }
+
+    private string UserTarget(string? returnUrl)
+    {
+        var target = ReturnUrlPolicy.GetSafeLocalPath(returnUrl, Navigation.BaseUri, "/account");
+        var path = target.Split('?', '#')[0];
+        return path is "/account" or "/api-keys" or "/usage" ? target : "/account";
+    }
+}

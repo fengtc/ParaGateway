@@ -1,0 +1,106 @@
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+
+<section class="settings-card user-defaults-card">
+    <header><div><h2>新用户默认值</h2><p>设置新用户的余额、并发、RPM、默认订阅以及五个平台的周期限额。</p></div></header>
+    <div class="settings-grid">
+        <Field Label="默认余额"><InputNumber @bind-Value="Settings.DefaultBalance" min="0" step="0.01" /></Field>
+        <Field Label="默认并发"><InputNumber @bind-Value="Settings.DefaultConcurrency" min="1" /></Field>
+        <Field Label="默认用户 RPM" Hint="0 表示不限制"><InputNumber @bind-Value="Settings.DefaultUserRpmLimit" min="0" /></Field>
+    </div>
+
+    <div class="defaults-subsection">
+        <div class="subsection-heading"><div><h3>默认订阅</h3><p>注册成功后自动授予指定订阅分组和有效期。</p></div><button type="button" class="button secondary small" disabled="@(groupsLoading || NextGroup(Settings.DefaultSubscriptions) is null)" @onclick="() => AddSubscription(Settings.DefaultSubscriptions)"><Icon Name="plus" Size="14" />添加订阅</button></div>
+        @if (!string.IsNullOrWhiteSpace(groupError))
+        {
+            <div class="inline-alert warning"><Icon Name="alert" Size="15" /><span>@groupError</span></div>
+        }
+        <DefaultSubscriptionEditor Items="Settings.DefaultSubscriptions" Groups="subscriptionGroups" Loading="groupsLoading" />
+    </div>
+
+    <PlatformQuotaMatrix Title="全局默认平台限额" Hint="单位为美元；留空表示不限制，0 表示禁止该周期额度。" Quotas="Settings.DefaultPlatformQuotas" />
+</section>
+
+<section class="settings-card user-defaults-card">
+    <header><div><h2>认证来源默认值</h2><p>分别控制邮箱、LinuxDo、OIDC、微信、GitHub、Google 和钉钉首次注册或首次绑定时授予的权益。</p></div></header>
+    <ToggleField Label="第三方注册强制补充邮箱" Hint="第三方身份没有可靠邮箱时，要求用户补充并验证本地邮箱"><InputCheckbox @bind-Value="Settings.ForceEmailOnThirdPartySignup" /></ToggleField>
+
+    <div class="auth-source-list">
+        @foreach (var meta in Sources)
+        {
+            var source = Settings.AuthSourceDefaults[meta.Id];
+            <article class="auth-source-card" @key="meta.Id">
+                <div class="auth-source-heading">
+                    <div><h3>@meta.Label</h3><p>@meta.Description</p></div>
+                    <label class="inline-switch"><span>注册时授予</span><InputCheckbox @bind-Value="source.GrantOnSignup" /></label>
+                </div>
+                @if (source.GrantOnSignup)
+                {
+                    <div class="auth-source-body">
+                        <div class="settings-grid">
+                            <Field Label="默认余额"><InputNumber @bind-Value="source.Balance" min="0" step="0.01" /></Field>
+                            <Field Label="默认并发"><InputNumber @bind-Value="source.Concurrency" min="1" /></Field>
+                            <ToggleField Label="首次绑定也授予" Hint="已有本地账号第一次绑定此认证来源时，同样执行授予"><InputCheckbox @bind-Value="source.GrantOnFirstBind" /></ToggleField>
+                        </div>
+                        <div class="defaults-subsection compact">
+                            <div class="subsection-heading"><div><h3>来源默认订阅</h3><p>覆盖全局默认订阅的额外授权。</p></div><button type="button" class="button secondary small" disabled="@(NextGroup(source.Subscriptions) is null)" @onclick="() => AddSubscription(source.Subscriptions)"><Icon Name="plus" Size="14" />添加订阅</button></div>
+                            <DefaultSubscriptionEditor Items="source.Subscriptions" Groups="subscriptionGroups" Loading="groupsLoading" />
+                        </div>
+                        <PlatformQuotaMatrix Title="平台限额覆盖" Hint="该来源填写的值覆盖全局默认平台限额；留空表示不覆盖。" Quotas="source.PlatformQuotas" />
+                    </div>
+                }
+            </article>
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public AdminSettingsDto Settings { get; set; } = default!;
+
+    private static readonly (string Id, string Label, string Description)[] Sources =
+    [
+        ("email", "邮箱注册", "使用邮箱和密码创建的新账号"),
+        ("linuxdo", "LinuxDo", "通过 LinuxDo OAuth 首次登录的账号"),
+        ("oidc", "通用 OIDC", "通过自定义 OpenID Connect 提供商登录的账号"),
+        ("wechat", "微信", "通过微信开放平台、公众号或移动应用登录的账号"),
+        ("github", "GitHub", "通过 GitHub OAuth 登录的账号"),
+        ("google", "Google", "通过 Google OAuth 登录的账号"),
+        ("dingtalk", "钉钉", "通过钉钉 OAuth 登录的企业账号")
+    ];
+    private List<GoGroup> subscriptionGroups = [];
+    private bool groupsLoading = true;
+    private string? groupError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            subscriptionGroups = (await Api.GetAllAdminGroupsAsync())
+                .Where(group => group.SubscriptionType == "subscription" && group.Status == "active")
+                .OrderBy(group => group.SortOrder)
+                .ThenBy(group => group.Id)
+                .ToList();
+        }
+        catch (ApiException ex)
+        {
+            groupError = $"订阅分组加载失败：{ex.Message}";
+        }
+        finally
+        {
+            groupsLoading = false;
+        }
+    }
+
+    private GoGroup? NextGroup(List<DefaultSubscriptionSettingDto> items)
+    {
+        var used = items.Select(item => item.GroupId).ToHashSet();
+        return subscriptionGroups.FirstOrDefault(group => !used.Contains(group.Id));
+    }
+
+    private void AddSubscription(List<DefaultSubscriptionSettingDto> items)
+    {
+        var group = NextGroup(items);
+        if (group is not null) items.Add(new DefaultSubscriptionSettingDto { GroupId = group.Id, ValidityDays = 30 });
+    }
+
+}

@@ -1,0 +1,236 @@
+@page "/redeem"
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject ToastService Toasts
+
+<PageTitle>兑换码 · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>兑换码</h1>
+        <p>兑换管理员发放的余额、并发或订阅权益。</p>
+    </div>
+    <button type="button" class="icon-button" title="刷新历史" aria-label="刷新兑换历史" disabled="@loadingHistory" @onclick="LoadHistoryAsync">
+        <Icon Name="refresh" Size="17" />
+    </button>
+</div>
+
+<div class="redeem-layout">
+    <section class="redeem-balance-card">
+        <span class="redeem-balance-icon"><Icon Name="wallet" Size="28" /></span>
+        <span>当前余额</span>
+        <strong>$@((Auth.User?.Balance ?? 0m).ToString("0.00"))</strong>
+        <small>并发额度：@(Auth.User?.Concurrency ?? 0) 请求</small>
+    </section>
+
+    <section class="content-section redeem-form-card">
+        <div class="section-header">
+            <div>
+                <h2>立即兑换</h2>
+                <p>兑换码只会提交到官方 Go 后端，不会在浏览器中保存。</p>
+            </div>
+        </div>
+        <EditForm Model="form" OnValidSubmit="RedeemAsync" FormName="redeem-form">
+            <DataAnnotationsValidator />
+            <div class="form-field full redeem-code-field">
+                <label for="redeem-code">兑换码</label>
+                <div class="redeem-input-wrap">
+                    <Icon Name="ticket" Size="19" />
+                    <InputText id="redeem-code" @bind-Value="form.Code" autocomplete="off" disabled="@saving" placeholder="请输入兑换码" />
+                </div>
+                <span class="field-hint">请完整输入兑换码，字母和数字均区分大小写。</span>
+                <ValidationMessage For="() => form.Code" />
+            </div>
+            <button type="submit" class="button primary redeem-submit" disabled="@(saving || string.IsNullOrWhiteSpace(form.Code))">
+                @if (saving) { <span class="spinner light"></span> }
+                <Icon Name="circle-check" Size="17" />@(saving ? "兑换中…" : "立即兑换")
+            </button>
+        </EditForm>
+    </section>
+
+    @if (result is not null)
+    {
+        <section class="redeem-result success" role="status">
+            <span class="result-icon"><Icon Name="circle-check" Size="22" /></span>
+            <div>
+                <strong>兑换成功</strong>
+                <p>@ResultTitle(result)</p>
+                @if (result.Type == "balance")
+                {
+                    <span>当前余额：<b>$@((Auth.User?.Balance ?? 0m).ToString("0.00"))</b></span>
+                }
+                else if (result.Type == "concurrency")
+                {
+                    <span>当前并发额度：<b>@(Auth.User?.Concurrency ?? 0) 请求</b></span>
+                }
+            </div>
+        </section>
+    }
+
+    @if (error is not null)
+    {
+        <section class="redeem-result danger" role="alert">
+            <span class="result-icon"><Icon Name="alert" Size="22" /></span>
+            <div><strong>兑换失败</strong><p>@error</p></div>
+        </section>
+    }
+
+    <section class="redeem-info-card">
+        <span><Icon Name="info" Size="20" /></span>
+        <div>
+            <strong>关于兑换码</strong>
+            <ul>
+                <li>每个兑换码通常只能使用一次。</li>
+                <li>兑换码可能包含余额、并发额度或指定分组的订阅时长。</li>
+                <li>兑换码无效或过期时，请联系管理员@if (!string.IsNullOrWhiteSpace(contactInfo)) { <b>（@contactInfo）</b> }。</li>
+                <li>兑换成功后，权益和下方历史记录会立即更新。</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="content-section redeem-history-card">
+        <div class="section-header">
+            <div><h2>最近活动</h2><p>最近 25 条兑换及管理员余额、并发调整记录。</p></div>
+        </div>
+
+        @if (loadingHistory)
+        {
+            <LoadingState Text="正在载入兑换历史" />
+        }
+        else if (history.Count == 0)
+        {
+            <EmptyState Title="暂无兑换记录" Description="兑换成功后，记录会显示在这里。" />
+        }
+        else
+        {
+            <div class="redeem-history-list">
+                @foreach (var item in history)
+                {
+                    <article class="redeem-history-item">
+                        <span class="history-icon @HistoryTone(item)"><Icon Name="@HistoryIcon(item)" Size="19" /></span>
+                        <div class="history-copy">
+                            <strong>@HistoryTitle(item)</strong>
+                            <span>@FormatDateTime(item.UsedAt ?? item.CreatedAt)</span>
+                        </div>
+                        <div class="history-value @HistoryTone(item)">
+                            <strong>@FormatHistoryValue(item)</strong>
+                            @if (IsAdminAdjustment(item.Type))
+                            {
+                                <span>管理员调整</span>
+                            }
+                            else
+                            {
+                                <code>@MaskCode(item.Code)</code>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(item.Notes))
+                            {
+                                <span class="history-notes" title="@item.Notes">@item.Notes</span>
+                            }
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private RedeemInput form = new();
+    private RedeemCodeDto? result;
+    private List<RedeemCodeDto> history = [];
+    private bool loadingHistory = true;
+    private bool saving;
+    private string? error;
+    private string contactInfo = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.WhenAll(LoadHistoryAsync(), LoadContactInfoAsync());
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        loadingHistory = true;
+        try
+        {
+            history = await Api.GetRedeemHistoryAsync();
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            loadingHistory = false;
+        }
+    }
+
+    private async Task LoadContactInfoAsync()
+    {
+        try { contactInfo = (await Api.GetPublicSettingsAsync()).ContactInfo; }
+        catch (ApiException) { }
+    }
+
+    private async Task RedeemAsync()
+    {
+        saving = true;
+        error = null;
+        result = null;
+        try
+        {
+            result = await Api.RedeemAsync(form);
+            form = new RedeemInput();
+            await Auth.RefreshAsync();
+            await LoadHistoryAsync();
+            Toasts.Success("兑换成功");
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private static bool IsBalanceType(string type) => type is "balance" or "admin_balance";
+    private static bool IsSubscriptionType(string type) => type == "subscription";
+    private static bool IsAdminAdjustment(string type) => type is "admin_balance" or "admin_concurrency";
+
+    private static string ResultTitle(RedeemCodeDto item) => item.Type switch
+    {
+        "balance" => $"余额增加 ${item.Value:0.00}",
+        "concurrency" => $"并发额度增加 {item.Value:0.##} 请求",
+        "subscription" => string.IsNullOrWhiteSpace(item.Group?.Name)
+            ? $"已获得 {Math.Abs(item.ValidityDays)} 天订阅"
+            : $"已获得 {item.Group.Name} · {Math.Abs(item.ValidityDays)} 天订阅",
+        _ => "兑换权益已经发放"
+    };
+
+    private static string HistoryTitle(RedeemCodeDto item) => item.Type switch
+    {
+        "balance" => "兑换码增加余额",
+        "admin_balance" => item.Value >= 0 ? "管理员增加余额" : "管理员扣减余额",
+        "concurrency" => "兑换码增加并发",
+        "admin_concurrency" => item.Value >= 0 ? "管理员增加并发" : "管理员减少并发",
+        "subscription" => "订阅权益已分配",
+        _ => "未知权益变更"
+    };
+
+    private static string FormatHistoryValue(RedeemCodeDto item)
+    {
+        if (IsBalanceType(item.Type)) return $"{(item.Value >= 0 ? "+" : string.Empty)}${item.Value:0.00}";
+        if (IsSubscriptionType(item.Type))
+        {
+            var days = item.ValidityDays != 0 ? item.ValidityDays : (int)Math.Round(item.Value);
+            return string.IsNullOrWhiteSpace(item.Group?.Name) ? $"{days} 天" : $"{days} 天 · {item.Group.Name}";
+        }
+        return $"{(item.Value >= 0 ? "+" : string.Empty)}{item.Value:0.##} 请求";
+    }
+
+    private static string HistoryIcon(RedeemCodeDto item) => IsBalanceType(item.Type) ? "dollar" : IsSubscriptionType(item.Type) ? "ticket" : "pulse";
+    private static string HistoryTone(RedeemCodeDto item) => IsSubscriptionType(item.Type) ? "purple" : item.Value >= 0 ? "positive" : "negative";
+    private static string MaskCode(string value) => string.IsNullOrWhiteSpace(value) ? "-" : value.Length <= 8 ? value : $"{value[..8]}…";
+    private static string FormatDateTime(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+}

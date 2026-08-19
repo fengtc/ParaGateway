@@ -1,0 +1,438 @@
+.profile-shell {
+    display: grid;
+    width: min(950px, 100%);
+    margin: 0 auto;
+    gap: 24px;
+}
+
+.profile-hero,
+.profile-card {
+    overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(20, 35, 29, .03);
+}
+
+.profile-hero {
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+    padding: 28px 32px;
+    background:
+        radial-gradient(circle at 88% 0, rgba(238, 190, 104, .18), transparent 37%),
+        linear-gradient(135deg, var(--primary-soft), var(--surface) 47%, rgba(250, 243, 222, .55));
+    border-color: color-mix(in srgb, var(--primary) 18%, var(--line));
+}
+
+.profile-hero-avatar,
+.avatar-editor-preview {
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    overflow: hidden;
+    color: #fff;
+    background: linear-gradient(145deg, #399777, #21684e);
+    box-shadow: 0 12px 28px rgba(40, 116, 90, .2);
+}
+
+.profile-hero-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 27px;
+    font-size: 1.55rem;
+    font-weight: 760;
+}
+
+.profile-hero-avatar img,
+.avatar-editor-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.profile-hero-main {
+    display: grid;
+    min-width: 0;
+    flex: 1 1 auto;
+    gap: 20px;
+}
+
+.profile-hero-copy,
+.profile-hero-copy > div {
+    min-width: 0;
+}
+
+.profile-hero-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.profile-hero-title h2 {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    font-size: 1.55rem;
+    font-weight: 720;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.profile-hero-copy > p {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: .86rem;
+}
+
+.profile-source-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 9px;
+}
+
+.profile-source-chips span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    color: var(--muted);
+    background: color-mix(in srgb, var(--surface) 84%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 14%, var(--line));
+    border-radius: 999px;
+    font-size: .7rem;
+}
+
+.profile-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.profile-metrics article {
+    display: grid;
+    gap: 3px;
+    padding: 13px 15px;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--surface) 74%, var(--line));
+    border-radius: 16px;
+    box-shadow: 0 2px 7px rgba(21, 35, 30, .035);
+}
+
+.profile-metrics small {
+    color: color-mix(in srgb, var(--muted) 74%, transparent);
+    font-size: .64rem;
+    font-weight: 700;
+    letter-spacing: .13em;
+}
+
+.profile-metrics strong {
+    font-size: 1.06rem;
+    font-weight: 720;
+}
+
+.profile-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--line);
+}
+
+.profile-card-header h2,
+.profile-contact-card h2 {
+    margin: 0;
+    font-size: 1.03rem;
+    font-weight: 700;
+}
+
+.profile-card-header p,
+.profile-contact-card p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: .79rem;
+}
+
+.profile-card-body {
+    padding: 22px 24px;
+}
+
+.profile-basics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 22px;
+    padding: 24px;
+}
+
+.profile-inset-card {
+    min-width: 0;
+    padding: 20px;
+    background: color-mix(in srgb, var(--surface-soft) 86%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+    border-radius: 20px;
+}
+
+.avatar-editor {
+    display: grid;
+    align-content: start;
+    gap: 15px;
+}
+
+.avatar-editor-preview {
+    width: 64px;
+    height: 64px;
+    border-radius: 17px;
+    font-size: 1.2rem;
+    font-weight: 750;
+}
+
+.avatar-editor-copy h3,
+.profile-editor h3 {
+    margin: 0;
+    font-size: .92rem;
+}
+
+.avatar-editor-copy p {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: .76rem;
+}
+
+.avatar-actions {
+    margin-top: 0;
+}
+
+.file-button {
+    cursor: pointer;
+}
+
+.visually-hidden-file {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.profile-editor {
+    display: grid;
+    align-content: start;
+    gap: 17px;
+}
+
+.profile-editor form,
+.password-form {
+    display: grid;
+}
+
+.profile-form-action {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.profile-binding-grid {
+    display: grid;
+    gap: 12px;
+    padding: 24px;
+}
+
+.profile-binding-item {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 15px 16px;
+    background: color-mix(in srgb, var(--surface-soft) 68%, var(--surface));
+    border: 1px solid var(--line);
+    border-radius: 15px;
+}
+
+.provider-avatar {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    color: #fff;
+    background: #53615b;
+    border-radius: 13px;
+    font-size: .86rem;
+    font-weight: 760;
+}
+
+.provider-avatar.email { background: #28745a; }
+.provider-avatar.linuxdo { background: #282d31; }
+.provider-avatar.dingtalk { background: #1677ff; }
+.provider-avatar.oidc { background: #7c5ce3; }
+.provider-avatar.wechat { background: #07c160; }
+
+.provider-main {
+    min-width: 0;
+}
+
+.provider-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.provider-title h3 {
+    margin: 0;
+    font-size: .88rem;
+}
+
+.provider-main p {
+    margin: 3px 0 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: .72rem;
+    text-overflow: ellipsis;
+}
+
+.provider-identity {
+    color: var(--ink) !important;
+}
+
+.provider-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.email-binding-form {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: end;
+    gap: 12px;
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 11px;
+}
+
+.email-binding-form .form-field {
+    margin-bottom: 0;
+}
+
+.input-action-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+
+.profile-card-alert {
+    margin: 20px 24px 0;
+}
+
+.profile-sources-card {
+    padding-bottom: 20px;
+}
+
+.profile-source-list {
+    display: grid;
+    gap: 10px;
+    padding: 20px 24px 4px;
+}
+
+.profile-source-list > div {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+    color: var(--muted);
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    font-size: .76rem;
+}
+
+.profile-contact-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 22px 24px;
+    color: color-mix(in srgb, var(--primary) 78%, var(--ink));
+    background: var(--primary-soft);
+    border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--line));
+    border-radius: 12px;
+}
+
+.contact-icon {
+    display: grid;
+    flex: 0 0 46px;
+    width: 46px;
+    height: 46px;
+    place-items: center;
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary-soft) 46%, var(--surface));
+    border-radius: 13px;
+}
+
+.password-card .profile-card-body {
+    max-width: 620px;
+}
+
+.password-form small {
+    color: var(--muted);
+    font-size: .69rem;
+}
+
+@media (max-width: 760px) {
+    .profile-hero {
+        padding: 22px;
+        flex-direction: column;
+    }
+
+    .profile-hero-main {
+        width: 100%;
+    }
+
+    .profile-metrics,
+    .profile-basics-grid,
+    .email-binding-form {
+        grid-template-columns: 1fr;
+    }
+
+    .profile-basics-grid,
+    .profile-binding-grid {
+        padding: 18px;
+    }
+
+    .profile-binding-item {
+        grid-template-columns: 42px minmax(0, 1fr);
+    }
+
+    .provider-actions,
+    .email-binding-form {
+        grid-column: 1 / -1;
+    }
+
+    .provider-actions .button {
+        width: 100%;
+    }
+}
+
+@media (max-width: 480px) {
+    .profile-metrics {
+        grid-template-columns: 1fr;
+    }
+
+    .profile-card-header,
+    .profile-card-body,
+    .profile-contact-card {
+        padding-right: 18px;
+        padding-left: 18px;
+    }
+
+    .input-action-row {
+        grid-template-columns: 1fr;
+    }
+}

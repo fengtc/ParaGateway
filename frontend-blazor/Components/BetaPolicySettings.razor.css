@@ -1,0 +1,18 @@
+.beta-policy-card { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.beta-policy-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.beta-policy-card h2 { margin: 0; color: var(--text); font-size: .98rem; }
+.beta-policy-card > header p { margin: 5px 0 0; color: var(--muted); font-size: .76rem; }
+.beta-alert { display: flex; align-items: center; gap: 8px; margin: 16px 20px 0; padding: 10px 12px; border: 1px solid rgba(190,62,62,.25); border-radius: 6px; color: var(--danger); background: rgba(190,62,62,.06); font-size: .76rem; }
+.beta-rules { display: grid; gap: 12px; padding: 20px; }
+.beta-rules article { overflow: hidden; border: 1px solid var(--line); border-radius: 7px; }
+.beta-rules article > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--surface-soft); }
+.beta-rules article > header div { display: grid; gap: 3px; }
+.beta-rules code { color: var(--muted); font-size: .67rem; }
+.action-badge { padding: 3px 8px; border-radius: 999px; color: var(--muted); background: var(--surface); font-size: .66rem; font-weight: 700; }
+.action-badge.block { color: var(--danger); background: rgba(190,62,62,.1); }
+.action-badge.filter { color: #97620d; background: rgba(209,144,23,.12); }
+.action-badge.pass { color: var(--primary); background: rgba(35,134,98,.1); }
+.beta-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; gap: 16px 18px; padding: 16px; }
+.beta-grid ::deep input, .beta-grid ::deep select, .beta-grid ::deep textarea { width: 100%; }
+.beta-grid ::deep textarea { resize: vertical; font-family: ui-monospace,SFMono-Regular,Consolas,monospace; }
+@media (max-width: 760px) { .beta-policy-card > header { flex-direction: column; } .beta-policy-card > header .button { width: 100%; } .beta-grid { grid-template-columns: 1fr; } }

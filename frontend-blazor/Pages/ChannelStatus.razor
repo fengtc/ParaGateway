@@ -1,0 +1,50 @@
+@page "/monitor"
+@inject ApiClient Api
+@inject AuthSession Auth
+
+<PageTitle>渠道状态 · ParaGateway</PageTitle>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入渠道状态配置" />
+}
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else if (string.Equals(settings.ChannelMonitorMode, "v2", StringComparison.OrdinalIgnoreCase))
+{
+    <ChannelStatusV2Panel HideThroughput="@settings.ChannelMonitorHideThroughput"
+                          IsAdmin="@(Auth.User?.IsAdmin == true)" />
+}
+else
+{
+    <ChannelStatusV1Panel Enabled="@settings.ChannelMonitorEnabled"
+                          DefaultIntervalSeconds="@settings.ChannelMonitorDefaultIntervalSeconds" />
+}
+
+@code {
+    private PublicSettingsDto settings = new();
+    private bool loading = true;
+    private string? error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            settings = await Api.GetPublicSettingsAsync();
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+}

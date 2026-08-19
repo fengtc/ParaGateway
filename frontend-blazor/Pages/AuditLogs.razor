@@ -1,0 +1,341 @@
+@page "/admin/audit-logs"
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<PageTitle>审计日志 · ParaGateway</PageTitle>
+
+<div class="audit-page">
+    <header class="audit-heading">
+        <div>
+            <span>安全与合规</span>
+            <h1>审计日志</h1>
+            <p>记录管理面操作、认证方式、来源地址和结果；请求凭据及正文由 Go 后端脱敏后保存。</p>
+        </div>
+        <button type="button" class="button secondary" disabled="@loading" @onclick="LoadAsync">
+            <Icon Name="refresh" Size="16" /> 刷新
+        </button>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="inline-alert danger" role="alert">
+            <Icon Name="alert" Size="17" />
+            <span>@error</span>
+            <button type="button" @onclick="LoadAsync">重试</button>
+        </div>
+    }
+
+    <form class="audit-filter-card" @onsubmit="SearchAsync" @onsubmit:preventDefault="true">
+        <div class="audit-filter-grid">
+            <label class="wide-filter">
+                <span>全文搜索</span>
+                <div class="search-box"><Icon Name="search" Size="15" /><input @bind="filterSearch" placeholder="动作、路径或操作者邮箱" /></div>
+            </label>
+            <label><span>操作者邮箱</span><input @bind="filterActorEmail" /></label>
+            <label><span>动作</span><input @bind="filterAction" placeholder="例如 admin.accounts.update" /></label>
+            <label><span>客户端 IP</span><input @bind="filterClientIp" /></label>
+            <label>
+                <span>HTTP 方法</span>
+                <select @bind="filterMethod">
+                    <option value="">全部</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>GET</option>
+                </select>
+            </label>
+            <label>
+                <span>认证方式</span>
+                <select @bind="filterAuthMethod">
+                    <option value="">全部</option><option value="jwt">JWT</option><option value="admin_api_key">Admin API Key</option><option value="passkey">Passkey</option>
+                </select>
+            </label>
+            <label>
+                <span>执行结果</span>
+                <select @bind="filterSuccess">
+                    <option value="">全部</option><option value="true">成功</option><option value="false">失败</option>
+                </select>
+            </label>
+            <label>
+                <span>时间范围</span>
+                <select value="@timeRange" @onchange="TimeRangeChangedAsync">
+                    <option value="">全部时间</option><option value="30m">最近 30 分钟</option><option value="1h">最近 1 小时</option><option value="6h">最近 6 小时</option><option value="24h">最近 24 小时</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option><option value="custom">自定义范围</option>
+                </select>
+            </label>
+        </div>
+        <div class="audit-filter-actions">
+            <button type="button" class="button danger" disabled="@(loading || checkingTotp)" @onclick="OpenClearAsync">
+                <Icon Name="trash" Size="16" /> 清空全部
+            </button>
+            <div>
+                <button type="button" class="button secondary" disabled="@loading" @onclick="ResetFiltersAsync">重置</button>
+                <button type="submit" class="button primary" disabled="@loading">搜索</button>
+            </div>
+        </div>
+    </form>
+
+    <section class="audit-table-card" aria-busy="@loading">
+        @if (loading && logsPage.Items.Count == 0)
+        {
+            <LoadingState Text="正在载入审计日志" />
+        }
+        else
+        {
+            <div class="audit-table-scroll">
+                <table class="audit-table">
+                    <thead><tr><th>时间</th><th>操作者</th><th>动作</th><th>结果</th><th>耗时</th><th>客户端 IP</th><th>操作</th></tr></thead>
+                    <tbody>
+                        @if (logsPage.Items.Count == 0)
+                        {
+                            <tr><td colspan="7"><div class="audit-empty"><Icon Name="shield" Size="34" /><b>暂无审计日志</b><span>调整筛选条件或执行管理操作后再查看。</span></div></td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var row in logsPage.Items)
+                            {
+                                <tr>
+                                    <td class="nowrap">@FormatTime(row.CreatedAt)</td>
+                                    <td><div class="actor-cell"><b title="@row.ActorEmail">@Dash(row.ActorEmail)</b><small>@Dash(row.ActorRole)@if (!string.IsNullOrWhiteSpace(row.AuthMethod)) { <text> · @AuthMethodLabel(row.AuthMethod)</text> }</small></div></td>
+                                    <td><div class="action-cell"><code title="@row.Action">@Dash(row.Action)</code><small title="@($"{row.Method} {row.Path}")"><b>@row.Method</b> @row.Path</small></div></td>
+                                    <td><span class="status-pill @StatusTone(row.StatusCode)"><i></i>@row.StatusCode · @StatusLabel(row.StatusCode)</span></td>
+                                    <td class="nowrap">@row.LatencyMs ms</td>
+                                    <td><code>@Dash(row.ClientIp)</code></td>
+                                    <td><button type="button" class="text-action" @onclick="() => OpenDetailAsync(row.Id)"><Icon Name="eye" Size="15" />详情</button></td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <footer class="audit-pagination">
+                <div>共 <b>@logsPage.Total</b> 条</div>
+                <div>
+                    <label>每页<select value="@pageSize" @onchange="PageSizeChangedAsync"><option value="20">20</option><option value="50">50</option><option value="100">100</option><option value="200">200</option></select></label>
+                    <button type="button" disabled="@(page <= 1 || loading)" @onclick="() => ChangePageAsync(page - 1)">上一页</button>
+                    <span>@($"{page} / {TotalPages}")</span>
+                    <button type="button" disabled="@(page >= TotalPages || loading)" @onclick="() => ChangePageAsync(page + 1)">下一页</button>
+                </div>
+            </footer>
+        }
+    </section>
+</div>
+
+<AppModal Open="detailOpen" Title="审计日志详情" MaxWidth="980px" OnClose="CloseDetail">
+    <ChildContent>
+        @if (detailLoading)
+        {
+            <LoadingState Text="正在载入日志详情" />
+        }
+        else if (detail is not null)
+        {
+            <div class="audit-detail">
+                <section class="detail-hero">
+                    <div><span class="status-pill @StatusTone(detail.StatusCode)"><i></i>@detail.StatusCode · @StatusLabel(detail.StatusCode)</span><code>@detail.Action</code></div>
+                    <p><b>@detail.Method</b><span>@detail.Path</span></p>
+                    <small>@FormatTime(detail.CreatedAt) · @detail.LatencyMs ms@if (!string.IsNullOrWhiteSpace(detail.RequestId)) { <text> · Request ID：<code>@detail.RequestId</code></text> }</small>
+                </section>
+                <div class="detail-overview">
+                    <article><small>操作者</small><b>@Dash(detail.ActorEmail)</b><span>@Dash(detail.ActorRole)@if (detail.ActorUserId.HasValue) { <text> · #@detail.ActorUserId</text> }</span></article>
+                    <article><small>认证方式</small><b>@AuthMethodLabel(detail.AuthMethod)</b><code>@Dash(detail.CredentialMasked)</code></article>
+                    <article><small>客户端 IP</small><code>@Dash(detail.ClientIp)</code></article>
+                </div>
+                <section class="detail-block"><h3>User-Agent</h3><pre>@Dash(detail.UserAgent)</pre></section>
+                @if (!string.IsNullOrWhiteSpace(detail.RequestBody))
+                {
+                    <section class="detail-block"><h3>请求正文（已脱敏）</h3><pre>@PrettyJson(detail.RequestBody)</pre></section>
+                }
+                @if (detail.Extra.Count > 0)
+                {
+                    <section class="detail-block"><h3>附加信息</h3><pre>@PrettyExtra(detail.Extra)</pre></section>
+                }
+            </div>
+        }
+    </ChildContent>
+</AppModal>
+
+<AppModal Open="customTimeOpen" Title="自定义时间范围" MaxWidth="520px" OnClose="CancelCustomTime">
+    <ChildContent>
+        <div class="custom-time-form">
+            <label><span>开始时间</span><input type="datetime-local" value="@customStartInput" @onchange="CustomStartChanged" /></label>
+            <label><span>结束时间</span><input type="datetime-local" value="@customEndInput" @onchange="CustomEndChanged" /></label>
+            @if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger"><span>@modalError</span></div> }
+        </div>
+    </ChildContent>
+    <Footer>
+        <button type="button" class="button secondary" @onclick="CancelCustomTime">取消</button>
+        <button type="button" class="button primary" @onclick="ConfirmCustomTimeAsync">确定</button>
+    </Footer>
+</AppModal>
+
+<AppModal Open="clearConfirmOpen" Title="清空全部审计日志" MaxWidth="560px" OnClose="CancelClearConfirm">
+    <ChildContent>
+        <div class="clear-warning"><Icon Name="alert" Size="22" /><div><b>此操作不可恢复</b><p>所有现有审计记录会被永久清空；Go 后端会保留一条包含操作者、来源和删除数量的清空留痕。</p></div></div>
+    </ChildContent>
+    <Footer>
+        <button type="button" class="button secondary" @onclick="CancelClearConfirm">取消</button>
+        <button type="button" class="button danger" @onclick="ConfirmClear">继续验证</button>
+    </Footer>
+</AppModal>
+
+<AppModal Open="clearTotpOpen" Title="验证管理员 TOTP" MaxWidth="480px" OnClose="CancelClearTotp">
+    <ChildContent>
+        <div class="totp-form">
+            <p>请输入验证器中当前的 6 位验证码。每次清空都必须现场验证，不能复用已有 step-up 状态。</p>
+            <input value="@totpCode" @oninput="TotpCodeChanged" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="••••••" />
+            @if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger"><span>@modalError</span></div> }
+        </div>
+    </ChildContent>
+    <Footer>
+        <button type="button" class="button secondary" disabled="@clearing" @onclick="CancelClearTotp">取消</button>
+        <button type="button" class="button danger" disabled="@(clearing || !ValidTotpCode)" @onclick="SubmitClearAsync">@(clearing ? "正在清空…" : "确认清空")</button>
+    </Footer>
+</AppModal>
+
+@code {
+    private static readonly JsonSerializerOptions PrettyJsonOptions = new() { WriteIndented = true };
+    private PagedEnvelope<AuditLogDto> logsPage = new();
+    private AuditLogDto? detail;
+    private int page = 1, pageSize = 20;
+    private bool loading = true, detailOpen, detailLoading, customTimeOpen, clearConfirmOpen, clearTotpOpen, checkingTotp, clearing;
+    private string filterSearch = string.Empty, filterActorEmail = string.Empty, filterAction = string.Empty, filterClientIp = string.Empty;
+    private string filterMethod = string.Empty, filterAuthMethod = string.Empty, filterSuccess = string.Empty, timeRange = string.Empty;
+    private string customStart = string.Empty, customEnd = string.Empty, customStartInput = string.Empty, customEndInput = string.Empty, totpCode = string.Empty;
+    private string? error, modalError;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            var (start, end) = ResolveTimeRange();
+            logsPage = await Api.GetAuditLogsAsync(page, pageSize, filterSearch, filterActorEmail, filterAction, filterClientIp, filterMethod, filterAuthMethod, filterSuccess, start, end);
+            if (logsPage.Page > 0) page = logsPage.Page;
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task SearchAsync() { page = 1; await LoadAsync(); }
+
+    private async Task ResetFiltersAsync()
+    {
+        filterSearch = filterActorEmail = filterAction = filterClientIp = filterMethod = filterAuthMethod = filterSuccess = string.Empty;
+        timeRange = customStart = customEnd = string.Empty;
+        await SearchAsync();
+    }
+
+    private async Task TimeRangeChangedAsync(ChangeEventArgs args)
+    {
+        var value = args.Value?.ToString() ?? string.Empty;
+        if (value == "custom")
+        {
+            var now = DateTime.Now;
+            customStartInput = string.IsNullOrWhiteSpace(customStart) ? now.AddHours(-1).ToString("yyyy-MM-ddTHH:mm") : customStart;
+            customEndInput = string.IsNullOrWhiteSpace(customEnd) ? now.ToString("yyyy-MM-ddTHH:mm") : customEnd;
+            modalError = null;
+            customTimeOpen = true;
+            return;
+        }
+        timeRange = value;
+        customStart = customEnd = string.Empty;
+        await SearchAsync();
+    }
+
+    private async Task ConfirmCustomTimeAsync()
+    {
+        if (!DateTimeOffset.TryParse(customStartInput, out var start) || !DateTimeOffset.TryParse(customEndInput, out var end) || start >= end)
+        {
+            modalError = "请选择有效的开始和结束时间，且开始时间必须早于结束时间。";
+            return;
+        }
+        customStart = customStartInput;
+        customEnd = customEndInput;
+        timeRange = "custom";
+        customTimeOpen = false;
+        modalError = null;
+        await SearchAsync();
+    }
+
+    private Task CancelCustomTime() { customTimeOpen = false; modalError = null; return Task.CompletedTask; }
+    private void CustomStartChanged(ChangeEventArgs args) { customStartInput = args.Value?.ToString() ?? string.Empty; modalError = null; }
+    private void CustomEndChanged(ChangeEventArgs args) { customEndInput = args.Value?.ToString() ?? string.Empty; modalError = null; }
+
+    private (string? Start, string? End) ResolveTimeRange()
+    {
+        if (timeRange == "custom")
+        {
+            return (ToRfc3339(customStart), ToRfc3339(customEnd));
+        }
+        var minutes = timeRange switch { "30m" => 30, "1h" => 60, "6h" => 360, "24h" => 1440, "7d" => 10080, "30d" => 43200, _ => 0 };
+        return minutes > 0 ? (DateTimeOffset.UtcNow.AddMinutes(-minutes).ToString("O"), null) : (null, null);
+    }
+
+    private static string? ToRfc3339(string value) => DateTimeOffset.TryParse(value, out var parsed) ? parsed.ToUniversalTime().ToString("O") : null;
+
+    private async Task ChangePageAsync(int value) { page = Math.Clamp(value, 1, TotalPages); await LoadAsync(); }
+    private async Task PageSizeChangedAsync(ChangeEventArgs args) { if (int.TryParse(args.Value?.ToString(), out var value)) pageSize = Math.Clamp(value, 1, 200); await SearchAsync(); }
+    private int TotalPages => Math.Max(1, logsPage.Pages > 0 ? logsPage.Pages : (int)Math.Ceiling(logsPage.Total / (double)Math.Max(1, pageSize)));
+
+    private async Task OpenDetailAsync(long id)
+    {
+        detailOpen = true;
+        detailLoading = true;
+        detail = null;
+        try { detail = await Api.GetAuditLogAsync(id); }
+        catch (ApiException ex) { detailOpen = false; error = ex.Message; }
+        finally { detailLoading = false; }
+    }
+
+    private Task CloseDetail() { detailOpen = false; detail = null; return Task.CompletedTask; }
+
+    private async Task OpenClearAsync()
+    {
+        if (checkingTotp) return;
+        checkingTotp = true;
+        error = null;
+        try
+        {
+            var status = await Api.GetTotpStatusAsync();
+            if (!status.FeatureEnabled) { error = "系统尚未启用 TOTP 功能，无法清空审计日志。"; return; }
+            if (!status.Enabled) { error = "当前管理员尚未启用 TOTP，请先到个人资料的安全设置中启用。"; return; }
+            clearConfirmOpen = true;
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { checkingTotp = false; }
+    }
+
+    private Task CancelClearConfirm() { clearConfirmOpen = false; return Task.CompletedTask; }
+    private void ConfirmClear() { clearConfirmOpen = false; clearTotpOpen = true; totpCode = string.Empty; modalError = null; }
+    private Task CancelClearTotp() { if (!clearing) { clearTotpOpen = false; modalError = null; totpCode = string.Empty; } return Task.CompletedTask; }
+    private void TotpCodeChanged(ChangeEventArgs args) { totpCode = new string((args.Value?.ToString() ?? string.Empty).Where(char.IsDigit).Take(6).ToArray()); modalError = null; }
+    private bool ValidTotpCode => totpCode.Length == 6 && totpCode.All(char.IsDigit);
+
+    private async Task SubmitClearAsync()
+    {
+        if (!ValidTotpCode || clearing) return;
+        clearing = true;
+        modalError = null;
+        try
+        {
+            var result = await Api.ClearAuditLogsAsync(totpCode);
+            clearTotpOpen = false;
+            totpCode = string.Empty;
+            Toasts.Success($"已清空 {result.Deleted} 条审计日志，并保留本次清空留痕");
+            await SearchAsync();
+        }
+        catch (ApiException ex) { modalError = ex.Message; totpCode = string.Empty; }
+        finally { clearing = false; }
+    }
+
+    private static string PrettyJson(string value)
+    {
+        try { using var document = JsonDocument.Parse(value); return JsonSerializer.Serialize(document.RootElement, PrettyJsonOptions); }
+        catch (JsonException) { return value; }
+    }
+
+    private static string PrettyExtra(Dictionary<string, JsonElement> value) => JsonSerializer.Serialize(value, PrettyJsonOptions);
+    private static string StatusTone(int status) => status >= 500 ? "danger" : status >= 400 ? "warning" : "success";
+    private static string StatusLabel(int status) => status < 400 ? "成功" : "失败";
+    private static string AuthMethodLabel(string value) => value switch { "jwt" => "JWT", "admin_api_key" => "Admin API Key", "passkey" => "Passkey", _ => Dash(value) };
+    private static string Dash(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value;
+    private static string FormatTime(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+}

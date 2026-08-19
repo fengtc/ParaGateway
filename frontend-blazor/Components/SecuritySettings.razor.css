@@ -1,0 +1,572 @@
+.security-card {
+    overflow: hidden;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(20, 35, 29, .03);
+}
+
+.security-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--line);
+}
+
+.security-card-header h2 {
+    margin: 0;
+    font-size: 1.02rem;
+    font-weight: 700;
+}
+
+.security-card-header p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: .78rem;
+}
+
+.security-card-body {
+    padding: 22px 24px;
+}
+
+.security-stack {
+    display: grid;
+    gap: 22px;
+}
+
+.security-toggle-row,
+.security-status-row,
+.notify-email-row,
+.passkey-row {
+    display: flex;
+    align-items: center;
+}
+
+.security-toggle-row {
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.security-toggle-row > label:first-child,
+.field-label {
+    color: var(--ink);
+    font-size: .79rem;
+    font-weight: 680;
+}
+
+.switch-control,
+.mini-switch {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    cursor: pointer;
+}
+
+.switch-control {
+    width: 44px;
+    height: 24px;
+}
+
+.mini-switch {
+    width: 36px;
+    height: 20px;
+}
+
+.switch-control input,
+.mini-switch input {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+}
+
+.switch-control span,
+.mini-switch span {
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, var(--muted) 34%, var(--surface-soft));
+    border-radius: 999px;
+    transition: background .15s ease;
+}
+
+.switch-control span::after,
+.mini-switch span::after {
+    position: absolute;
+    content: "";
+    background: #fff;
+    border: 1px solid rgba(36, 52, 46, .16);
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(20, 30, 26, .2);
+    transition: transform .15s ease;
+}
+
+.switch-control span::after {
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+}
+
+.mini-switch span::after {
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+}
+
+.switch-control input:checked + span,
+.mini-switch input:checked + span {
+    background: var(--primary);
+}
+
+.switch-control input:checked + span::after { transform: translateX(20px); }
+.mini-switch input:checked + span::after { transform: translateX(16px); }
+
+.switch-control input:focus-visible + span,
+.mini-switch input:focus-visible + span {
+    outline: 3px solid color-mix(in srgb, var(--primary) 25%, transparent);
+    outline-offset: 2px;
+}
+
+.form-field small {
+    margin-left: 7px;
+    color: var(--muted);
+    font-size: .68rem;
+    font-weight: 500;
+}
+
+.money-input-row,
+.notify-email-add-row,
+.input-action-row,
+.secret-copy-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+}
+
+.money-input-row > span {
+    color: var(--muted);
+    font-size: 1rem;
+}
+
+.money-input-row input,
+.notify-email-add-row input,
+.compact-code-input,
+.input-action-row input,
+.passkey-add-form input,
+.delete-passkey-form input,
+.otp-code-input {
+    width: 100%;
+    min-width: 0;
+    height: var(--form-control-height);
+    padding: 7px 10px;
+    color: var(--form-control-color);
+    background: var(--form-control-bg);
+    border: 1px solid var(--form-control-border);
+    border-radius: var(--form-control-radius);
+}
+
+.money-input-row input:focus,
+.notify-email-add-row input:focus,
+.compact-code-input:focus,
+.input-action-row input:focus,
+.passkey-add-form input:focus,
+.delete-passkey-form input:focus,
+.otp-code-input:focus {
+    border-color: var(--form-control-focus);
+    outline: 0;
+    box-shadow: 0 0 0 3px var(--form-control-focus-ring);
+}
+
+.notify-email-section {
+    display: grid;
+    gap: 10px;
+}
+
+.warning-hint,
+.warning-text {
+    color: #a06b13;
+}
+
+.warning-hint {
+    margin: -5px 0 1px;
+    font-size: .69rem;
+}
+
+.notify-email-list {
+    display: grid;
+    gap: 8px;
+}
+
+.notify-email-row {
+    min-height: 46px;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 12px;
+    background: var(--surface-soft);
+    border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+    border-radius: 9px;
+}
+
+.notify-email-row.pending {
+    background: color-mix(in srgb, #fff3cf 42%, var(--surface));
+    border-color: color-mix(in srgb, #d9a938 42%, var(--line));
+}
+
+.notify-email-main,
+.notify-email-actions {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+}
+
+.notify-email-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.notify-address {
+    min-width: 0;
+    overflow: hidden;
+    font-size: .77rem;
+    text-overflow: ellipsis;
+}
+
+.compact-code-input {
+    width: 90px;
+    height: 31px;
+    padding: 4px 8px;
+    font-size: .74rem;
+}
+
+.text-button {
+    min-height: 28px;
+    padding: 3px 5px;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    font-size: .7rem;
+    font-weight: 650;
+}
+
+.text-button:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
+.primary-text { color: var(--primary); }
+.danger-text { color: var(--danger); }
+.muted { color: var(--muted); }
+.countdown { color: var(--muted); font-size: .67rem; }
+
+.notify-email-add-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-top: 2px;
+}
+
+.security-loading {
+    display: flex;
+    min-height: 76px;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: .77rem;
+}
+
+.security-status-row {
+    min-height: 64px;
+    gap: 14px;
+}
+
+.security-status-row.with-action .security-status-copy {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.security-status-row strong {
+    display: block;
+    font-size: .86rem;
+}
+
+.security-status-row p {
+    margin: 3px 0 0;
+    color: var(--muted);
+    font-size: .73rem;
+}
+
+.security-status-icon {
+    display: grid;
+    flex: 0 0 48px;
+    width: 48px;
+    height: 48px;
+    place-items: center;
+    border-radius: 50%;
+}
+
+.security-status-icon.neutral { color: var(--muted); background: var(--surface-soft); }
+.security-status-icon.success { color: #25825d; background: #e8f6ef; }
+
+.danger-outline {
+    color: var(--danger);
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--danger) 56%, var(--line));
+}
+
+.danger-outline:hover:not(:disabled),
+.ghost-danger:hover:not(:disabled) {
+    color: #fff;
+    background: var(--danger);
+    border-color: var(--danger);
+}
+
+.passkey-add-form {
+    display: grid;
+    gap: 15px;
+    padding: 16px;
+    background: color-mix(in srgb, var(--surface-soft) 72%, var(--surface));
+    border: 1px solid var(--line);
+    border-radius: 9px;
+}
+
+.two-column-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.passkey-add-form .form-field,
+.delete-passkey-form .form-field {
+    margin: 0;
+}
+
+.form-actions,
+.modal-action-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.security-empty {
+    padding: 27px 16px;
+    color: var(--muted);
+    text-align: center;
+    border: 1px dashed var(--line);
+    border-radius: 9px;
+    font-size: .77rem;
+}
+
+.passkey-list {
+    display: grid;
+}
+
+.passkey-row {
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.passkey-row:first-child { padding-top: 0; }
+.passkey-row:last-child { padding-bottom: 0; border-bottom: 0; }
+
+.passkey-icon {
+    display: grid;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    color: var(--primary);
+    background: var(--primary-soft);
+    border-radius: 10px;
+}
+
+.passkey-main {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.passkey-title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.passkey-title strong {
+    overflow: hidden;
+    font-size: .81rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.passkey-main p {
+    margin: 3px 0 0;
+    color: var(--muted);
+    font-size: .68rem;
+}
+
+.passkey-actions {
+    display: flex;
+    gap: 7px;
+}
+
+.ghost-danger {
+    color: var(--danger);
+    background: transparent;
+    border-color: transparent;
+}
+
+.modal-intro {
+    margin: 0 0 20px;
+    color: var(--muted);
+    font-size: .8rem;
+}
+
+.modal-intro.centered { text-align: center; }
+
+.totp-modal {
+    display: grid;
+    gap: 15px;
+}
+
+.totp-modal .form-field {
+    margin: 0;
+}
+
+.input-action-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.totp-qr {
+    display: flex;
+    justify-content: center;
+}
+
+.totp-qr img {
+    width: 214px;
+    height: 214px;
+    padding: 10px;
+    background: #fff;
+    border: 1px solid #dfe5e1;
+    border-radius: 10px;
+}
+
+.manual-entry-label {
+    margin: 0;
+    color: var(--muted);
+    text-align: center;
+    font-size: .73rem;
+}
+
+.secret-copy-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: min(100%, 350px);
+    margin: 0 auto;
+    padding: 7px 7px 7px 12px;
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+
+.secret-copy-row code {
+    min-width: 0;
+    overflow: auto;
+    color: var(--ink);
+    font-size: .76rem;
+}
+
+.otp-field {
+    justify-items: center;
+}
+
+.otp-code-input {
+    width: min(100%, 260px);
+    height: 54px;
+    padding-left: 28px;
+    text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 1.35rem;
+    font-weight: 720;
+    letter-spacing: .55em;
+}
+
+.danger-modal-icon {
+    display: grid;
+    width: 48px;
+    height: 48px;
+    margin: 0 auto;
+    place-items: center;
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+    border-radius: 50%;
+}
+
+.delete-passkey-form {
+    display: grid;
+    gap: 18px;
+}
+
+.delete-passkey-form > p {
+    margin: 0;
+    color: var(--muted);
+    font-size: .8rem;
+}
+
+.muted-text,
+.warning-text {
+    margin: 0;
+    font-size: .78rem;
+}
+
+@media (max-width: 680px) {
+    .security-card-header,
+    .security-card-body {
+        padding-right: 18px;
+        padding-left: 18px;
+    }
+
+    .passkey-header,
+    .security-status-row.with-action,
+    .notify-email-row,
+    .passkey-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .passkey-header .button,
+    .security-status-row.with-action .button,
+    .passkey-actions .button {
+        width: 100%;
+    }
+
+    .two-column-form {
+        grid-template-columns: 1fr;
+    }
+
+    .notify-email-actions {
+        justify-content: flex-start;
+    }
+
+    .money-input-row {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .money-input-row .button {
+        grid-column: 1 / -1;
+        width: 100%;
+    }
+
+    .input-action-row,
+    .notify-email-add-row {
+        grid-template-columns: 1fr;
+    }
+
+    .input-action-row .button,
+    .notify-email-add-row .button {
+        width: 100%;
+    }
+}

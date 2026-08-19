@@ -1,0 +1,46 @@
+@using ParaGateway.Frontend.Models
+
+<section class="settings-card notification-card">
+    <header><div><h2>订阅到期提醒</h2><p>在用户订阅即将到期时发送系统邮件，邮件内容由模板编辑器控制。</p></div></header>
+    <ToggleField Label="启用订阅到期提醒" Hint="后台任务会按订阅到期时间自动发送提醒"><InputCheckbox @bind-Value="Settings.SubscriptionExpiryNotifyEnabled" /></ToggleField>
+</section>
+
+<section class="settings-card notification-card">
+    <header><div><h2>余额不足提醒</h2><p>用户余额低于阈值时发送通知，并可在邮件中提供充值或帮助入口。</p></div></header>
+    <div class="settings-grid">
+        <ToggleField Label="启用余额不足提醒" Hint="避免用户因余额耗尽导致 API 调用中断"><InputCheckbox @bind-Value="Settings.BalanceLowNotifyEnabled" /></ToggleField>
+        @if (Settings.BalanceLowNotifyEnabled)
+        {
+            <Field Label="提醒阈值（USD）"><InputNumber @bind-Value="Settings.BalanceLowNotifyThreshold" min="0" step="0.01" /></Field>
+        }
+        <Field Label="充值/帮助地址" Hint="留空时由服务端使用站点地址" Full="true"><InputText @bind-Value="Settings.BalanceLowNotifyRechargeUrl" type="url" /></Field>
+    </div>
+</section>
+
+<section class="settings-card notification-card">
+    <header><div><h2>上游账号配额提醒</h2><p>上游账号配额低于阈值时，向启用的管理员邮箱发送告警。</p></div></header>
+    <ToggleField Label="启用账号配额提醒" Hint="通知由账号用量采集任务触发"><InputCheckbox @bind-Value="Settings.AccountQuotaNotifyEnabled" /></ToggleField>
+    @if (Settings.AccountQuotaNotifyEnabled)
+    {
+        <div class="notify-email-list">
+            @foreach (var entry in Settings.AccountQuotaNotifyEmails.ToList())
+            {
+                <div class="notify-email-row" @key="entry">
+                    <label class="notify-enabled"><input type="checkbox" checked="@(!entry.Disabled)" @onchange="args => SetEntryEnabled(entry, args)" /><span>启用</span></label>
+                    <input type="email" autocomplete="email" placeholder="admin@example.com" @bind="entry.Email" @bind:event="oninput" />
+                    @if (entry.Verified) { <span class="verified-badge">已验证</span> }
+                    <button type="button" class="icon-button" title="删除邮箱" aria-label="删除邮箱" @onclick="() => Settings.AccountQuotaNotifyEmails.Remove(entry)"><Icon Name="x" Size="15" /></button>
+                </div>
+            }
+            <button type="button" class="button secondary small add-email" @onclick="AddEmail"><Icon Name="plus" Size="14" />添加通知邮箱</button>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public AdminSettingsDto Settings { get; set; } = default!;
+
+    private void AddEmail() => Settings.AccountQuotaNotifyEmails.Add(new NotifyEmailEntryDto());
+
+    private static void SetEntryEnabled(NotifyEmailEntryDto entry, ChangeEventArgs args) => entry.Disabled = args.Value is not true;
+}

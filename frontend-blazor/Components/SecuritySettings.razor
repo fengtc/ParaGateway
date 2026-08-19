@@ -1,0 +1,737 @@
+@using System.Globalization
+@using System.Text.Json
+@using QRCoder
+@implements IDisposable
+@inject ApiClient Api
+@inject IJSRuntime Js
+@inject ToastService Toasts
+
+@if (PublicSettings.BalanceLowNotifyEnabled)
+{
+    <section class="security-card" data-testid="profile-balance-notify-card">
+        <header class="security-card-header">
+            <div>
+                <h2>余额不足提醒</h2>
+                <p>当账户余额低于阈值时发送邮件提醒</p>
+            </div>
+        </header>
+        <div class="security-card-body security-stack">
+            <div class="security-toggle-row">
+                <label for="balance-notify-enabled">启用余额不足提醒</label>
+                <label class="switch-control">
+                    <input id="balance-notify-enabled" type="checkbox" checked="@notifyEnabled" disabled="@balanceBusy" @onchange="ToggleBalanceNotifyAsync" />
+                    <span aria-hidden="true"></span>
+                </label>
+            </div>
+
+            @if (notifyEnabled)
+            {
+                <div class="form-field">
+                    <label for="balance-threshold">自定义提醒阈值 <small>留空使用系统默认值</small></label>
+                    <div class="money-input-row">
+                        <span>$</span>
+                        <input id="balance-threshold"
+                               type="number"
+                               min="0"
+                               step="0.01"
+                               value="@balanceThresholdText"
+                               @oninput="OnBalanceThresholdInput"
+                               placeholder="@(PublicSettings.BalanceLowNotifyThreshold > 0 ? $"系统默认值 ${PublicSettings.BalanceLowNotifyThreshold:0.##}" : "输入金额")" />
+                        <button type="button" class="button primary small" disabled="@balanceBusy" @onclick="SaveBalanceThresholdAsync">@(balanceBusy ? "保存中…" : "保存")</button>
+                    </div>
+                </div>
+
+                <div class="notify-email-section">
+                    <label class="field-label">通知邮箱</label>
+                    <p class="warning-hint">必须添加并验证邮箱后，余额不足时才能收到提醒邮件</p>
+
+                    @if (Profile.BalanceNotifyExtraEmails.Count > 0)
+                    {
+                        <div class="notify-email-list" data-testid="saved-notify-emails">
+                            @foreach (var entry in Profile.BalanceNotifyExtraEmails)
+                            {
+                                <article class="notify-email-row" @key="entry.Email">
+                                    <div class="notify-email-main">
+                                        <label class="mini-switch" title="@(entry.Disabled ? "启用此邮箱" : "停用此邮箱")">
+                                            <input type="checkbox" checked="@(!entry.Disabled)" disabled="@balanceBusy" @onchange="() => ToggleNotifyEmailAsync(entry)" />
+                                            <span aria-hidden="true"></span>
+                                        </label>
+                                        <span class="notify-address">@entry.Email</span>
+                                    </div>
+                                    <div class="notify-email-actions">
+                                        @if (!entry.Verified && string.Equals(savedVerifyingEmail, entry.Email, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <input class="compact-code-input" aria-label="@($"{entry.Email} 验证码")" maxlength="6" inputmode="numeric" value="@savedVerifyCode" @oninput="OnSavedVerifyCodeInput" placeholder="6位验证码" />
+                                            <button type="button" class="text-button primary-text" disabled="@(savedEmailBusy || savedVerifyCode.Length != 6)" @onclick="() => VerifySavedEmailAsync(entry.Email)">验证</button>
+                                            @if (savedVerifyCountdown > 0)
+                                            {
+                                                <span class="countdown">@savedVerifyCountdown 秒</span>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="text-button" disabled="@savedEmailBusy" @onclick="() => SendCodeForSavedEmailAsync(entry.Email)">重发</button>
+                                            }
+                                            <button type="button" class="text-button muted" @onclick="CancelSavedEmailVerification">取消</button>
+                                        }
+                                        else if (!entry.Verified)
+                                        {
+                                            <button type="button" class="text-button primary-text" disabled="@savedEmailBusy" @onclick="() => SendCodeForSavedEmailAsync(entry.Email)">验证</button>
+                                            <span class="status-badge warning">未验证</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="status-badge success">已验证</span>
+                                        }
+                                        <button type="button" class="text-button danger-text" disabled="@balanceBusy" @onclick="() => RemoveNotifyEmailAsync(entry.Email)">移除</button>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    }
+
+                    @if (pendingEmails.Count > 0)
+                    {
+                        <div class="notify-email-list" data-testid="pending-notify-emails">
+                            @foreach (var pending in pendingEmails)
+                            {
+                                <article class="notify-email-row pending" @key="pending.Email">
+                                    <span class="notify-address">@pending.Email</span>
+                                    <div class="notify-email-actions">
+                                        @if (!pending.CodeSent)
+                                        {
+                                            <button type="button" class="text-button primary-text" disabled="@pending.Sending" @onclick="() => SendCodeForPendingEmailAsync(pending)">@(pending.Sending ? "发送中…" : "发送验证码")</button>
+                                            <button type="button" class="text-button danger-text" @onclick="() => RemovePendingEmail(pending)">移除</button>
+                                        }
+                                        else
+                                        {
+                                            <input class="compact-code-input" aria-label="@($"{pending.Email} 验证码")" maxlength="6" inputmode="numeric" value="@pending.Code" @oninput="args => OnPendingEmailCodeInput(pending, args)" placeholder="6位验证码" />
+                                            <button type="button" class="text-button primary-text" disabled="@(pending.Verifying || pending.Code.Length != 6)" @onclick="() => VerifyPendingEmailAsync(pending)">@(pending.Verifying ? "验证中…" : "验证")</button>
+                                            @if (pending.Countdown > 0)
+                                            {
+                                                <span class="countdown">@pending.Countdown 秒</span>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="text-button" disabled="@pending.Sending" @onclick="() => SendCodeForPendingEmailAsync(pending)">重发</button>
+                                            }
+                                            <button type="button" class="text-button danger-text" @onclick="() => RemovePendingEmail(pending)">移除</button>
+                                        }
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    }
+
+                    @if (CanAddNotifyEmail)
+                    {
+                        <div class="notify-email-add-row">
+                            <input type="email" aria-label="添加通知邮箱" value="@newNotifyEmail" @oninput="OnNewNotifyEmailInput" @onkeydown="HandleNewNotifyEmailKeyDown" autocomplete="email" placeholder="输入邮箱地址" />
+                            <button type="button" class="button secondary" disabled="@string.IsNullOrWhiteSpace(newNotifyEmail)" @onclick="AddPendingEmail">添加</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="field-hint">已达到通知邮箱数量上限（3 个）</p>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+}
+
+<section class="security-card" data-testid="profile-totp-card">
+    <header class="security-card-header">
+        <div>
+            <h2>双因素认证 (2FA)</h2>
+            <p>使用 Google Authenticator 等应用增强账户安全</p>
+        </div>
+    </header>
+    <div class="security-card-body">
+        @if (totpLoading)
+        {
+            <div class="security-loading"><span class="spinner"></span><span>正在载入安全设置…</span></div>
+        }
+        else if (totp is null || !totp.FeatureEnabled)
+        {
+            <div class="security-status-row">
+                <span class="security-status-icon neutral"><Icon Name="alert" Size="23" /></span>
+                <div><strong>功能未开放</strong><p>管理员尚未开放双因素认证功能</p></div>
+            </div>
+        }
+        else if (totp.Enabled)
+        {
+            <div class="security-status-row with-action">
+                <span class="security-status-icon success"><Icon Name="shield" Size="23" /></span>
+                <div class="security-status-copy">
+                    <strong>已启用</strong>
+                    @if (totp.EnabledAt.HasValue)
+                    {
+                        <p>启用时间：@UiFormat.DateTime(totp.EnabledAt.Value)</p>
+                    }
+                </div>
+                <button type="button" class="button danger-outline" disabled="@totpBusy" @onclick="BeginDisableTotpAsync">禁用</button>
+            </div>
+        }
+        else
+        {
+            <div class="security-status-row with-action">
+                <span class="security-status-icon neutral"><Icon Name="shield" Size="23" /></span>
+                <div class="security-status-copy"><strong>未启用</strong><p>启用双因素认证可以增强账户安全性</p></div>
+                <button type="button" class="button primary" disabled="@totpBusy" @onclick="BeginSetupTotpAsync">启用</button>
+            </div>
+        }
+    </div>
+</section>
+
+<section class="security-card" data-testid="profile-passkey-card">
+    <header class="security-card-header passkey-header">
+        <div>
+            <h2>Passkey</h2>
+            <p>使用面容 ID、触控 ID、Windows Hello 或安全密钥免密码登录。</p>
+        </div>
+        @if (PublicSettings.PasskeyEnabled && passkeySupported && !showPasskeyAddForm)
+        {
+            <button type="button" class="button primary" disabled="@passkeyBusy" @onclick="ShowPasskeyAddForm">添加 Passkey</button>
+        }
+    </header>
+    <div class="security-card-body security-stack">
+        @if (!PublicSettings.PasskeyEnabled)
+        {
+            <p class="muted-text">管理员尚未配置 Passkey 功能。</p>
+        }
+        else if (!passkeySupported)
+        {
+            <p class="warning-text">当前浏览器或设备不支持 Passkey。</p>
+        }
+        else
+        {
+            @if (showPasskeyAddForm)
+            {
+                <form class="passkey-add-form" @onsubmit="RegisterPasskeyAsync" @onsubmit:preventDefault="true" data-testid="passkey-add-form">
+                    <div class="two-column-form">
+                        <div class="form-field"><label for="passkey-name">Passkey 名称</label><input id="passkey-name" maxlength="100" value="@newPasskeyName" @oninput="OnPasskeyNameInput" placeholder="例如：MacBook 触控 ID" autofocus /></div>
+                        <div class="form-field"><label for="passkey-add-password">当前密码</label><input id="passkey-add-password" type="password" autocomplete="current-password" value="@newPasskeyPassword" @oninput="OnPasskeyPasswordInput" placeholder="输入当前登录密码以确认" /></div>
+                    </div>
+                    <div class="form-actions"><button type="button" class="button secondary" disabled="@passkeyBusy" @onclick="CancelPasskeyAdd">取消</button><button type="submit" class="button primary" disabled="@(passkeyBusy || string.IsNullOrEmpty(newPasskeyPassword))">@(passkeyBusy ? "处理中…" : "创建 Passkey")</button></div>
+                </form>
+            }
+
+            @if (passkeyLoading)
+            {
+                <div class="security-loading"><span class="spinner"></span><span>正在加载 Passkey…</span></div>
+            }
+            else if (passkeys.Count == 0)
+            {
+                <div class="security-empty">尚未添加任何 Passkey。</div>
+            }
+            else
+            {
+                <div class="passkey-list">
+                    @foreach (var passkey in passkeys)
+                    {
+                        <article class="passkey-row" @key="passkey.Id">
+                            <span class="passkey-icon"><Icon Name="key" Size="19" /></span>
+                            <div class="passkey-main">
+                                <div class="passkey-title"><strong>@passkey.Name</strong>@if (passkey.Backup) { <span class="status-badge success">已同步</span> }</div>
+                                <p>创建于 @FormatPasskeyDate(passkey.CreatedAt)@if (passkey.LastUsedAt.HasValue) { <span> · 上次使用 @FormatPasskeyDate(passkey.LastUsedAt.Value)</span> }</p>
+                            </div>
+                            <div class="passkey-actions"><button type="button" class="button secondary small" disabled="@passkeyBusy" @onclick="() => RenamePasskeyAsync(passkey)">编辑</button><button type="button" class="button ghost-danger small" disabled="@passkeyBusy" @onclick="() => OpenPasskeyDelete(passkey)">删除</button></div>
+                        </article>
+                    }
+                </div>
+            }
+        }
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(securityError))
+{
+    <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@securityError</span></div>
+}
+
+<AppModal Open="@showTotpSetup" Title="设置双因素认证" MaxWidth="500px" OnClose="CloseTotpSetup">
+    <ChildContent>
+        <div class="totp-modal" data-testid="totp-setup-modal">
+            <p class="modal-intro">@TotpSetupDescription</p>
+            @if (totpSetupStep == 0)
+            {
+                @if (totpMethodLoading)
+                {
+                    <div class="security-loading"><span class="spinner"></span><span>正在确认验证方式…</span></div>
+                }
+                else if (totpMethod == "email")
+                {
+                    <div class="form-field"><label for="totp-setup-email-code">邮箱验证码</label><div class="input-action-row"><input id="totp-setup-email-code" maxlength="6" inputmode="numeric" value="@totpSetupEmailCode" @oninput="OnTotpSetupEmailCodeInput" placeholder="请输入 6 位验证码" /><button type="button" class="button secondary" disabled="@(totpSetupSendingCode || totpSetupCodeCooldown > 0)" @onclick="() => SendTotpCodeAsync(TotpCodePurpose.Setup)">@(totpSetupCodeCooldown > 0 ? $"{totpSetupCodeCooldown} 秒" : totpSetupSendingCode ? "发送中…" : "发送验证码")</button></div></div>
+                }
+                else
+                {
+                    <div class="form-field"><label for="totp-setup-password">当前密码</label><input id="totp-setup-password" type="password" autocomplete="current-password" value="@totpSetupPassword" @oninput="OnTotpSetupPasswordInput" placeholder="请输入当前密码确认" /></div>
+                }
+                <div class="modal-action-row"><button type="button" class="button secondary" @onclick="CloseTotpSetup">取消</button><button type="button" class="button primary" disabled="@(totpBusy || !CanProceedTotpSetup)" @onclick="PrepareTotpSetupAsync">@(totpBusy ? "加载中…" : "下一步")</button></div>
+            }
+            else if (totpSetupStep == 1 && totpSetup is not null)
+            {
+                @if (!string.IsNullOrWhiteSpace(totpQrSvgDataUri))
+                {
+                    <div class="totp-qr"><img src="@totpQrSvgDataUri" alt="TOTP 配置二维码" /></div>
+                }
+                <p class="manual-entry-label">无法扫码？手动输入密钥：</p>
+                <div class="secret-copy-row"><code>@totpSetup.Secret</code><button type="button" class="icon-button" title="复制密钥" aria-label="复制密钥" @onclick="CopyTotpSecretAsync"><Icon Name="copy" Size="18" /></button></div>
+                <div class="modal-action-row"><button type="button" class="button secondary" @onclick="CloseTotpSetup">取消</button><button type="button" class="button primary" @onclick="() => totpSetupStep = 2">下一步</button></div>
+            }
+            else if (totpSetupStep == 2)
+            {
+                <div class="form-field otp-field"><label for="totp-enable-code">输入 6 位验证码</label><input id="totp-enable-code" class="otp-code-input" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" value="@totpEnableCode" @oninput="OnTotpEnableCodeInput" placeholder="000000" /></div>
+                <div class="modal-action-row"><button type="button" class="button secondary" @onclick="() => totpSetupStep = 1">上一步</button><button type="button" class="button primary" disabled="@(totpBusy || totpEnableCode.Length != 6)" @onclick="EnableTotpAsync">@(totpBusy ? "验证中…" : "验证")</button></div>
+            }
+        </div>
+    </ChildContent>
+</AppModal>
+
+<AppModal Open="@showTotpDisable" Title="禁用双因素认证" MaxWidth="470px" OnClose="CloseTotpDisable">
+    <ChildContent>
+        <div class="totp-modal" data-testid="totp-disable-modal">
+            <div class="danger-modal-icon"><Icon Name="alert" Size="25" /></div>
+            <p class="modal-intro centered">禁用后，登录时将不再需要验证码。这可能会降低您的账户安全性。</p>
+            @if (totpMethodLoading)
+            {
+                <div class="security-loading"><span class="spinner"></span><span>正在确认验证方式…</span></div>
+            }
+            else if (totpMethod == "email")
+            {
+                <div class="form-field"><label for="totp-disable-email-code">邮箱验证码</label><div class="input-action-row"><input id="totp-disable-email-code" maxlength="6" inputmode="numeric" value="@totpDisableEmailCode" @oninput="OnTotpDisableEmailCodeInput" placeholder="请输入 6 位验证码" /><button type="button" class="button secondary" disabled="@(totpDisableSendingCode || totpDisableCodeCooldown > 0)" @onclick="() => SendTotpCodeAsync(TotpCodePurpose.Disable)">@(totpDisableCodeCooldown > 0 ? $"{totpDisableCodeCooldown} 秒" : totpDisableSendingCode ? "发送中…" : "发送验证码")</button></div></div>
+            }
+            else
+            {
+                <div class="form-field"><label for="totp-disable-password">当前密码</label><input id="totp-disable-password" type="password" autocomplete="current-password" value="@totpDisablePassword" @oninput="OnTotpDisablePasswordInput" placeholder="请输入当前密码确认" /></div>
+            }
+            <div class="modal-action-row"><button type="button" class="button secondary" @onclick="CloseTotpDisable">取消</button><button type="button" class="button danger" disabled="@(totpBusy || !CanDisableTotp)" @onclick="DisableTotpAsync">@(totpBusy ? "处理中…" : "确认禁用")</button></div>
+        </div>
+    </ChildContent>
+</AppModal>
+
+<AppModal Open="@(passkeyDeleteTarget is not null)" Title="删除 Passkey" MaxWidth="470px" OnClose="ClosePasskeyDelete">
+    <ChildContent>
+        @if (passkeyDeleteTarget is not null)
+        {
+            <form class="delete-passkey-form" @onsubmit="ConfirmDeletePasskeyAsync" @onsubmit:preventDefault="true" data-testid="passkey-delete-modal">
+                <p>删除“@passkeyDeleteTarget.Name”？删除后将无法再使用它登录。</p>
+                <div class="form-field"><label for="passkey-delete-password">当前密码</label><input id="passkey-delete-password" type="password" autocomplete="current-password" value="@passkeyDeletePassword" @oninput="OnPasskeyDeletePasswordInput" placeholder="输入当前登录密码以确认" autofocus /></div>
+                <div class="modal-action-row"><button type="button" class="button secondary" disabled="@passkeyBusy" @onclick="ClosePasskeyDelete">取消</button><button type="submit" class="button danger" disabled="@(passkeyBusy || string.IsNullOrEmpty(passkeyDeletePassword))">@(passkeyBusy ? "处理中…" : "删除")</button></div>
+            </form>
+        }
+    </ChildContent>
+</AppModal>
+
+@code {
+    [Parameter, EditorRequired] public ProfileDto Profile { get; set; } = default!;
+    [Parameter, EditorRequired] public PublicSettingsDto PublicSettings { get; set; } = default!;
+    [Parameter] public EventCallback<ProfileDto> ProfileChanged { get; set; }
+
+    private const int MaxNotifyEmails = 3;
+    private readonly List<PendingNotifyEmail> pendingEmails = [];
+    private System.Threading.Timer? countdownTimer;
+
+    private bool notifyEnabled;
+    private string balanceThresholdText = string.Empty;
+    private string newNotifyEmail = string.Empty;
+    private bool notifyEmailPrefilled;
+    private bool balanceBusy;
+    private string savedVerifyingEmail = string.Empty;
+    private string savedVerifyCode = string.Empty;
+    private int savedVerifyCountdown;
+    private bool savedEmailBusy;
+
+    private TotpStatusDto? totp;
+    private TotpSetupResponseDto? totpSetup;
+    private bool totpLoading = true;
+    private bool totpBusy;
+    private bool showTotpSetup;
+    private bool showTotpDisable;
+    private bool totpMethodLoading;
+    private int totpSetupStep;
+    private string totpMethod = "password";
+    private string totpSetupEmailCode = string.Empty;
+    private string totpSetupPassword = string.Empty;
+    private string totpEnableCode = string.Empty;
+    private string totpDisableEmailCode = string.Empty;
+    private string totpDisablePassword = string.Empty;
+    private int totpSetupCodeCooldown;
+    private int totpDisableCodeCooldown;
+    private bool totpSetupSendingCode;
+    private bool totpDisableSendingCode;
+    private string? totpQrSvgDataUri;
+
+    private readonly List<PasskeyCredentialDto> passkeys = [];
+    private bool passkeySupported;
+    private bool passkeyLoading;
+    private bool passkeyBusy;
+    private bool showPasskeyAddForm;
+    private string newPasskeyName = string.Empty;
+    private string newPasskeyPassword = string.Empty;
+    private PasskeyCredentialDto? passkeyDeleteTarget;
+    private string passkeyDeletePassword = string.Empty;
+    private string? securityError;
+
+    private bool CanAddNotifyEmail => Profile.BalanceNotifyExtraEmails.Count + pendingEmails.Count < MaxNotifyEmails;
+    private bool CanProceedTotpSetup => !totpMethodLoading && (totpMethod == "email" ? totpSetupEmailCode.Length == 6 : !string.IsNullOrWhiteSpace(totpSetupPassword));
+    private bool CanDisableTotp => !totpMethodLoading && (totpMethod == "email" ? totpDisableEmailCode.Length == 6 : !string.IsNullOrWhiteSpace(totpDisablePassword));
+    private string TotpSetupDescription => totpSetupStep switch
+    {
+        1 => "使用认证器应用扫描下方二维码",
+        2 => "输入应用显示的 6 位验证码",
+        _ => totpMethod == "email" ? "请先验证您的邮箱" : "请先验证您的身份"
+    };
+
+    protected override void OnParametersSet()
+    {
+        notifyEnabled = Profile.BalanceNotifyEnabled;
+        balanceThresholdText = Profile.BalanceNotifyThreshold is > 0
+            ? Profile.BalanceNotifyThreshold.Value.ToString("0.########", CultureInfo.InvariantCulture)
+            : string.Empty;
+        if (!notifyEmailPrefilled && Profile.BalanceNotifyExtraEmails.Count == 0 && IsUsableEmail(Profile.Email))
+        {
+            newNotifyEmail = Profile.Email;
+            notifyEmailPrefilled = true;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { passkeySupported = await Js.InvokeAsync<bool>("paraGateway.isPasskeySupported"); }
+        catch (JSException) { passkeySupported = false; }
+
+        var totpTask = LoadTotpStatusAsync();
+        var passkeyTask = PublicSettings.PasskeyEnabled && passkeySupported ? LoadPasskeysAsync() : Task.CompletedTask;
+        await Task.WhenAll(totpTask, passkeyTask);
+    }
+
+    private void OnBalanceThresholdInput(ChangeEventArgs args) => balanceThresholdText = args.Value?.ToString() ?? string.Empty;
+    private void OnNewNotifyEmailInput(ChangeEventArgs args) => newNotifyEmail = args.Value?.ToString() ?? string.Empty;
+    private void OnSavedVerifyCodeInput(ChangeEventArgs args) => savedVerifyCode = Digits(args.Value?.ToString(), 6);
+    private void OnPendingEmailCodeInput(PendingNotifyEmail pending, ChangeEventArgs args) => pending.Code = Digits(args.Value?.ToString(), 6);
+    private void OnTotpSetupEmailCodeInput(ChangeEventArgs args) => totpSetupEmailCode = Digits(args.Value?.ToString(), 6);
+    private void OnTotpSetupPasswordInput(ChangeEventArgs args) => totpSetupPassword = args.Value?.ToString() ?? string.Empty;
+    private void OnTotpEnableCodeInput(ChangeEventArgs args) => totpEnableCode = Digits(args.Value?.ToString(), 6);
+    private void OnTotpDisableEmailCodeInput(ChangeEventArgs args) => totpDisableEmailCode = Digits(args.Value?.ToString(), 6);
+    private void OnTotpDisablePasswordInput(ChangeEventArgs args) => totpDisablePassword = args.Value?.ToString() ?? string.Empty;
+    private void OnPasskeyNameInput(ChangeEventArgs args) => newPasskeyName = args.Value?.ToString() ?? string.Empty;
+    private void OnPasskeyPasswordInput(ChangeEventArgs args) => newPasskeyPassword = args.Value?.ToString() ?? string.Empty;
+    private void OnPasskeyDeletePasswordInput(ChangeEventArgs args) => passkeyDeletePassword = args.Value?.ToString() ?? string.Empty;
+
+    private void HandleNewNotifyEmailKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter") AddPendingEmail();
+    }
+
+    private async Task ToggleBalanceNotifyAsync(ChangeEventArgs args)
+    {
+        var previous = notifyEnabled;
+        notifyEnabled = ReadChecked(args.Value);
+        balanceBusy = true; securityError = null;
+        try
+        {
+            var updated = await Api.UpdateProfileAsync(new ProfileUpdate { DisplayName = Profile.DisplayName, BalanceNotifyEnabled = notifyEnabled });
+            await ProfileChanged.InvokeAsync(updated);
+        }
+        catch (ApiException ex) { notifyEnabled = previous; securityError = ex.Message; }
+        finally { balanceBusy = false; }
+    }
+
+    private async Task SaveBalanceThresholdAsync()
+    {
+        var threshold = ParseThreshold(balanceThresholdText);
+        if (threshold < 0) { securityError = "提醒阈值不能小于 0"; return; }
+        balanceBusy = true; securityError = null;
+        try
+        {
+            var updated = await Api.UpdateProfileAsync(new ProfileUpdate { DisplayName = Profile.DisplayName, BalanceNotifyThreshold = threshold });
+            await ProfileChanged.InvokeAsync(updated);
+            Toasts.Success("通知阈值已保存");
+        }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { balanceBusy = false; }
+    }
+
+    private void AddPendingEmail()
+    {
+        securityError = null;
+        var email = newNotifyEmail.Trim();
+        if (!IsUsableEmail(email)) { securityError = "请输入有效的邮箱地址"; return; }
+        if (!CanAddNotifyEmail) { securityError = "已达到通知邮箱数量上限"; return; }
+        if (Profile.BalanceNotifyExtraEmails.Any(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase)) || pendingEmails.Any(x => x.Email.Equals(email, StringComparison.OrdinalIgnoreCase)))
+        {
+            securityError = "该邮箱已存在";
+            return;
+        }
+        pendingEmails.Add(new PendingNotifyEmail(email));
+        newNotifyEmail = string.Empty;
+    }
+
+    private void RemovePendingEmail(PendingNotifyEmail pending) => pendingEmails.Remove(pending);
+
+    private async Task SendCodeForPendingEmailAsync(PendingNotifyEmail pending)
+    {
+        pending.Sending = true; securityError = null;
+        try
+        {
+            await Api.SendNotifyEmailCodeAsync(pending.Email);
+            pending.CodeSent = true; pending.Countdown = 60; EnsureCountdownTimer();
+            Toasts.Success($"验证码已发送到 {pending.Email}");
+        }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { pending.Sending = false; }
+    }
+
+    private async Task VerifyPendingEmailAsync(PendingNotifyEmail pending)
+    {
+        if (pending.Code.Length != 6) return;
+        pending.Verifying = true; securityError = null;
+        try
+        {
+            var updated = await Api.VerifyNotifyEmailAsync(pending.Email, pending.Code);
+            pendingEmails.Remove(pending);
+            await ProfileChanged.InvokeAsync(updated);
+            Toasts.Success("邮箱添加成功");
+        }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { pending.Verifying = false; }
+    }
+
+    private async Task SendCodeForSavedEmailAsync(string email)
+    {
+        savedEmailBusy = true; securityError = null;
+        try
+        {
+            await Api.SendNotifyEmailCodeAsync(email);
+            savedVerifyingEmail = email; savedVerifyCode = string.Empty; savedVerifyCountdown = 60; EnsureCountdownTimer();
+            Toasts.Success("验证码已发送");
+        }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { savedEmailBusy = false; }
+    }
+
+    private async Task VerifySavedEmailAsync(string email)
+    {
+        if (savedVerifyCode.Length != 6) return;
+        savedEmailBusy = true; securityError = null;
+        try
+        {
+            var updated = await Api.VerifyNotifyEmailAsync(email, savedVerifyCode);
+            CancelSavedEmailVerification();
+            await ProfileChanged.InvokeAsync(updated);
+            Toasts.Success("邮箱添加成功");
+        }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { savedEmailBusy = false; }
+    }
+
+    private void CancelSavedEmailVerification() { savedVerifyingEmail = string.Empty; savedVerifyCode = string.Empty; savedVerifyCountdown = 0; }
+
+    private async Task ToggleNotifyEmailAsync(NotifyEmailEntryDto entry)
+    {
+        balanceBusy = true; securityError = null;
+        try { await ProfileChanged.InvokeAsync(await Api.ToggleNotifyEmailAsync(entry.Email, !entry.Disabled)); }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { balanceBusy = false; }
+    }
+
+    private async Task RemoveNotifyEmailAsync(string email)
+    {
+        balanceBusy = true; securityError = null;
+        try { await ProfileChanged.InvokeAsync(await Api.RemoveNotifyEmailAsync(email)); Toasts.Success("邮箱已移除"); }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { balanceBusy = false; }
+    }
+
+    private async Task LoadTotpStatusAsync()
+    {
+        totpLoading = true;
+        try { totp = await Api.GetTotpStatusAsync(); }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { totpLoading = false; }
+    }
+
+    private async Task BeginSetupTotpAsync()
+    {
+        ResetTotpSetup(); showTotpSetup = true; totpMethodLoading = true; securityError = null;
+        try { totpMethod = NormalizeTotpMethod((await Api.GetTotpVerificationMethodAsync()).Method); }
+        catch (ApiException ex) { securityError = ex.Message; showTotpSetup = false; }
+        finally { totpMethodLoading = false; }
+    }
+
+    private async Task PrepareTotpSetupAsync()
+    {
+        if (!CanProceedTotpSetup) return;
+        totpBusy = true; securityError = null;
+        try
+        {
+            totpSetup = await Api.SetupTotpAsync(totpMethod == "email" ? totpSetupEmailCode : null, totpMethod == "password" ? totpSetupPassword : null);
+            totpQrSvgDataUri = CreateQrSvgDataUri(totpSetup.QrCodeUrl);
+            totpSetupStep = 1;
+        }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { totpBusy = false; }
+    }
+
+    private async Task EnableTotpAsync()
+    {
+        if (totpSetup is null || totpEnableCode.Length != 6) return;
+        totpBusy = true; securityError = null;
+        try
+        {
+            await Api.EnableTotpAsync(totpEnableCode, totpSetup.SetupToken);
+            CloseTotpSetup(); await LoadTotpStatusAsync(); Toasts.Success("双因素认证已启用");
+        }
+        catch (ApiException ex) { securityError = ex.Message; totpEnableCode = string.Empty; }
+        finally { totpBusy = false; }
+    }
+
+    private async Task BeginDisableTotpAsync()
+    {
+        showTotpDisable = true; totpMethodLoading = true; totpDisableEmailCode = string.Empty; totpDisablePassword = string.Empty; securityError = null;
+        try { totpMethod = NormalizeTotpMethod((await Api.GetTotpVerificationMethodAsync()).Method); }
+        catch (ApiException ex) { securityError = ex.Message; showTotpDisable = false; }
+        finally { totpMethodLoading = false; }
+    }
+
+    private async Task DisableTotpAsync()
+    {
+        if (!CanDisableTotp) return;
+        totpBusy = true; securityError = null;
+        try
+        {
+            await Api.DisableTotpAsync(totpMethod == "email" ? totpDisableEmailCode : null, totpMethod == "password" ? totpDisablePassword : null);
+            CloseTotpDisable(); await LoadTotpStatusAsync(); Toasts.Success("双因素认证已禁用");
+        }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { totpBusy = false; }
+    }
+
+    private async Task SendTotpCodeAsync(TotpCodePurpose purpose)
+    {
+        if (purpose == TotpCodePurpose.Setup) totpSetupSendingCode = true; else totpDisableSendingCode = true;
+        securityError = null;
+        try
+        {
+            await Api.SendTotpVerifyCodeAsync();
+            if (purpose == TotpCodePurpose.Setup) totpSetupCodeCooldown = 60; else totpDisableCodeCooldown = 60;
+            EnsureCountdownTimer(); Toasts.Success("验证码已发送到您的邮箱");
+        }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { if (purpose == TotpCodePurpose.Setup) totpSetupSendingCode = false; else totpDisableSendingCode = false; }
+    }
+
+    private async Task CopyTotpSecretAsync()
+    {
+        if (totpSetup is null) return;
+        await Js.InvokeVoidAsync("navigator.clipboard.writeText", totpSetup.Secret);
+        Toasts.Success("密钥已复制");
+    }
+
+    private static string? CreateQrSvgDataUri(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        using var data = QRCodeGenerator.GenerateQrCode(value, QRCodeGenerator.ECCLevel.M);
+        var svg = new SvgQRCode(data).GetGraphic(5, "#17201d", "#ffffff", true);
+        return $"data:image/svg+xml;base64,{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(svg))}";
+    }
+
+    private void CloseTotpSetup() { showTotpSetup = false; ResetTotpSetup(); }
+    private void ResetTotpSetup() { totpSetup = null; totpQrSvgDataUri = null; totpSetupStep = 0; totpSetupEmailCode = string.Empty; totpSetupPassword = string.Empty; totpEnableCode = string.Empty; }
+    private void CloseTotpDisable() { showTotpDisable = false; totpDisableEmailCode = string.Empty; totpDisablePassword = string.Empty; }
+
+    private async Task LoadPasskeysAsync()
+    {
+        passkeyLoading = true;
+        try { passkeys.Clear(); passkeys.AddRange(await Api.GetPasskeysAsync()); }
+        catch (ApiException ex) when (ex.Message.Contains("PASSKEY_DISABLED", StringComparison.OrdinalIgnoreCase)) { }
+        catch (ApiException) { securityError = "加载 Passkey 失败。"; }
+        finally { passkeyLoading = false; }
+    }
+
+    private void ShowPasskeyAddForm() { showPasskeyAddForm = true; newPasskeyName = string.Empty; newPasskeyPassword = string.Empty; }
+    private void CancelPasskeyAdd() { showPasskeyAddForm = false; newPasskeyName = string.Empty; newPasskeyPassword = string.Empty; }
+
+    private async Task RegisterPasskeyAsync()
+    {
+        if (string.IsNullOrEmpty(newPasskeyPassword)) return;
+        passkeyBusy = true; securityError = null;
+        try
+        {
+            var begin = await Api.BeginPasskeyRegistrationAsync(newPasskeyPassword);
+            var session = begin.TryGetProperty("session_token", out var token) ? token.GetString() : null;
+            var options = begin.TryGetProperty("options", out var optionValue) ? optionValue : default;
+            if (string.IsNullOrWhiteSpace(session) || options.ValueKind == JsonValueKind.Undefined) throw new ApiException("后端未返回 Passkey 注册参数。");
+            var publicKey = options.TryGetProperty("publicKey", out var publicKeyValue) ? publicKeyValue : options;
+            var credential = await Js.InvokeAsync<JsonElement>("paraGateway.passkeyCreate", publicKey);
+            await Api.FinishPasskeyRegistrationAsync(session, newPasskeyName.Trim(), credential);
+            CancelPasskeyAdd(); await LoadPasskeysAsync(); Toasts.Success("Passkey 已添加。");
+        }
+        catch (JSException ex) when (ex.Message.Contains("NotAllowedError", StringComparison.OrdinalIgnoreCase)) { }
+        catch (JSException ex) { securityError = ex.Message; }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { passkeyBusy = false; }
+    }
+
+    private async Task RenamePasskeyAsync(PasskeyCredentialDto item)
+    {
+        var name = (await Js.InvokeAsync<string?>("paraGateway.prompt", "请输入新的 Passkey 名称", item.Name))?.Trim();
+        if (string.IsNullOrWhiteSpace(name) || name == item.Name) return;
+        passkeyBusy = true; securityError = null;
+        try { await Api.RenamePasskeyAsync(item.Id, name); item.Name = name; Toasts.Success("Passkey 已重命名。"); }
+        catch (ApiException) { securityError = "重命名 Passkey 失败。"; }
+        finally { passkeyBusy = false; }
+    }
+
+    private void OpenPasskeyDelete(PasskeyCredentialDto item) { passkeyDeleteTarget = item; passkeyDeletePassword = string.Empty; }
+    private void ClosePasskeyDelete() { passkeyDeleteTarget = null; passkeyDeletePassword = string.Empty; }
+
+    private async Task ConfirmDeletePasskeyAsync()
+    {
+        var target = passkeyDeleteTarget;
+        if (target is null || string.IsNullOrEmpty(passkeyDeletePassword)) return;
+        passkeyBusy = true; securityError = null;
+        try { await Api.DeletePasskeyAsync(target.Id, passkeyDeletePassword); passkeys.Remove(target); Toasts.Success("Passkey 已删除。"); ClosePasskeyDelete(); }
+        catch (ApiException ex) { securityError = ex.Message; }
+        finally { passkeyBusy = false; }
+    }
+
+    private void EnsureCountdownTimer()
+    {
+        countdownTimer ??= new System.Threading.Timer(_ => _ = InvokeAsync(TickCountdowns), null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void TickCountdowns()
+    {
+        if (savedVerifyCountdown > 0) savedVerifyCountdown--;
+        if (totpSetupCodeCooldown > 0) totpSetupCodeCooldown--;
+        if (totpDisableCodeCooldown > 0) totpDisableCodeCooldown--;
+        foreach (var pending in pendingEmails)
+        {
+            if (pending.Countdown > 0) pending.Countdown--;
+        }
+        StateHasChanged();
+    }
+
+    private static bool ReadChecked(object? value) => value is bool flag ? flag : bool.TryParse(value?.ToString(), out var parsed) && parsed;
+    private static double ParseThreshold(string value) => string.IsNullOrWhiteSpace(value) ? 0 : double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : -1;
+    private static bool IsUsableEmail(string value) => !string.IsNullOrWhiteSpace(value) && !value.EndsWith(".invalid", StringComparison.OrdinalIgnoreCase) && new EmailAddressAttribute().IsValid(value);
+    private static string Digits(string? value, int maxLength) => new((value ?? string.Empty).Where(char.IsDigit).Take(maxLength).ToArray());
+    private static string NormalizeTotpMethod(string value) => value.Equals("email", StringComparison.OrdinalIgnoreCase) ? "email" : "password";
+    private static string FormatPasskeyDate(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy年M月d日");
+
+    public void Dispose() => countdownTimer?.Dispose();
+
+    private enum TotpCodePurpose { Setup, Disable }
+
+    private sealed class PendingNotifyEmail(string email)
+    {
+        public string Email { get; } = email;
+        public bool CodeSent { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public bool Sending { get; set; }
+        public bool Verifying { get; set; }
+        public int Countdown { get; set; }
+    }
+}

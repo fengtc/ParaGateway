@@ -1,0 +1,40 @@
+@page "/key-usage"
+@layout AuthLayout
+@inject ApiClient Api
+
+<PageTitle>Key 用量 · ParaGateway</PageTitle>
+
+<div class="public-tool-page">
+    <div class="public-tool-heading"><BrandMark /><div><h1>API Key 用量</h1><p>使用 API Key 直接查询官方 Go 网关的配额、限速和模型统计。</p></div></div>
+    <section class="content-section">
+        <div class="form-row"><div class="grow form-field"><label for="usage-key">API Key</label><InputText id="usage-key" @bind-Value="apiKey" type="password" autocomplete="off" placeholder="sk-..." /></div><div class="form-field compact"><label for="usage-days">天数</label><InputNumber id="usage-days" @bind-Value="days" min="1" max="90" /></div><button type="button" class="button primary" disabled="@loading || string.IsNullOrWhiteSpace(apiKey)" @onclick="QueryAsync">查询</button></div>
+    </section>
+    @if (error is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@error</span></div> }
+    @if (result is not null)
+    {
+        <section class="metrics-grid compact-metrics">
+            <div class="metric-card"><span class="metric-label">模式</span><strong>@result.Mode</strong></div>
+            <div class="metric-card"><span class="metric-label">剩余</span><strong>@(result.Remaining?.ToString("0.####") ?? "-") @result.Unit</strong></div>
+            <div class="metric-card"><span class="metric-label">今日请求</span><strong>@result.Usage?.Today.Requests</strong></div>
+            <div class="metric-card"><span class="metric-label">累计 Token</span><strong>@UiFormat.Integer(result.Usage?.Total.TotalTokens ?? 0)</strong></div>
+        </section>
+        <section class="content-section"><div class="section-header"><div><h2>每日用量</h2><p>@result.DailyUsage.Count 个日期点</p></div></div><DxGrid Data="@result.DailyUsage" ShowFilterRow="true" PageSize="20"><Columns><DxGridDataColumn FieldName="Date" Caption="日期" /><DxGridDataColumn FieldName="Requests" Caption="请求数" /><DxGridDataColumn FieldName="TotalTokens" Caption="Token" /><DxGridDataColumn FieldName="ActualCost" Caption="实际费用" DisplayFormat="0.########" /></Columns></DxGrid></section>
+        <section class="content-section"><div class="section-header"><div><h2>模型统计</h2></div></div><DxGrid Data="@result.ModelStats" ShowFilterRow="true" PageSize="20"><Columns><DxGridDataColumn FieldName="Model" Caption="模型" /><DxGridDataColumn FieldName="Requests" Caption="请求数" /><DxGridDataColumn FieldName="TotalTokens" Caption="Token" /><DxGridDataColumn FieldName="ActualCost" Caption="实际费用" DisplayFormat="0.########" /></Columns></DxGrid></section>
+    }
+</div>
+
+@code {
+    private string apiKey = string.Empty;
+    private int days = 30;
+    private bool loading;
+    private string? error;
+    private GatewayUsageResponse? result;
+
+    private async Task QueryAsync()
+    {
+        loading = true; error = null;
+        try { result = await Api.GetGatewayUsageAsync(apiKey, days: days); }
+        catch (ApiException ex) { result = null; error = ex.Message; }
+        finally { loading = false; }
+    }
+}

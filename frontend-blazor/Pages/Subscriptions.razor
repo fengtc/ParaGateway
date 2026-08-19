@@ -1,0 +1,616 @@
+@page "/subscriptions"
+@page "/admin/subscriptions"
+@implements IDisposable
+@using System.Globalization
+@using System.Text.Json
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>@(IsAdminRoute ? "订阅管理" : "我的订阅") · ParaGateway</PageTitle>
+
+@if (IsAdminRoute)
+{
+    <section class="subscriptions-workspace">
+        <div class="subscriptions-toolbar">
+            <div class="subscriptions-toolbar-left">
+                <div class="user-search-anchor">
+                    <div class="search-box subscription-user-search">
+                        <Icon Name="search" Size="17" />
+                        <input value="@filterUserKeyword"
+                               @oninput="FilterUserSearchChangedAsync"
+                               @onfocus="ShowFilterUserDropdown"
+                               placeholder="邮箱/用户名/备注/API Key 模糊搜索"
+                               aria-label="邮箱/用户名/备注/API Key 模糊搜索" />
+                        @if (selectedFilterUser is not null)
+                        {
+                            <button type="button" class="search-clear" title="清除用户筛选" aria-label="清除用户筛选" @onclick="ClearFilterUserAsync"><Icon Name="x" Size="14" /></button>
+                        }
+                    </div>
+                    @if (showFilterUserDropdown && !string.IsNullOrWhiteSpace(filterUserKeyword))
+                    {
+                        <div class="user-search-menu" role="listbox" aria-label="用户搜索结果">
+                            @if (filterUserLoading)
+                            {
+                                <span class="search-state">正在加载...</span>
+                            }
+                            else if (filterUserResults.Count == 0)
+                            {
+                                <span class="search-state">没有找到选项</span>
+                            }
+                            else
+                            {
+                                @foreach (var user in filterUserResults)
+                                {
+                                    <button type="button" role="option" @onclick="() => SelectFilterUserAsync(user)"><strong>@user.Email</strong><span>@UserResultDetail(user)</span></button>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+
+                <select class="compact-select" value="@statusFilter" @onchange="StatusFilterChangedAsync" aria-label="订阅状态筛选">
+                    <option value="">全部状态</option><option value="active">生效中</option><option value="expired">已过期</option><option value="revoked">已撤销</option>
+                </select>
+                <select class="compact-select group-filter" value="@GroupFilterValue" @onchange="GroupFilterChangedAsync" aria-label="订阅分组筛选">
+                    <option value="">全部分组</option>
+                    @foreach (var group in allGroups) { <option value="@group.Id">@group.Name</option> }
+                </select>
+                <select class="compact-select" value="@platformFilter" @onchange="PlatformFilterChangedAsync" aria-label="订阅平台筛选">
+                    <option value="">全部平台</option><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option><option value="composite">Composite</option>
+                </select>
+            </div>
+
+            <div class="subscriptions-toolbar-actions">
+                <button type="button" class="button secondary icon-only" title="刷新" aria-label="刷新" disabled="@adminLoading" @onclick="RefreshAdminAsync"><Icon Name="refresh" Size="17" /></button>
+                <div class="menu-anchor">
+                    <button type="button" class="button secondary" title="列设置" aria-label="列设置" aria-expanded="@showColumnMenu" @onclick="ToggleColumnMenu"><Icon Name="columns" Size="16" /> 列设置</button>
+                    @if (showColumnMenu)
+                    {
+                        <div class="settings-menu subscription-columns-menu">
+                            <span class="menu-section-title">用户</span>
+                            <button type="button" @onclick='() => SetUserColumnModeAsync("email")'><span>邮箱</span>@if (userColumnMode == "email") { <Icon Name="check" Size="15" /> }</button>
+                            <button type="button" @onclick='() => SetUserColumnModeAsync("username")'><span>用户名</span>@if (userColumnMode == "username") { <Icon Name="check" Size="15" /> }</button>
+                            <span class="menu-separator"></span>
+                            @foreach (var column in ToggleableColumns)
+                            {
+                                <button type="button" @onclick="() => ToggleColumnAsync(column.Key)"><span>@column.Label</span>@if (IsColumnVisible(column.Key)) { <Icon Name="check" Size="15" /> }</button>
+                            }
+                        </div>
+                    }
+                </div>
+                <button type="button" class="button secondary icon-only" title="使用指南" aria-label="使用指南" @onclick="OpenGuide"><Icon Name="info" Size="17" /></button>
+                <button type="button" class="button primary" @onclick="OpenAssign"><Icon Name="plus" Size="17" /> 分配订阅</button>
+            </div>
+        </div>
+
+        @if (adminError is not null)
+        {
+            <ErrorState Message="@adminError" OnRetry="RefreshAdminAsync" />
+        }
+        else
+        {
+            <div class="subscriptions-table-card">
+                <div class="subscriptions-table-scroll">
+                    <table class="subscriptions-data-table">
+                        <thead>
+                            <tr>
+                                <th>@(userColumnMode == "username" ? "用户名" : "用户")</th>
+                                @if (IsColumnVisible("group")) { <th>分组</th> }
+                                @if (IsColumnVisible("usage")) { <th>用量</th> }
+                                @if (IsColumnVisible("expires_at")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("expires_at")'>到期时间 @SortIndicator("expires_at")</button></th> }
+                                @if (IsColumnVisible("status")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("status")'>状态 @SortIndicator("status")</button></th> }
+                                <th class="subscription-actions-column">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (adminLoading)
+                            {
+                                <tr><td colspan="@VisibleColumnCount"><LoadingState Text="正在载入订阅" /></td></tr>
+                            }
+                            else if (subscriptions.Count == 0)
+                            {
+                                <tr><td colspan="@VisibleColumnCount" class="empty-table-cell"><EmptyState Title="暂无订阅" Description="分配一个订阅以开始使用。"><Action><button type="button" class="button primary small" @onclick="OpenAssign"><Icon Name="plus" Size="15" /> 分配订阅</button></Action></EmptyState></td></tr>
+                            }
+                            else
+                            {
+                                @foreach (var subscription in subscriptions)
+                                {
+                                    <tr @key="subscription.Id">
+                                        <td>
+                                            <div class="subscription-user-cell">
+                                                <span class="subscription-avatar">@UserInitial(subscription)</span>
+                                                <strong>@UserDisplay(subscription)</strong>
+                                            </div>
+                                        </td>
+                                        @if (IsColumnVisible("group"))
+                                        {
+                                            <td>@if (subscription.Group is not null) { <span class="subscription-group-badge @subscription.Group.Platform"><span class="platform-dot"></span>@subscription.Group.Name</span> } else { <span class="muted-value">—</span> }</td>
+                                        }
+                                        @if (IsColumnVisible("usage"))
+                                        {
+                                            <td>@UsageCell(subscription, false)</td>
+                                        }
+                                        @if (IsColumnVisible("expires_at"))
+                                        {
+                                            <td>
+                                                @if (subscription.ExpiresAt.HasValue)
+                                                {
+                                                    <div class="expiry-cell @ExpiryClass(subscription.ExpiresAt.Value)"><span>@FormatDateTime(subscription.ExpiresAt.Value)</span>@if (RemainingExpiry(subscription.ExpiresAt.Value) is { } remaining) { <small>@remaining</small> }</div>
+                                                }
+                                                else { <span class="muted-value">无过期时间</span> }
+                                            </td>
+                                        }
+                                        @if (IsColumnVisible("status"))
+                                        {
+                                            <td><span class="subscription-status @subscription.Status">@StatusLabel(subscription.Status)</span></td>
+                                        }
+                                        <td class="subscription-actions-column">
+                                            <div class="subscription-row-actions">
+                                                @if (subscription.Status is "active" or "expired")
+                                                {
+                                                    <button type="button" title="调整订阅" @onclick="() => OpenAdjust(subscription)"><Icon Name="calendar" Size="15" /><span>调整</span></button>
+                                                }
+                                                @if (subscription.Status == "active")
+                                                {
+                                                    <button type="button" title="重置配额" class="warning-action" @onclick="() => OpenResetQuota(subscription)"><Icon Name="refresh" Size="15" /><span>重置配额</span></button>
+                                                    <button type="button" title="撤销订阅" class="danger-action" @onclick="() => OpenRevoke(subscription)"><Icon Name="ban" Size="15" /><span>撤销</span></button>
+                                                }
+                                                @if (subscription.Status == "revoked")
+                                                {
+                                                    <button type="button" title="恢复订阅" class="success-action" @onclick="() => OpenRestore(subscription)"><Icon Name="refresh" Size="15" /><span>恢复</span></button>
+                                                }
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            @if (total > 0)
+            {
+                <div class="subscriptions-pagination">
+                    <span>第 @RangeStart-@RangeEnd 条，共 @total 条</span>
+                    <div class="page-controls">
+                        <label>每页<select value="@pageSize" @onchange="PageSizeChangedAsync" aria-label="每页条数"><option value="20">20</option><option value="50">50</option><option value="100">100</option></select>条</label>
+                        <button type="button" class="icon-button" aria-label="上一页" disabled="@(page <= 1)" @onclick="PreviousPageAsync"><Icon Name="chevron-left" Size="16" /></button>
+                        @foreach (var pageNumber in VisiblePages) { <button type="button" class="page-button @(pageNumber == page ? "active" : null)" @onclick="() => GoToPageAsync(pageNumber)">@pageNumber</button> }
+                        <button type="button" class="icon-button" aria-label="下一页" disabled="@(page >= TotalPages)" @onclick="NextPageAsync"><Icon Name="chevron-right" Size="16" /></button>
+                    </div>
+                </div>
+            }
+        }
+    </section>
+}
+else
+{
+    <section class="my-subscriptions-workspace">
+        @if (selfLoading)
+        {
+            <LoadingState Text="正在载入订阅" />
+        }
+        else if (selfError is not null)
+        {
+            <ErrorState Message="@selfError" OnRetry="LoadSelfAsync" />
+        }
+        else if (selfSubscriptions.Count == 0)
+        {
+            <div class="self-subscription-empty"><span class="self-empty-icon"><Icon Name="wallet" Size="28" /></span><h3>暂无有效订阅</h3><p>您没有任何有效订阅。请联系管理员获取订阅。</p></div>
+        }
+        else
+        {
+            <div class="self-subscriptions-grid">
+                @foreach (var subscription in selfSubscriptions)
+                {
+                    <article class="self-subscription-card @PlatformClass(subscription.Group?.Platform)" @key="subscription.Id">
+                        <header>
+                            <div class="self-subscription-title"><span class="platform-dot"></span><div><div><h3>@(subscription.Group?.Name ?? $"Group #{subscription.GroupId}")</h3><span class="self-platform-badge">@PlatformLabel(subscription.Group?.Platform)</span></div>@if (!string.IsNullOrWhiteSpace(subscription.Group?.Description)) { <p>@subscription.Group.Description</p> }<small>费率：×@FormatRate(subscription.Group?.RateMultiplier ?? 1) @if (subscription.Group?.PeakRateEnabled == true) { <span>高峰：@PeakRateLabel(subscription.Group)</span> }</small></div></div>
+                            <span class="subscription-status @subscription.Status">@SelfStatusLabel(subscription.Status)</span>
+                        </header>
+                        <div class="self-subscription-body">
+                            <div class="self-expiry"><span>到期时间</span><strong>@SelfExpiration(subscription.ExpiresAt)</strong></div>
+                            @UsageCell(subscription, true)
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+}
+
+<AppModal Open="@assignOpen" Title="分配订阅" MaxWidth="560px" OnClose="CloseAssign">
+    <ChildContent>
+        <EditForm id="assign-subscription-form" Model="assignForm" OnValidSubmit="AssignSubscriptionAsync" FormName="assign-subscription-form">
+            <DataAnnotationsValidator />
+            @if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@modalError</span></div> }
+            <div class="form-field">
+                <label for="assign-subscription-user">用户</label>
+                <div class="user-search-anchor">
+                    <div class="search-box modal-user-search"><Icon Name="search" Size="16" /><input id="assign-subscription-user" value="@assignUserKeyword" @oninput="AssignUserSearchChangedAsync" @onfocus="ShowAssignUserDropdown" placeholder="搜索用户邮箱、用户名或备注" autocomplete="off" />@if (selectedAssignUser is not null) { <button type="button" class="search-clear" title="清除用户" aria-label="清除用户" @onclick="ClearAssignUser"><Icon Name="x" Size="14" /></button> }</div>
+                    @if (showAssignUserDropdown && !string.IsNullOrWhiteSpace(assignUserKeyword))
+                    {
+                        <div class="user-search-menu modal-search-menu" role="listbox">
+                            @if (assignUserLoading) { <span class="search-state">正在加载...</span> }
+                            else if (assignUserResults.Count == 0) { <span class="search-state">没有找到选项</span> }
+                            else { @foreach (var user in assignUserResults) { <button type="button" role="option" @onclick="() => SelectAssignUser(user)"><strong>@user.Email</strong><span>@UserResultDetail(user)</span></button> } }
+                        </div>
+                    }
+                </div>
+                <ValidationMessage For="() => assignForm.UserId" />
+            </div>
+            <div class="form-field">
+                <label for="assign-subscription-group">订阅分组</label>
+                <InputSelect id="assign-subscription-group" @bind-Value="assignForm.GroupId"><option value="">选择订阅分组</option>@foreach (var group in AssignableGroups) { <option value="@group.Id">@group.Name · @PlatformLabel(group.Platform) · @FormatRate(group.RateMultiplier)x</option> }</InputSelect>
+                <small>仅显示订阅计费类型且状态正常的分组。</small>
+                <ValidationMessage For="() => assignForm.GroupId" />
+            </div>
+            <div class="form-field">
+                <label for="assign-subscription-days">有效期（天）</label>
+                <InputNumber id="assign-subscription-days" @bind-Value="assignForm.ValidityDays" min="1" max="36500" />
+                <small>订阅的有效天数。</small>
+                <ValidationMessage For="() => assignForm.ValidityDays" />
+            </div>
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" disabled="@submitting" @onclick="CloseAssign">取消</button><button type="submit" form="assign-subscription-form" class="button primary" disabled="@submitting">@(submitting ? "分配中..." : "分配")</button></Footer>
+</AppModal>
+
+<AppModal Open="@(adjustTarget is not null)" Title="调整订阅" MaxWidth="480px" OnClose="CloseAdjust">
+    <ChildContent>
+        @if (adjustTarget is not null)
+        {
+            <EditForm id="adjust-subscription-form" Model="adjustForm" OnValidSubmit="AdjustSubscriptionAsync" FormName="adjust-subscription-form">
+                <DataAnnotationsValidator />
+                @if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@modalError</span></div> }
+                <div class="subscription-modal-summary"><p>为以下用户调整订阅 <strong>@UserEmail(adjustTarget)</strong></p><p>当前到期时间：<strong>@(adjustTarget.ExpiresAt.HasValue ? FormatDateTime(adjustTarget.ExpiresAt.Value) : "无过期时间")</strong></p>@if (adjustTarget.ExpiresAt.HasValue) { <p>剩余天数：<strong>@Math.Max(0, (int)Math.Ceiling((adjustTarget.ExpiresAt.Value - DateTimeOffset.Now).TotalDays))</strong></p> }</div>
+                <div class="form-field"><label for="adjust-subscription-days">调整天数</label><InputNumber id="adjust-subscription-days" @bind-Value="adjustForm.Days" min="-36500" max="36500" /><small>输入正数延长订阅，负数缩短订阅（缩短后剩余天数需大于 0）。</small><ValidationMessage For="() => adjustForm.Days" /></div>
+            </EditForm>
+        }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" disabled="@submitting" @onclick="CloseAdjust">取消</button><button type="submit" form="adjust-subscription-form" class="button primary" disabled="@submitting">@(submitting ? "调整中..." : "调整")</button></Footer>
+</AppModal>
+
+<AppModal Open="@(resetTarget is not null)" Title="重置用量配额" MaxWidth="500px" OnClose="CloseResetQuota">
+    <ChildContent>@if (resetTarget is not null) { <div class="subscription-confirm"><span class="confirm-icon warning"><Icon Name="refresh" Size="21" /></span><div><strong>确定重置“@UserEmail(resetTarget)”的用量配额吗？</strong><p>每日、每周和每月用量将归零，并从当前时间重新计算。</p></div></div>@if (modalError is not null) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@modalError</span></div> } }</ChildContent>
+    <Footer><button type="button" class="button secondary" disabled="@submitting" @onclick="CloseResetQuota">取消</button><button type="button" class="button primary" disabled="@submitting" @onclick="ResetQuotaAsync">重置配额</button></Footer>
+</AppModal>
+
+<AppModal Open="@(revokeTarget is not null)" Title="撤销订阅" MaxWidth="500px" OnClose="CloseRevoke">
+    <ChildContent>@if (revokeTarget is not null) { <div class="subscription-confirm"><span class="confirm-icon danger"><Icon Name="ban" Size="21" /></span><div><strong>确定撤销“@UserEmail(revokeTarget)”的订阅吗？</strong><p>订阅将立即终止，可稍后在“已撤销”列表中恢复。</p></div></div>@if (modalError is not null) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@modalError</span></div> } }</ChildContent>
+    <Footer><button type="button" class="button secondary" disabled="@submitting" @onclick="CloseRevoke">取消</button><button type="button" class="button danger" disabled="@submitting" @onclick="RevokeSubscriptionAsync">撤销</button></Footer>
+</AppModal>
+
+<AppModal Open="@(restoreTarget is not null)" Title="恢复订阅" MaxWidth="500px" OnClose="CloseRestore">
+    <ChildContent>@if (restoreTarget is not null) { <div class="subscription-confirm"><span class="confirm-icon success"><Icon Name="refresh" Size="21" /></span><div><strong>确定恢复“@UserEmail(restoreTarget)”的订阅吗？</strong><p>如果原订阅已经过期，恢复后仍会显示为已过期。</p></div></div>@if (modalError is not null) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@modalError</span></div> } }</ChildContent>
+    <Footer><button type="button" class="button secondary" disabled="@submitting" @onclick="CloseRestore">取消</button><button type="button" class="button primary" disabled="@submitting" @onclick="RestoreSubscriptionAsync">恢复</button></Footer>
+</AppModal>
+
+<AppModal Open="@guideOpen" Title="订阅管理教程" MaxWidth="680px" OnClose="CloseGuide">
+    <ChildContent>
+        <p class="guide-intro">订阅模式允许你按时间周期为用户分配使用额度，支持日/周/月配额限制。按照以下步骤即可完成配置。</p>
+        <div class="subscription-guide-step"><span>1</span><div><h3>创建订阅分组</h3><ol><li>前往“分组管理”页面，点击“创建分组”</li><li>将计费类型设为“订阅”，配置日/周/月额度限制</li><li>保存分组，确保状态为“正常”</li></ol><a href="/admin/groups" @onclick="CloseGuide">前往分组管理 <Icon Name="arrow-right" Size="13" /></a></div></div>
+        <div class="subscription-guide-step"><span>2</span><div><h3>分配订阅给用户</h3><ol><li>点击本页右上角“分配订阅”按钮</li><li>在弹窗中搜索用户邮箱并选择目标用户</li><li>选择订阅分组、设置有效期天数，点击“分配”</li></ol></div></div>
+        <div class="subscription-guide-step"><span>3</span><div><h3>管理已有订阅</h3><div class="guide-action-table"><div><strong>调整</strong><span>延长或缩短订阅有效期</span></div><div><strong>重置配额</strong><span>将日/周/月用量归零，重新开始计算</span></div><div><strong>撤销</strong><span>立即终止该用户的订阅，可在已撤销列表中恢复</span></div></div></div></div>
+        <div class="guide-tip">提示：订阅分组下拉列表中只会显示计费类型为“订阅”且状态为“正常”的分组。如果没有可选项，请先到分组管理中创建。</div>
+    </ChildContent>
+    <Footer><button type="button" class="button primary" @onclick="CloseGuide">关闭</button></Footer>
+</AppModal>
+
+@code {
+    private const string HiddenColumnsKey = "subscription-hidden-columns";
+    private const string UserColumnModeKey = "subscription-user-column-mode";
+    private const string PageSizeKey = "table-page-size";
+    private static readonly JsonSerializerOptions PreferenceJson = new(JsonSerializerDefaults.Web);
+    private static readonly IReadOnlyList<ColumnOption> ToggleableColumns = [new("group", "分组"), new("usage", "用量"), new("expires_at", "到期时间"), new("status", "状态")];
+
+    private readonly HashSet<string> hiddenColumns = [];
+    private CancellationTokenSource? filterUserDebounce;
+    private CancellationTokenSource? assignUserDebounce;
+    private List<SubscriptionDto> subscriptions = [];
+    private List<SubscriptionDto> selfSubscriptions = [];
+    private List<GroupDto> allGroups = [];
+    private List<GoUser> filterUserResults = [];
+    private List<GoUser> assignUserResults = [];
+    private GoUser? selectedFilterUser;
+    private GoUser? selectedAssignUser;
+    private SubscriptionDto? adjustTarget;
+    private SubscriptionDto? resetTarget;
+    private SubscriptionDto? revokeTarget;
+    private SubscriptionDto? restoreTarget;
+    private SubscriptionAssignInput assignForm = new();
+    private SubscriptionAdjustInput adjustForm = new();
+    private string statusFilter = "active";
+    private string platformFilter = string.Empty;
+    private long? groupFilterId;
+    private string sortBy = "created_at";
+    private string sortOrder = "desc";
+    private string userColumnMode = "email";
+    private string filterUserKeyword = string.Empty;
+    private string assignUserKeyword = string.Empty;
+    private string? adminError;
+    private string? selfError;
+    private string? modalError;
+    private int page = 1;
+    private int pageSize = 20;
+    private long total;
+    private bool adminLoading = true;
+    private bool selfLoading = true;
+    private bool filterUserLoading;
+    private bool assignUserLoading;
+    private bool showFilterUserDropdown;
+    private bool showAssignUserDropdown;
+    private bool showColumnMenu;
+    private bool assignOpen;
+    private bool guideOpen;
+    private bool submitting;
+
+    private bool IsAdminRoute => new Uri(Navigation.Uri).AbsolutePath.TrimEnd('/').Equals("/admin/subscriptions", StringComparison.OrdinalIgnoreCase);
+    private string GroupFilterValue => groupFilterId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    private IEnumerable<GroupDto> AssignableGroups => allGroups.Where(x => x.SubscriptionType == "subscription" && x.Status == "active");
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+    private long RangeStart => total == 0 ? 0 : (page - 1L) * pageSize + 1;
+    private long RangeEnd => Math.Min(total, page * (long)pageSize);
+    private int VisibleColumnCount => 2 + ToggleableColumns.Count(x => IsColumnVisible(x.Key));
+    private IEnumerable<int> VisiblePages { get { var start = Math.Max(1, Math.Min(page - 2, TotalPages - 4)); var end = Math.Min(TotalPages, start + 4); return Enumerable.Range(start, end - start + 1); } }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsAdminRoute)
+        {
+            await Task.WhenAll(LoadGroupsAsync(), LoadAdminAsync());
+        }
+        else
+        {
+            await LoadSelfAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !IsAdminRoute) return;
+        try
+        {
+            var savedColumns = await JS.InvokeAsync<string?>("localStorage.getItem", HiddenColumnsKey);
+            var values = string.IsNullOrWhiteSpace(savedColumns) ? null : JsonSerializer.Deserialize<List<string>>(savedColumns, PreferenceJson);
+            if (values is not null) { hiddenColumns.Clear(); foreach (var value in values.Where(x => ToggleableColumns.Any(c => c.Key == x))) hiddenColumns.Add(value); }
+            else await SaveColumnPreferencesAsync();
+
+            var savedMode = await JS.InvokeAsync<string?>("localStorage.getItem", UserColumnModeKey);
+            if (savedMode is "email" or "username") userColumnMode = savedMode;
+
+            var savedPageSize = await JS.InvokeAsync<string?>("localStorage.getItem", PageSizeKey);
+            if (int.TryParse(savedPageSize, out var parsedPageSize) && parsedPageSize is 20 or 50 or 100 && parsedPageSize != pageSize)
+            {
+                pageSize = parsedPageSize;
+                page = 1;
+                await LoadAdminAsync();
+            }
+            StateHasChanged();
+        }
+        catch (JSException) { }
+    }
+
+    private async Task LoadAdminAsync()
+    {
+        adminLoading = true;
+        adminError = null;
+        showColumnMenu = false;
+        try
+        {
+            var result = await Api.GetAdminSubscriptionsAsync(page, pageSize, selectedFilterUser?.Id, groupFilterId, statusFilter, platformFilter, sortBy, sortOrder);
+            subscriptions = result.Items;
+            total = result.Total;
+            if (page > TotalPages) { page = TotalPages; await LoadAdminAsync(); return; }
+        }
+        catch (ApiException ex) { adminError = ex.Message; subscriptions = []; total = 0; }
+        finally { adminLoading = false; }
+    }
+
+    private async Task LoadGroupsAsync()
+    {
+        try { allGroups = await Api.GetGroupsAsync(); }
+        catch (ApiException ex) { allGroups = []; Toasts.Error($"加载分组失败：{ex.Message}"); }
+    }
+
+    private async Task LoadSelfAsync()
+    {
+        selfLoading = true;
+        selfError = null;
+        try { selfSubscriptions = await Api.GetMySubscriptionsAsync(); }
+        catch (ApiException ex) { selfError = ex.Message; selfSubscriptions = []; }
+        finally { selfLoading = false; }
+    }
+
+    private async Task RefreshAdminAsync() { filterUserDebounce?.Cancel(); await Task.WhenAll(LoadGroupsAsync(), LoadAdminAsync()); }
+    private async Task StatusFilterChangedAsync(ChangeEventArgs e) { statusFilter = e.Value?.ToString() ?? string.Empty; page = 1; await LoadAdminAsync(); }
+    private async Task PlatformFilterChangedAsync(ChangeEventArgs e) { platformFilter = e.Value?.ToString() ?? string.Empty; page = 1; await LoadAdminAsync(); }
+    private async Task GroupFilterChangedAsync(ChangeEventArgs e) { groupFilterId = long.TryParse(e.Value?.ToString(), out var value) ? value : null; page = 1; await LoadAdminAsync(); }
+    private async Task ChangeSortAsync(string key) { if (sortBy == key) sortOrder = sortOrder == "asc" ? "desc" : "asc"; else { sortBy = key; sortOrder = "asc"; } page = 1; await LoadAdminAsync(); }
+    private string SortIndicator(string key) => sortBy == key ? (sortOrder == "asc" ? "↑" : "↓") : string.Empty;
+    private async Task PageSizeChangedAsync(ChangeEventArgs e) { if (int.TryParse(e.Value?.ToString(), out var value)) pageSize = value; try { await JS.InvokeVoidAsync("localStorage.setItem", PageSizeKey, pageSize.ToString(CultureInfo.InvariantCulture)); } catch (JSException) { } page = 1; await LoadAdminAsync(); }
+    private Task PreviousPageAsync() => GoToPageAsync(page - 1);
+    private Task NextPageAsync() => GoToPageAsync(page + 1);
+    private async Task GoToPageAsync(int target) { var normalized = Math.Clamp(target, 1, TotalPages); if (normalized == page) return; page = normalized; await LoadAdminAsync(); }
+
+    private void ToggleColumnMenu() => showColumnMenu = !showColumnMenu;
+    private bool IsColumnVisible(string key) => !hiddenColumns.Contains(key);
+    private async Task ToggleColumnAsync(string key) { if (!hiddenColumns.Remove(key)) hiddenColumns.Add(key); await SaveColumnPreferencesAsync(); }
+    private async Task SaveColumnPreferencesAsync() { try { await JS.InvokeVoidAsync("localStorage.setItem", HiddenColumnsKey, JsonSerializer.Serialize(hiddenColumns, PreferenceJson)); } catch (JSException) { } }
+    private async Task SetUserColumnModeAsync(string mode) { userColumnMode = mode is "username" ? "username" : "email"; try { await JS.InvokeVoidAsync("localStorage.setItem", UserColumnModeKey, userColumnMode); } catch (JSException) { } }
+
+    private void ShowFilterUserDropdown() => showFilterUserDropdown = true;
+    private async Task FilterUserSearchChangedAsync(ChangeEventArgs e)
+    {
+        var next = e.Value?.ToString() ?? string.Empty;
+        var clearedSelection = selectedFilterUser is not null && !string.Equals(next, selectedFilterUser.Email, StringComparison.Ordinal);
+        if (clearedSelection) { selectedFilterUser = null; page = 1; await LoadAdminAsync(); }
+        filterUserKeyword = next;
+        showFilterUserDropdown = true;
+        filterUserDebounce?.Cancel(); filterUserDebounce?.Dispose();
+        if (string.IsNullOrWhiteSpace(next)) { filterUserResults = []; filterUserLoading = false; return; }
+        var current = filterUserDebounce = new();
+        try { await Task.Delay(300, current.Token); await SearchFilterUsersAsync(next.Trim(), current.Token); }
+        catch (OperationCanceledException) { }
+    }
+    private async Task SearchFilterUsersAsync(string keyword, CancellationToken token)
+    {
+        filterUserLoading = true;
+        try { var result = await Api.GetAdminUsersAsync(1, 10, keyword, includeSubscriptions: false); if (!token.IsCancellationRequested) filterUserResults = result.Items; }
+        catch (ApiException ex) { if (!token.IsCancellationRequested) { filterUserResults = []; Toasts.Error(ex.Message); } }
+        finally { if (!token.IsCancellationRequested) filterUserLoading = false; }
+    }
+    private async Task SelectFilterUserAsync(GoUser user) { selectedFilterUser = user; filterUserKeyword = user.Email; showFilterUserDropdown = false; filterUserResults = []; page = 1; await LoadAdminAsync(); }
+    private async Task ClearFilterUserAsync() { selectedFilterUser = null; filterUserKeyword = string.Empty; filterUserResults = []; showFilterUserDropdown = false; page = 1; await LoadAdminAsync(); }
+
+    private void OpenAssign() { assignForm = new(); selectedAssignUser = null; assignUserKeyword = string.Empty; assignUserResults = []; showAssignUserDropdown = false; modalError = null; assignOpen = true; showColumnMenu = false; }
+    private void CloseAssign() { if (!submitting) assignOpen = false; }
+    private void ShowAssignUserDropdown() => showAssignUserDropdown = true;
+    private async Task AssignUserSearchChangedAsync(ChangeEventArgs e)
+    {
+        var next = e.Value?.ToString() ?? string.Empty;
+        if (selectedAssignUser is not null && !string.Equals(next, selectedAssignUser.Email, StringComparison.Ordinal)) { selectedAssignUser = null; assignForm.UserId = null; }
+        assignUserKeyword = next; showAssignUserDropdown = true;
+        assignUserDebounce?.Cancel(); assignUserDebounce?.Dispose();
+        if (string.IsNullOrWhiteSpace(next)) { assignUserResults = []; assignUserLoading = false; return; }
+        var current = assignUserDebounce = new();
+        try { await Task.Delay(300, current.Token); assignUserLoading = true; var result = await Api.GetAdminUsersAsync(1, 10, next.Trim(), includeSubscriptions: false); if (!current.IsCancellationRequested) assignUserResults = result.Items; }
+        catch (OperationCanceledException) { }
+        catch (ApiException ex) { if (!current.IsCancellationRequested) { assignUserResults = []; Toasts.Error(ex.Message); } }
+        finally { if (!current.IsCancellationRequested) assignUserLoading = false; }
+    }
+    private void SelectAssignUser(GoUser user) { selectedAssignUser = user; assignForm.UserId = user.Id; assignUserKeyword = user.Email; assignUserResults = []; showAssignUserDropdown = false; }
+    private void ClearAssignUser() { selectedAssignUser = null; assignForm.UserId = null; assignUserKeyword = string.Empty; assignUserResults = []; showAssignUserDropdown = false; }
+    private async Task AssignSubscriptionAsync()
+    {
+        submitting = true; modalError = null;
+        try { await Api.AssignAdminSubscriptionAsync(assignForm); Toasts.Success("订阅分配成功"); assignOpen = false; await LoadAdminAsync(); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { submitting = false; }
+    }
+
+    private void OpenAdjust(SubscriptionDto value) { adjustTarget = value; adjustForm = new(); modalError = null; }
+    private void CloseAdjust() { if (!submitting) adjustTarget = null; }
+    private async Task AdjustSubscriptionAsync()
+    {
+        if (adjustTarget is null) return;
+        if (adjustForm.Days == 0) { modalError = "调整天数不能为 0"; return; }
+        if (adjustTarget.ExpiresAt.HasValue && adjustTarget.ExpiresAt.Value.AddDays(adjustForm.Days) <= DateTimeOffset.Now) { modalError = "调整后剩余天数必须大于 0"; return; }
+        submitting = true; modalError = null;
+        try { await Api.AdjustAdminSubscriptionAsync(adjustTarget.Id, adjustForm.Days); Toasts.Success("订阅调整成功"); adjustTarget = null; await LoadAdminAsync(); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { submitting = false; }
+    }
+
+    private void OpenResetQuota(SubscriptionDto value) { resetTarget = value; modalError = null; }
+    private void CloseResetQuota() { if (!submitting) resetTarget = null; }
+    private async Task ResetQuotaAsync()
+    {
+        if (resetTarget is null) return; submitting = true; modalError = null;
+        try { await Api.ResetAdminSubscriptionQuotaAsync(resetTarget.Id); Toasts.Success("配额重置成功"); resetTarget = null; await LoadAdminAsync(); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { submitting = false; }
+    }
+
+    private void OpenRevoke(SubscriptionDto value) { revokeTarget = value; modalError = null; }
+    private void CloseRevoke() { if (!submitting) revokeTarget = null; }
+    private async Task RevokeSubscriptionAsync()
+    {
+        if (revokeTarget is null) return; submitting = true; modalError = null;
+        try { await Api.RevokeAdminSubscriptionAsync(revokeTarget.Id); Toasts.Success("订阅撤销成功"); revokeTarget = null; await LoadAdminAsync(); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { submitting = false; }
+    }
+
+    private void OpenRestore(SubscriptionDto value) { restoreTarget = value; modalError = null; }
+    private void CloseRestore() { if (!submitting) restoreTarget = null; }
+    private async Task RestoreSubscriptionAsync()
+    {
+        if (restoreTarget is null) return; submitting = true; modalError = null;
+        try { await Api.RestoreAdminSubscriptionAsync(restoreTarget.Id); Toasts.Success("订阅已恢复"); restoreTarget = null; await LoadAdminAsync(); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { submitting = false; }
+    }
+
+    private void OpenGuide() { guideOpen = true; showColumnMenu = false; }
+    private void CloseGuide() => guideOpen = false;
+
+    private RenderFragment UsageCell(SubscriptionDto subscription, bool large) => builder =>
+    {
+        var group = subscription.Group;
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", large ? "subscription-usage-cell large" : "subscription-usage-cell");
+        if (group is null || !HasAnyLimit(group))
+        {
+            builder.OpenElement(2, "div"); builder.AddAttribute(3, "class", "unlimited-usage"); builder.OpenElement(4, "strong"); builder.AddContent(5, "∞"); builder.CloseElement(); builder.OpenElement(6, "span"); builder.AddContent(7, large ? "无限制 · 该订阅无用量限制" : "无限制"); builder.CloseElement(); builder.CloseElement();
+        }
+        else
+        {
+            var sequence = 10;
+            if (group.DailyLimitUsd is > 0) AddUsageWindow(builder, ref sequence, "每日", subscription.DailyUsageUsd, group.DailyLimitUsd.Value, DailyResetLabel(subscription));
+            if (group.WeeklyLimitUsd is > 0) AddUsageWindow(builder, ref sequence, "每周", subscription.WeeklyUsageUsd, group.WeeklyLimitUsd.Value, ResetLabel(subscription.WeeklyWindowStart, TimeSpan.FromDays(7)));
+            if (group.MonthlyLimitUsd is > 0) AddUsageWindow(builder, ref sequence, "每月", subscription.MonthlyUsageUsd, group.MonthlyLimitUsd.Value, ResetLabel(subscription.MonthlyWindowStart, TimeSpan.FromDays(30)));
+        }
+        builder.CloseElement();
+    };
+
+    private static void AddUsageWindow(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, ref int sequence, string label, double used, double limit, string reset)
+    {
+        var percentage = limit <= 0 ? 0 : Math.Min(100, used / limit * 100);
+        var progressClass = percentage >= 90 ? "danger" : percentage >= 70 ? "warning" : "success";
+        builder.OpenElement(sequence++, "div"); builder.AddAttribute(sequence++, "class", "subscription-usage-row");
+        builder.OpenElement(sequence++, "div"); builder.AddAttribute(sequence++, "class", "subscription-usage-line");
+        builder.OpenElement(sequence++, "span"); builder.AddAttribute(sequence++, "class", "usage-window-label"); builder.AddContent(sequence++, label); builder.CloseElement();
+        builder.OpenElement(sequence++, "div"); builder.AddAttribute(sequence++, "class", "usage-progress"); builder.OpenElement(sequence++, "span"); builder.AddAttribute(sequence++, "class", $"{progressClass}"); builder.AddAttribute(sequence++, "style", $"width:{percentage.ToString("0.##", CultureInfo.InvariantCulture)}%"); builder.CloseElement(); builder.CloseElement();
+        builder.OpenElement(sequence++, "span"); builder.AddAttribute(sequence++, "class", "usage-numbers"); builder.AddContent(sequence++, $"${used:0.00} / ${limit:0.00}"); builder.CloseElement(); builder.CloseElement();
+        if (!string.IsNullOrWhiteSpace(reset)) { builder.OpenElement(sequence++, "small"); builder.AddContent(sequence++, reset); builder.CloseElement(); }
+        builder.CloseElement();
+    }
+
+    private static bool HasAnyLimit(GoGroup group) => group.DailyLimitUsd is > 0 || group.WeeklyLimitUsd is > 0 || group.MonthlyLimitUsd is > 0;
+    private static bool IsOneTimeDailyQuota(SubscriptionDto subscription) => subscription.StartsAt.HasValue && subscription.ExpiresAt.HasValue && subscription.ExpiresAt.Value <= subscription.StartsAt.Value.AddDays(1);
+    private static string DailyResetLabel(SubscriptionDto subscription) => IsOneTimeDailyQuota(subscription) && subscription.ExpiresAt.HasValue ? DurationLabel(subscription.ExpiresAt.Value, "额度将在", "后结束") : ResetLabel(subscription.DailyWindowStart, TimeSpan.FromDays(1));
+    private static string ResetLabel(DateTimeOffset? start, TimeSpan window) => start.HasValue ? DurationLabel(start.Value.Add(window), string.Empty, "后重置") : "窗口未激活";
+    private static string DurationLabel(DateTimeOffset target, string prefix, string suffix)
+    {
+        var remaining = target - DateTimeOffset.Now;
+        if (remaining <= TimeSpan.Zero) return "窗口未激活";
+        var totalMinutes = Math.Max(0, (int)Math.Floor(remaining.TotalMinutes));
+        var days = totalMinutes / 1440; var hours = totalMinutes % 1440 / 60; var minutes = totalMinutes % 60;
+        var value = days > 0 ? $"{days} 天 {hours} 小时" : hours > 0 ? $"{hours} 小时 {minutes} 分钟" : $"{minutes} 分钟";
+        return $"{prefix}{value}{suffix}";
+    }
+
+    private string UserDisplay(SubscriptionDto value) => userColumnMode == "username" ? value.User?.Username ?? "—" : value.User?.Email ?? $"用户 #{value.UserId}";
+    private string UserInitial(SubscriptionDto value) => Initial(userColumnMode == "username" ? value.User?.Username : value.User?.Email);
+    private static string UserEmail(SubscriptionDto value) => value.User?.Email ?? $"用户 #{value.UserId}";
+    private static string Initial(string? value) => string.IsNullOrWhiteSpace(value) ? "?" : value.Trim()[..1].ToUpperInvariant();
+    private static string UserResultDetail(GoUser user) { var values = new List<string> { $"#{user.Id}" }; if (!string.IsNullOrWhiteSpace(user.Username)) values.Add(user.Username); if (!string.IsNullOrWhiteSpace(user.Notes)) values.Add(user.Notes); return string.Join(" · ", values); }
+    private static string StatusLabel(string status) => status switch { "active" => "生效中", "expired" => "已过期", "revoked" => "已撤销", "suspended" => "已暂停", _ => status };
+    private static string SelfStatusLabel(string status) => status switch { "active" => "有效", "expired" => "已过期", "revoked" => "已撤销", "suspended" => "已暂停", _ => status };
+    private static string FormatDateTime(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+    private static string? RemainingExpiry(DateTimeOffset value)
+    {
+        var remaining = value - DateTimeOffset.Now; if (remaining <= TimeSpan.Zero) return null;
+        if (remaining >= TimeSpan.FromDays(1)) return $"剩余 {(int)Math.Ceiling(remaining.TotalDays)} 天";
+        var minutes = Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes)); var hours = minutes / 60; minutes %= 60;
+        return hours > 0 ? $"剩余 {hours} 小时 {minutes} 分钟" : $"剩余 {minutes} 分钟";
+    }
+    private static string ExpiryClass(DateTimeOffset value) => value <= DateTimeOffset.Now ? "expired" : value - DateTimeOffset.Now <= TimeSpan.FromDays(7) ? "soon" : string.Empty;
+    private static string SelfExpiration(DateTimeOffset? value) => !value.HasValue ? "无到期时间" : value.Value <= DateTimeOffset.Now ? "已过期" : $"剩余 {(int)Math.Ceiling((value.Value - DateTimeOffset.Now).TotalDays)} 天（{FormatDateTime(value.Value)}）";
+    private static string PlatformLabel(string? value) => value switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", "composite" => "Composite", _ => string.IsNullOrWhiteSpace(value) ? "未知平台" : value };
+    private static string PlatformClass(string? value) => value switch { "anthropic" => "anthropic", "openai" => "openai", "gemini" => "gemini", "antigravity" => "antigravity", "grok" => "grok", _ => "other" };
+    private static string FormatRate(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    private static string PeakRateLabel(GoGroup group) => $"{group.PeakStart}–{group.PeakEnd} ×{FormatRate(group.PeakRateMultiplier)}";
+
+    public void Dispose()
+    {
+        filterUserDebounce?.Cancel(); filterUserDebounce?.Dispose();
+        assignUserDebounce?.Cancel(); assignUserDebounce?.Dispose();
+    }
+
+    private sealed record ColumnOption(string Key, string Label);
+}

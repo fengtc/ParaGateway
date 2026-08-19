@@ -1,0 +1,307 @@
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<AppModal Open="Open" Title="@ModalTitle" MaxWidth="980px" OnClose="CloseAsync">
+    <ChildContent>
+        @if (Group is not null)
+        {
+            <div class="override-summary">
+                <span class="platform-pill @Group.Platform">@PlatformLabel(Group.Platform)</span>
+                <strong>@Group.Name</strong>
+                <span>@DefaultValueLabel</span>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(error))
+            {
+                <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@error</span></div>
+            }
+
+            <section class="override-add-panel">
+                <div class="override-section-title">@(IsRateMode ? "添加用户专属倍率" : "添加用户专属 RPM")</div>
+                <div class="override-add-row">
+                    <div class="override-user-search">
+                        <div class="search-box">
+                            <Icon Name="search" Size="16" />
+                            <input value="@searchQuery" @oninput="SearchChangedAsync" @onfocus="ShowSearchResults" autocomplete="off" placeholder="搜索用户邮箱或用户名" aria-label="搜索用户" />
+                        </div>
+                        @if (showSearchResults && searchResults.Count > 0)
+                        {
+                            <div class="override-search-results">
+                                @foreach (var user in searchResults)
+                                {
+                                    <button type="button" @onclick="() => SelectUser(user)">
+                                        <span>#@user.Id</span><strong>@(string.IsNullOrWhiteSpace(user.Username) ? user.Email : user.Username)</strong><small>@user.Email</small>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                    <input class="override-value-input" type="number" step="@(IsRateMode ? "0.001" : "1")" min="@(IsRateMode ? "0.001" : "0")"
+                           value="@FormatInputValue(newValue)" @oninput="NewValueChanged" aria-label="@(IsRateMode ? "专属倍率" : "专属 RPM")" placeholder="@(IsRateMode ? "1.0" : "100")" />
+                    <button type="button" class="button primary" disabled="@(selectedUser is null || !NewValueIsValid)" @onclick="AddSelectedUser">添加</button>
+                </div>
+                @if (selectedUser is not null)
+                {
+                    <div class="selected-user-chip"><Icon Name="user" Size="14" /> 已选择 @selectedUser.Email <button type="button" aria-label="取消选择用户" @onclick="ClearSelectedUser"><Icon Name="x" Size="13" /></button></div>
+                }
+
+                @if (IsRateMode && localEntries.Count > 0)
+                {
+                    <div class="batch-rate-row">
+                        <span>批量调整</span><span>×</span>
+                        <input type="number" min="0.001" step="0.1" value="@FormatInputValue(batchFactor)" @oninput="BatchFactorChanged" aria-label="批量倍率因子" placeholder="0.5" />
+                        <button type="button" class="button secondary small" disabled="@(batchFactor is null or <= 0)" @onclick="ApplyBatchFactor">应用乘数</button>
+                        <button type="button" class="button secondary small danger-text push-right" @onclick="ClearLocal">全部清空</button>
+                    </div>
+                }
+                else if (!IsRateMode && localEntries.Count > 0)
+                {
+                    <div class="batch-rate-row"><button type="button" class="button secondary small danger-text push-right" @onclick="ClearLocal">全部清空</button></div>
+                }
+            </section>
+
+            @if (loading)
+            {
+                <LoadingState Text="正在载入专属配置" />
+            }
+            else
+            {
+                <div class="override-list-heading"><strong>@(IsRateMode ? "专属倍率" : "专属 RPM")</strong><span>@localEntries.Count 条</span></div>
+                @if (localEntries.Count == 0)
+                {
+                    <div class="override-empty">@(IsRateMode ? "尚未设置用户专属倍率" : "尚未设置用户专属 RPM")</div>
+                }
+                else
+                {
+                    <div class="override-table-scroll">
+                        <table class="override-table">
+                            <thead><tr><th>用户邮箱</th><th>ID</th><th>用户名</th><th>备注</th><th>状态</th><th>@(IsRateMode ? "倍率" : "RPM")</th>@if (IsRateMode && ShowFinalRate) { <th>最终倍率</th> }<th></th></tr></thead>
+                            <tbody>
+                                @foreach (var row in PagedEntries)
+                                {
+                                    <tr @key="row.UserId">
+                                        <td>@row.UserEmail</td><td class="muted-cell">#@row.UserId</td><td>@EmptyDash(row.UserName)</td><td class="notes-cell" title="@row.UserNotes">@EmptyDash(row.UserNotes)</td>
+                                        <td><span class="status-badge @(row.UserStatus == "active" ? "success" : "neutral")">@(row.UserStatus == "active" ? "正常" : row.UserStatus)</span></td>
+                                        <td><input class="row-value-input" type="number" step="@(IsRateMode ? "0.001" : "1")" min="@(IsRateMode ? "0.001" : "0")" value="@FormatRowValue(row.Value)" @onchange="e => UpdateValue(row, e)" /></td>
+                                        @if (IsRateMode && ShowFinalRate) { <td class="final-rate">@FormatRate(row.Value * batchFactor!.Value)x</td> }
+                                        <td><button type="button" class="icon-button danger" title="移除 @row.UserEmail" @onclick="() => Remove(row.UserId)"><Icon Name="trash" Size="15" /></button></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (LocalPages > 1)
+                    {
+                        <div class="override-pager"><button type="button" class="button secondary small" disabled="@(localPage <= 1)" @onclick="() => localPage--">上一页</button><span>@localPage / @LocalPages</span><button type="button" class="button secondary small" disabled="@(localPage >= LocalPages)" @onclick="() => localPage++">下一页</button></div>
+                    }
+                }
+            }
+        }
+    </ChildContent>
+    <Footer>
+        @if (IsDirty) { <span class="unsaved-copy">有未保存修改</span><button type="button" class="button secondary" disabled="@saving" @onclick="Revert">撤销</button> }
+        <span class="modal-footer-spacer"></span>
+        <button type="button" class="button secondary" disabled="@saving" @onclick="CloseAsync">关闭</button>
+        <button type="button" class="button primary" disabled="@(saving || loading || !IsDirty)" @onclick="SaveAsync">@(saving ? "正在保存…" : "保存")</button>
+    </Footer>
+</AppModal>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public GroupDto? Group { get; set; }
+    [Parameter] public string Mode { get; set; } = "rate";
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private readonly List<OverrideRow> serverEntries = [];
+    private readonly List<OverrideRow> localEntries = [];
+    private List<GoUser> searchResults = [];
+    private GoUser? selectedUser;
+    private string searchQuery = string.Empty;
+    private string? loadedKey;
+    private string? error;
+    private double? newValue;
+    private double? batchFactor;
+    private int searchVersion;
+    private int localPage = 1;
+    private const int LocalPageSize = 10;
+    private bool showSearchResults;
+    private bool loading;
+    private bool saving;
+
+    private bool IsRateMode => !string.Equals(Mode, "rpm", StringComparison.OrdinalIgnoreCase);
+    private string ModalTitle => IsRateMode ? "分组专属倍率管理" : "分组专属 RPM 管理";
+    private string DefaultValueLabel => IsRateMode ? $"分组倍率：{FormatRate(Group?.RateMultiplier ?? 1)}x" : $"分组默认 RPM：{(Group?.RpmLimit ?? 0)}";
+    private bool NewValueIsValid => newValue.HasValue && (IsRateMode ? newValue > 0 : newValue >= 0 && IsWholeNumber(newValue.Value));
+    private bool ShowFinalRate => IsRateMode && batchFactor is > 0 and not 1;
+    private int LocalPages => Math.Max(1, (int)Math.Ceiling(localEntries.Count / (double)LocalPageSize));
+    private IEnumerable<OverrideRow> PagedEntries => localEntries.Skip((localPage - 1) * LocalPageSize).Take(LocalPageSize);
+
+    private bool IsDirty
+    {
+        get
+        {
+            if (serverEntries.Count != localEntries.Count) return true;
+            var server = serverEntries.ToDictionary(x => x.UserId, x => x.Value);
+            return localEntries.Any(row => !server.TryGetValue(row.UserId, out var value) || Math.Abs(value - row.Value) > 0.0000001);
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Open || Group is null)
+        {
+            loadedKey = null;
+            return;
+        }
+
+        var key = $"{Group.Id}:{Mode}";
+        if (!string.Equals(loadedKey, key, StringComparison.Ordinal))
+        {
+            loadedKey = key;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (Group is null) return;
+        loading = true;
+        error = null;
+        try
+        {
+            var rows = await Api.GetAdminGroupUserOverridesAsync(Group.Id);
+            serverEntries.Clear();
+            serverEntries.AddRange(rows
+                .Where(x => IsRateMode ? x.RateMultiplier.HasValue : x.RpmOverride.HasValue)
+                .Select(x => new OverrideRow
+                {
+                    UserId = x.UserId, UserName = x.UserName, UserEmail = x.UserEmail,
+                    UserNotes = x.UserNotes, UserStatus = x.UserStatus,
+                    Value = IsRateMode ? x.RateMultiplier!.Value : x.RpmOverride!.Value
+                }));
+            Revert();
+            newValue = IsRateMode ? Group.RateMultiplier : Group.RpmLimit;
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task SearchChangedAsync(ChangeEventArgs e)
+    {
+        searchQuery = e.Value?.ToString() ?? string.Empty;
+        selectedUser = null;
+        var version = ++searchVersion;
+        if (string.IsNullOrWhiteSpace(searchQuery))
+        {
+            searchResults = [];
+            showSearchResults = false;
+            return;
+        }
+        await Task.Delay(300);
+        if (version != searchVersion) return;
+        try
+        {
+            var result = await Api.GetAdminUsersAsync(pageSize: 10, search: searchQuery, includeSubscriptions: false);
+            if (version != searchVersion) return;
+            searchResults = result.Items.Where(x => localEntries.All(row => row.UserId != x.Id)).ToList();
+            showSearchResults = true;
+        }
+        catch (ApiException) { searchResults = []; showSearchResults = false; }
+    }
+
+    private void ShowSearchResults() => showSearchResults = searchResults.Count > 0;
+    private void SelectUser(GoUser user) { selectedUser = user; searchQuery = user.Email; searchResults = []; showSearchResults = false; }
+    private void ClearSelectedUser() { selectedUser = null; searchQuery = string.Empty; searchResults = []; }
+    private void NewValueChanged(ChangeEventArgs e) => newValue = ParseNullable(e.Value?.ToString());
+    private void BatchFactorChanged(ChangeEventArgs e) => batchFactor = ParseNullable(e.Value?.ToString());
+
+    private void AddSelectedUser()
+    {
+        if (selectedUser is null || !NewValueIsValid || !newValue.HasValue) return;
+        var existing = localEntries.FirstOrDefault(x => x.UserId == selectedUser.Id);
+        if (existing is null)
+        {
+            localEntries.Add(new OverrideRow { UserId = selectedUser.Id, UserName = selectedUser.Username, UserEmail = selectedUser.Email, UserNotes = selectedUser.Notes, UserStatus = selectedUser.Status, Value = newValue.Value });
+        }
+        else existing.Value = newValue.Value;
+        ClearSelectedUser();
+        newValue = IsRateMode ? Group?.RateMultiplier : Group?.RpmLimit;
+        AdjustPage();
+    }
+
+    private void UpdateValue(OverrideRow row, ChangeEventArgs e)
+    {
+        var value = ParseNullable(e.Value?.ToString());
+        if (value.HasValue) row.Value = value.Value;
+    }
+
+    private void Remove(long userId) { localEntries.RemoveAll(x => x.UserId == userId); AdjustPage(); }
+    private void ClearLocal() { localEntries.Clear(); localPage = 1; }
+    private void ApplyBatchFactor()
+    {
+        if (batchFactor is null or <= 0) return;
+        foreach (var row in localEntries) row.Value = Math.Round(row.Value * batchFactor.Value, 6);
+        batchFactor = null;
+    }
+
+    private void Revert()
+    {
+        localEntries.Clear();
+        localEntries.AddRange(serverEntries.Select(x => x.Clone()));
+        batchFactor = null;
+        AdjustPage();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Group is null) return;
+        if (IsRateMode && localEntries.Any(x => x.Value <= 0)) { error = "专属倍率必须大于 0。"; return; }
+        if (!IsRateMode && localEntries.Any(x => x.Value < 0 || !IsWholeNumber(x.Value))) { error = "专属 RPM 必须是大于或等于 0 的整数。"; return; }
+        saving = true;
+        error = null;
+        try
+        {
+            if (IsRateMode)
+            {
+                await Api.SaveAdminGroupRateMultipliersAsync(Group.Id, localEntries.Select(x => new GroupRateMultiplierInputDto { UserId = x.UserId, RateMultiplier = x.Value }));
+            }
+            else
+            {
+                await Api.SaveAdminGroupRpmOverridesAsync(Group.Id, localEntries.Select(x => new GroupRpmOverrideInputDto { UserId = x.UserId, RpmOverride = (int)Math.Round(x.Value) }));
+            }
+            Toasts.Success(IsRateMode ? "用户专属倍率已保存" : "用户专属 RPM 已保存");
+            await OnSaved.InvokeAsync();
+            await CloseAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task CloseAsync()
+    {
+        loadedKey = null;
+        searchVersion++;
+        await OnClose.InvokeAsync();
+    }
+
+    private void AdjustPage() => localPage = Math.Clamp(localPage, 1, LocalPages);
+    private static bool IsWholeNumber(double value) => Math.Abs(value - Math.Round(value)) < 0.0000001;
+    private static double? ParseNullable(string? value) => double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var number) ? number : null;
+    private static string FormatInputValue(double? value) => value?.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+    private string FormatRowValue(double value) => IsRateMode ? FormatRate(value) : Math.Round(value).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    private static string FormatRate(double value) => value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+    private static string EmptyDash(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
+    private static string PlatformLabel(string value) => value switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", "composite" => "Composite", _ => value };
+
+    private sealed class OverrideRow
+    {
+        public long UserId { get; set; }
+        public string UserName { get; set; } = string.Empty;
+        public string UserEmail { get; set; } = string.Empty;
+        public string UserNotes { get; set; } = string.Empty;
+        public string UserStatus { get; set; } = string.Empty;
+        public double Value { get; set; }
+        public OverrideRow Clone() => (OverrideRow)MemberwiseClone();
+    }
+}

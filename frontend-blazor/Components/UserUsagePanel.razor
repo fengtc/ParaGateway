@@ -1,0 +1,641 @@
+@using System.Text
+@using System.Globalization
+@inject ApiClient Api
+@inject IJSRuntime JS
+@inject ToastService Toasts
+
+<div class="user-usage-page">
+    <div class="usage-stats-grid" aria-label="用量汇总">
+        <article class="usage-stat-card">
+            <span class="usage-stat-icon blue"><Icon Name="file-text" Size="20" /></span>
+            <div><small>总请求数</small><strong>@FormatInteger(stats?.TotalRequests ?? 0)</strong><span>所选时间范围</span></div>
+        </article>
+        <article class="usage-stat-card">
+            <span class="usage-stat-icon amber"><Icon Name="box" Size="20" /></span>
+            <div><small>总 Token</small><strong>@FormatTokens(stats?.TotalTokens ?? 0)</strong><span title="缓存写入：@FormatInteger(stats?.TotalCacheCreationTokens ?? 0)；缓存读取：@FormatInteger(stats?.TotalCacheReadTokens ?? 0)">输入 @FormatTokens(stats?.TotalInputTokens ?? 0) / 输出 @FormatTokens(stats?.TotalOutputTokens ?? 0) / 缓存 @FormatTokens(stats?.TotalCacheTokens ?? 0)</span></div>
+        </article>
+        <article class="usage-stat-card">
+            <span class="usage-stat-icon green"><Icon Name="dollar" Size="20" /></span>
+            <div><small>总费用</small><strong class="cost-value">$@FormatCost(stats?.TotalActualCost ?? 0, 4)</strong><span>标准费用 <s>$@FormatCost(stats?.TotalCost ?? 0, 4)</s></span></div>
+        </article>
+        <article class="usage-stat-card">
+            <span class="usage-stat-icon violet"><Icon Name="clock" Size="20" /></span>
+            <div><small>平均耗时</small><strong>@FormatDuration(stats?.AverageDurationMs ?? 0)</strong><span>请求平均总耗时</span></div>
+        </article>
+    </div>
+
+    <section class="usage-card date-filter-card" aria-label="统计时间筛选">
+        <div class="date-filter-group">
+            <span class="filter-caption">时间范围：</span>
+            <DxDateRangePicker T="DateTime"
+                               StartDate="@startDate"
+                               EndDate="@endDate"
+                               StartDateChanged="OnStartDateChangedAsync"
+                               EndDateChanged="OnEndDateChangedAsync"
+                               DisplayFormat="yyyy-MM-dd"
+                               CssClass="usage-date-range" />
+        </div>
+        <div class="date-filter-group granularity-group">
+            <label class="filter-caption" for="usage-granularity">粒度：</label>
+            <select id="usage-granularity" value="@granularity" disabled="@chartsLoading" @onchange="GranularityChangedAsync">
+                <option value="day">按天</option>
+                <option value="hour">按小时</option>
+            </select>
+        </div>
+    </section>
+
+    <div class="usage-chart-grid">
+        <section class="usage-card chart-card">
+            <div class="chart-heading"><h2>模型分布</h2><MetricToggle Value="@modelMetric" OnChange="value => modelMetric = value" /></div>
+            @if (modelStatsLoading) { <div class="chart-empty">正在载入…</div> }
+            else if (ModelRows.Count == 0) { <div class="chart-empty">暂无数据</div> }
+            else if (modelMetric == "tokens")
+            {
+                <DxPieChart Data="@ModelRows" InnerDiameter="0.55" Width="100%" Height="245px">
+                    <DxPieChartSeries T="UserUsageModelStatDto" TArgument="string" TValue="long" ArgumentField="item => item.Model" ValueField="item => item.TotalTokens" />
+                    <DxChartTooltip Enabled="true" />
+                </DxPieChart>
+            }
+            else
+            {
+                <DxPieChart Data="@ModelRows" InnerDiameter="0.55" Width="100%" Height="245px">
+                    <DxPieChartSeries T="UserUsageModelStatDto" TArgument="string" TValue="double" ArgumentField="item => item.Model" ValueField="item => item.ActualCost" />
+                    <DxChartTooltip Enabled="true" />
+                </DxPieChart>
+            }
+            <DistributionLegend Rows="@ModelLegend" Metric="@modelMetric" />
+        </section>
+
+        <section class="usage-card chart-card">
+            <div class="chart-heading"><h2>分组分布</h2><MetricToggle Value="@groupMetric" OnChange="value => groupMetric = value" /></div>
+            @if (chartsLoading) { <div class="chart-empty">正在载入…</div> }
+            else if (GroupRows.Count == 0) { <div class="chart-empty">暂无数据</div> }
+            else if (groupMetric == "tokens")
+            {
+                <DxPieChart Data="@GroupRows" InnerDiameter="0.55" Width="100%" Height="245px">
+                    <DxPieChartSeries T="UserUsageGroupStatDto" TArgument="string" TValue="long" ArgumentField="item => item.GroupName" ValueField="item => item.TotalTokens" />
+                    <DxChartTooltip Enabled="true" />
+                </DxPieChart>
+            }
+            else
+            {
+                <DxPieChart Data="@GroupRows" InnerDiameter="0.55" Width="100%" Height="245px">
+                    <DxPieChartSeries T="UserUsageGroupStatDto" TArgument="string" TValue="double" ArgumentField="item => item.GroupName" ValueField="item => item.ActualCost" />
+                    <DxChartTooltip Enabled="true" />
+                </DxPieChart>
+            }
+            <DistributionLegend Rows="@GroupLegend" Metric="@groupMetric" />
+        </section>
+
+        <section class="usage-card chart-card">
+            <div class="chart-heading"><h2>端点分布</h2><MetricToggle Value="@endpointMetric" OnChange="value => endpointMetric = value" /></div>
+            @if (statsLoading) { <div class="chart-empty">正在载入…</div> }
+            else if (EndpointRows.Count == 0) { <div class="chart-empty">暂无数据</div> }
+            else if (endpointMetric == "tokens")
+            {
+                <DxPieChart Data="@EndpointRows" InnerDiameter="0.55" Width="100%" Height="245px">
+                    <DxPieChartSeries T="UserUsageEndpointStatDto" TArgument="string" TValue="long" ArgumentField="item => item.Endpoint" ValueField="item => item.TotalTokens" />
+                    <DxChartTooltip Enabled="true" />
+                </DxPieChart>
+            }
+            else
+            {
+                <DxPieChart Data="@EndpointRows" InnerDiameter="0.55" Width="100%" Height="245px">
+                    <DxPieChartSeries T="UserUsageEndpointStatDto" TArgument="string" TValue="double" ArgumentField="item => item.Endpoint" ValueField="item => item.ActualCost" />
+                    <DxChartTooltip Enabled="true" />
+                </DxPieChart>
+            }
+            <DistributionLegend Rows="@EndpointLegend" Metric="@endpointMetric" />
+        </section>
+
+        <section class="usage-card chart-card trend-card">
+            <div class="chart-heading"><h2>Token 使用趋势</h2></div>
+            @if (chartsLoading) { <div class="chart-empty">正在载入…</div> }
+            else if (TrendRows.Count == 0) { <div class="chart-empty">暂无数据</div> }
+            else
+            {
+                <DxChart Data="@TrendRows" Width="100%" Height="285px">
+                    <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Input" ArgumentField="point => point.Date" ValueField="point => point.InputTokens" />
+                    <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Output" ArgumentField="point => point.Date" ValueField="point => point.OutputTokens" />
+                    <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Cache Creation" ArgumentField="point => point.Date" ValueField="point => point.CacheCreationTokens" />
+                    <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Cache Read" ArgumentField="point => point.Date" ValueField="point => point.CacheReadTokens" />
+                    <DxChartTooltip Enabled="true" />
+                </DxChart>
+            }
+        </section>
+    </div>
+
+    <section class="usage-card usage-filter-card">
+        @if (activeTab == "errors")
+        {
+            <div class="usage-filter-grid error-filter-grid">
+                <div class="usage-filter-field"><label for="error-key">Key 名称</label><select id="error-key" value="@errorApiKeyId" @onchange="ErrorApiKeyChangedAsync"><option value="">全部 Key</option>@foreach (var key in apiKeys) { <option value="@key.Id">@key.Name</option> }</select></div>
+                <div class="usage-filter-field"><label for="error-model">模型</label><input id="error-model" list="error-model-options" value="@errorModel" placeholder="输入模型名称" @onchange="ErrorModelChangedAsync" /><datalist id="error-model-options">@foreach (var model in ErrorModelOptions) { <option value="@model"></option> }</datalist></div>
+                <div class="usage-filter-field"><label for="error-category">分类</label><select id="error-category" value="@errorCategory" @onchange="ErrorCategoryChangedAsync"><option value="">全部分类</option>@foreach (var category in ErrorCategories) { <option value="@category.Key">@category.Value</option> }</select></div>
+                <div class="usage-filter-field"><label for="error-status">状态码</label><select id="error-status" value="@errorStatusCode" @onchange="ErrorStatusChangedAsync"><option value="">全部状态</option>@foreach (var code in CommonErrorStatusCodes) { <option value="@(code)">@(code)</option> }</select></div>
+            </div>
+        }
+        else
+        {
+            <div class="usage-filter-grid">
+                <div class="usage-filter-field"><label for="usage-key">API Key</label><select id="usage-key" value="@apiKeyId" @onchange="ApiKeyChangedAsync"><option value="">全部 API Key</option>@foreach (var key in apiKeys) { <option value="@key.Id">@key.Name</option> }</select></div>
+                <div class="usage-filter-field"><label for="usage-model">模型</label><input id="usage-model" list="usage-model-options" value="@model" placeholder="全部模型" @onchange="ModelChangedAsync" /><datalist id="usage-model-options">@foreach (var item in ModelOptions) { <option value="@item"></option> }</datalist></div>
+                <div class="usage-filter-field"><label for="usage-group">分组</label><select id="usage-group" value="@groupId" @onchange="GroupChangedAsync"><option value="">全部分组</option>@foreach (var group in groups) { <option value="@group.Id">@group.Name</option> }</select></div>
+                <div class="usage-filter-field"><label for="usage-type">类型</label><select id="usage-type" value="@requestType" @onchange="RequestTypeChangedAsync"><option value="">全部类型</option><option value="ws_v2">WS</option><option value="live">Live</option><option value="stream">Stream</option><option value="sync">Sync</option></select></div>
+                <div class="usage-filter-field"><label for="usage-billing-type">计费类型</label><select id="usage-billing-type" value="@billingType" @onchange="BillingTypeChangedAsync"><option value="">全部计费类型</option><option value="0">余额</option><option value="1">订阅</option></select></div>
+                <div class="usage-filter-field"><label for="usage-billing-mode">计费模式</label><select id="usage-billing-mode" value="@billingMode" @onchange="BillingModeChangedAsync"><option value="">全部计费模式</option><option value="token">Token</option><option value="per_request">按次</option><option value="image">图片</option><option value="video">视频</option></select></div>
+            </div>
+        }
+
+        <div class="usage-filter-actions">
+            <button type="button" class="button secondary" disabled="@(logsLoading || errorLoading)" @onclick="RefreshAsync"><Icon Name="refresh" Size="16" /> 刷新</button>
+            <button type="button" class="button secondary" disabled="@(logsLoading || errorLoading)" @onclick="ResetFiltersAsync"><Icon Name="rotate-ccw" Size="16" /> 重置</button>
+            <div class="column-menu-host">
+                <button type="button" class="button secondary" aria-expanded="@showColumnMenu" @onclick="ToggleColumnMenu"><Icon Name="columns" Size="16" /> 列设置</button>
+                @if (showColumnMenu)
+                {
+                    <div class="column-menu">
+                        @foreach (var column in CurrentToggleableColumns)
+                        {
+                            <button type="button" @onclick="() => ToggleColumnAsync(column.Key)"><span>@column.Label</span>@if (IsCurrentColumnVisible(column.Key)) { <Icon Name="check" Size="15" /> }</button>
+                        }
+                    </div>
+                }
+            </div>
+            @if (activeTab == "usage")
+            {
+                <button type="button" class="button primary" disabled="@(exporting || logs.Total == 0)" @onclick="ExportCsvAsync"><Icon Name="download" Size="16" /> @(exporting ? "正在导出" : "导出 CSV")</button>
+            }
+        </div>
+    </section>
+
+    @if (errorViewEnabled)
+    {
+        <div class="usage-tabs" role="tablist">
+            <button type="button" role="tab" aria-selected="@(activeTab == "usage")" class="@(activeTab == "usage" ? "active" : null)" @onclick="ShowUsageAsync">使用记录</button>
+            <button type="button" role="tab" aria-selected="@(activeTab == "errors")" class="@(activeTab == "errors" ? "active" : null)" @onclick="ShowErrorsAsync">错误请求</button>
+        </div>
+    }
+
+    @if (activeTab == "usage")
+    {
+        @if (!string.IsNullOrWhiteSpace(logsError)) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@logsError</span></div> }
+        <section class="usage-card usage-table-card">
+            @if (logsLoading) { <LoadingState Text="正在载入使用记录" /> }
+            else if (logs.Items.Count == 0) { <EmptyState Title="暂无使用记录" Description="调整筛选条件，或在 API 请求完成后回来查看。" /> }
+            else
+            {
+                <div class="usage-table-wrap">
+                    <table class="usage-detail-table">
+                        <thead><tr>
+                            @if (IsUsageColumnVisible("api_key")) { <th>API Key</th> }
+                            @if (IsUsageColumnVisible("model")) { <th><button class="sort-button" @onclick='() => ChangeUsageSortAsync("model")'>模型 @SortIndicator("model", usageSortBy, usageSortOrder)</button></th> }
+                            @if (IsUsageColumnVisible("reasoning_effort")) { <th>推理强度</th> }
+                            @if (IsUsageColumnVisible("endpoint")) { <th>端点</th> }
+                            @if (IsUsageColumnVisible("ip_address")) { <th>IP</th> }
+                            @if (IsUsageColumnVisible("group")) { <th>分组</th> }
+                            @if (IsUsageColumnVisible("stream")) { <th>类型</th> }
+                            @if (IsUsageColumnVisible("billing_mode")) { <th>计费模式</th> }
+                            @if (IsUsageColumnVisible("tokens")) { <th>Token</th> }
+                            @if (IsUsageColumnVisible("cost")) { <th>费用</th> }
+                            @if (IsUsageColumnVisible("latency")) { <th>延迟</th> }
+                            <th><button class="sort-button" @onclick='() => ChangeUsageSortAsync("created_at")'>时间 @SortIndicator("created_at", usageSortBy, usageSortOrder)</button></th>
+                            @if (IsUsageColumnVisible("user_agent")) { <th>User-Agent</th> }
+                        </tr></thead>
+                        <tbody>
+                            @foreach (var row in logs.Items)
+                            {
+                                <tr @key="row.Id">
+                                    @if (IsUsageColumnVisible("api_key")) { <td><span class="primary-cell">@(row.ApiKey?.Name ?? "已删除的 Key")</span><small>#@row.ApiKeyId</small></td> }
+                                    @if (IsUsageColumnVisible("model")) { <td><span class="model-name">@row.Model</span>@if (!string.IsNullOrWhiteSpace(row.ServiceTier)) { <small>@row.ServiceTier</small> }</td> }
+                                    @if (IsUsageColumnVisible("reasoning_effort")) { <td>@ReasoningLabel(row.ReasoningEffort)</td> }
+                                    @if (IsUsageColumnVisible("endpoint")) { <td class="endpoint-cell"><small><b>入口：</b>@(row.InboundEndpoint ?? "-")</small></td> }
+                                    @if (IsUsageColumnVisible("ip_address")) { <td><code>@(row.IpAddress ?? "-")</code></td> }
+                                    @if (IsUsageColumnVisible("group")) { <td>@if (row.Group is not null) { <span class="tag indigo">@row.Group.Name</span> } else { <span>-</span> }</td> }
+                                    @if (IsUsageColumnVisible("stream")) { <td><span class="tag @RequestTypeClass(row)">@RequestTypeLabel(row)</span></td> }
+                                    @if (IsUsageColumnVisible("billing_mode")) { <td><span class="tag @BillingModeClass(row)">@BillingModeLabel(row)</span></td> }
+                                    @if (IsUsageColumnVisible("tokens")) { <td>@TokenCell(row)</td> }
+                                    @if (IsUsageColumnVisible("cost")) { <td><span class="actual-cost" title="标准费用 $@FormatCost(row.TotalCost, 8)；倍率 @row.RateMultiplier.ToString("0.###", CultureInfo.InvariantCulture)x">$@FormatCost(row.ActualCost, 6)</span>@if (row.LongContextBillingApplied) { <span class="mini-badge amber">x2</span> }</td> }
+                                    @if (IsUsageColumnVisible("latency")) { <td class="latency-cell"><small>首字 @(row.FirstTokenMs.HasValue ? FormatDuration(row.FirstTokenMs.Value) : "-")</small><small>总计 @FormatDuration(row.DurationMs ?? 0)</small></td> }
+                                    <td><time datetime="@row.CreatedAt.ToString("O")">@row.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</time></td>
+                                    @if (IsUsageColumnVisible("user_agent")) { <td class="user-agent-cell" title="@row.UserAgent">@(string.IsNullOrWhiteSpace(row.UserAgent) ? "-" : row.UserAgent)</td> }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+        <UsagePagination Page="@logs.Page" PageSize="@logs.PageSize" Total="@logs.Total" Busy="@logsLoading" OnPage="GoUsagePageAsync" OnPageSize="UsagePageSizeChangedAsync" />
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(errorListError)) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@errorListError</span></div> }
+        <section class="usage-card usage-table-card">
+            @if (errorLoading) { <LoadingState Text="正在载入错误请求" /> }
+            else if (errors.Items.Count == 0) { <EmptyState Title="暂无错误请求" Description="所选范围内没有可查看的失败请求。" /> }
+            else
+            {
+                <div class="usage-table-wrap">
+                    <table class="usage-detail-table error-table">
+                        <thead><tr>
+                            @if (IsErrorColumnVisible("key_name")) { <th>Key 名称</th> }
+                            @if (IsErrorColumnVisible("model")) { <th><button class="sort-button" @onclick='() => ChangeErrorSortAsync("model")'>模型 @SortIndicator("model", errorSortBy, errorSortOrder)</button></th> }
+                            @if (IsErrorColumnVisible("endpoint")) { <th>端点</th> }
+                            @if (IsErrorColumnVisible("client_ip")) { <th>IP</th> }
+                            @if (IsErrorColumnVisible("group")) { <th>分组</th> }
+                            @if (IsErrorColumnVisible("type")) { <th>类型</th> }
+                            @if (IsErrorColumnVisible("platform")) { <th>平台</th> }
+                            @if (IsErrorColumnVisible("category")) { <th>分类</th> }
+                            <th><button class="sort-button" @onclick='() => ChangeErrorSortAsync("status_code")'>状态 @SortIndicator("status_code", errorSortBy, errorSortOrder)</button></th>
+                            @if (IsErrorColumnVisible("message")) { <th>消息</th> }
+                            <th><button class="sort-button" @onclick='() => ChangeErrorSortAsync("created_at")'>时间 @SortIndicator("created_at", errorSortBy, errorSortOrder)</button></th>
+                            @if (IsErrorColumnVisible("user_agent")) { <th>User-Agent</th> }
+                        </tr></thead>
+                        <tbody>
+                            @foreach (var row in errors.Items)
+                            {
+                                <tr class="clickable-row" @key="row.Id" @onclick="() => OpenErrorDetailAsync(row.Id)">
+                                    @if (IsErrorColumnVisible("key_name")) { <td>@(string.IsNullOrWhiteSpace(row.KeyName) ? "-" : row.KeyName)@if (row.KeyDeleted) { <span class="mini-badge danger">已删除</span> }</td> }
+                                    @if (IsErrorColumnVisible("model")) { <td><span class="model-name">@(string.IsNullOrWhiteSpace(row.Model) ? "-" : row.Model)</span></td> }
+                                    @if (IsErrorColumnVisible("endpoint")) { <td class="endpoint-cell">@(string.IsNullOrWhiteSpace(row.InboundEndpoint) ? "-" : row.InboundEndpoint)</td> }
+                                    @if (IsErrorColumnVisible("client_ip")) { <td><code>@(string.IsNullOrWhiteSpace(row.ClientIp) ? "-" : row.ClientIp)</code></td> }
+                                    @if (IsErrorColumnVisible("group")) { <td>@if (!string.IsNullOrWhiteSpace(row.GroupName)) { <span class="tag indigo">@row.GroupName</span> } else { <span>-</span> }</td> }
+                                    @if (IsErrorColumnVisible("type")) { <td><span class="tag @ErrorRequestTypeClass(row)">@ErrorRequestTypeLabel(row)</span></td> }
+                                    @if (IsErrorColumnVisible("platform")) { <td>@(string.IsNullOrWhiteSpace(row.Platform) ? "-" : row.Platform)</td> }
+                                    @if (IsErrorColumnVisible("category")) { <td>@ErrorCategoryLabel(row.Category)</td> }
+                                    <td><span class="status-code @StatusClass(row.StatusCode)">@row.StatusCode</span></td>
+                                    @if (IsErrorColumnVisible("message")) { <td class="message-cell" title="@row.Message">@(string.IsNullOrWhiteSpace(row.Message) ? "-" : row.Message)</td> }
+                                    <td>@row.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                    @if (IsErrorColumnVisible("user_agent")) { <td class="user-agent-cell" title="@row.UserAgent">@(string.IsNullOrWhiteSpace(row.UserAgent) ? "-" : row.UserAgent)</td> }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+        <UsagePagination Page="@errors.Page" PageSize="@errors.PageSize" Total="@errors.Total" Busy="@errorLoading" OnPage="GoErrorPageAsync" OnPageSize="ErrorPageSizeChangedAsync" />
+    }
+</div>
+
+<AppModal Open="@(detailId is not null)" Title="错误请求详情" MaxWidth="820px" OnClose="CloseErrorDetail">
+    <ChildContent>
+        @if (detailLoading) { <LoadingState Text="正在载入错误详情" /> }
+        else if (!string.IsNullOrWhiteSpace(detailError)) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@detailError</span></div> }
+        else if (errorDetail is not null)
+        {
+            <div class="error-detail-grid">
+                <div><small>时间</small><strong>@errorDetail.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</strong></div>
+                <div><small>模型</small><strong>@Display(errorDetail.Model)</strong></div>
+                <div><small>入口端点</small><strong>@Display(errorDetail.InboundEndpoint)</strong></div>
+                <div><small>状态码</small><strong><span class="status-code @StatusClass(errorDetail.StatusCode)">@errorDetail.StatusCode</span></strong></div>
+                <div><small>分类</small><strong>@ErrorCategoryLabel(errorDetail.Category)</strong></div>
+                <div><small>平台</small><strong>@Display(errorDetail.Platform)</strong></div>
+                @if (errorDetail.UpstreamStatusCode.HasValue) { <div><small>上游状态码</small><strong>@errorDetail.UpstreamStatusCode</strong></div> }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(errorDetail.Message)) { <div class="error-detail-section"><small>错误消息</small><p>@errorDetail.Message</p></div> }
+            @if (!string.IsNullOrWhiteSpace(errorDetail.ErrorBody)) { <div class="error-detail-section"><small>响应正文</small><pre>@errorDetail.ErrorBody</pre></div> }
+        }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseErrorDetail">关闭</button></Footer>
+</AppModal>
+
+@code {
+    private const string UsageHiddenColumnsKey = "user-usage-hidden-columns";
+    private const string ErrorHiddenColumnsKey = "user-usage-error-hidden-columns";
+    private static readonly JsonSerializerOptions PreferenceJson = new(JsonSerializerDefaults.Web);
+    private static readonly IReadOnlyList<ColumnOption> UsageColumns =
+    [
+        new("api_key", "API Key"), new("model", "模型"), new("reasoning_effort", "推理强度"), new("endpoint", "端点"),
+        new("ip_address", "IP"), new("group", "分组"), new("stream", "类型"), new("billing_mode", "计费模式"),
+        new("tokens", "Token"), new("cost", "费用"), new("latency", "延迟"), new("user_agent", "User-Agent")
+    ];
+    private static readonly IReadOnlyList<ColumnOption> ErrorColumns =
+    [
+        new("key_name", "Key 名称"), new("model", "模型"), new("endpoint", "端点"), new("client_ip", "IP"),
+        new("group", "分组"), new("type", "类型"), new("platform", "平台"), new("category", "分类"),
+        new("message", "消息"), new("user_agent", "User-Agent")
+    ];
+    private static readonly IReadOnlyDictionary<string, string> ErrorCategories = new Dictionary<string, string>
+    {
+        ["auth"] = "认证错误", ["rate_limit"] = "速率限制", ["quota"] = "额度不足", ["invalid_request"] = "请求无效",
+        ["service_unavailable"] = "服务不可用", ["upstream"] = "上游错误", ["internal"] = "内部错误", ["cyber"] = "内容策略", ["other"] = "其他"
+    };
+    private static readonly int[] CommonErrorStatusCodes = [400, 401, 403, 404, 408, 409, 422, 429, 500, 502, 503, 504];
+
+    private readonly HashSet<string> hiddenUsageColumns = ["user_agent"];
+    private readonly HashSet<string> hiddenErrorColumns = ["user_agent"];
+    private List<ApiKeyDto> apiKeys = [];
+    private List<GoGroup> groups = [];
+    private PagedEnvelope<GoUsageLog> logs = new();
+    private PagedEnvelope<UserErrorRequestDto> errors = new();
+    private UserUsageStatsDto? stats;
+    private UserUsageModelsResponseDto modelsResponse = new();
+    private UserUsageSnapshotDto snapshot = new();
+    private UserErrorRequestDetailDto? errorDetail;
+    private DateTime startDate = DateTime.Today.AddDays(-1);
+    private DateTime endDate = DateTime.Today;
+    private string granularity = "hour";
+    private string activeTab = "usage";
+    private string modelMetric = "tokens";
+    private string groupMetric = "tokens";
+    private string endpointMetric = "tokens";
+    private string apiKeyId = string.Empty;
+    private string groupId = string.Empty;
+    private string model = string.Empty;
+    private string requestType = string.Empty;
+    private string billingType = string.Empty;
+    private string billingMode = string.Empty;
+    private string errorApiKeyId = string.Empty;
+    private string errorModel = string.Empty;
+    private string errorCategory = string.Empty;
+    private string errorStatusCode = string.Empty;
+    private string usageSortBy = "created_at";
+    private string usageSortOrder = "desc";
+    private string errorSortBy = "created_at";
+    private string errorSortOrder = "desc";
+    private string? logsError;
+    private string? errorListError;
+    private string? detailError;
+    private long? detailId;
+    private bool errorViewEnabled;
+    private bool logsLoading = true;
+    private bool statsLoading = true;
+    private bool modelStatsLoading = true;
+    private bool chartsLoading = true;
+    private bool errorLoading;
+    private bool detailLoading;
+    private bool exporting;
+    private bool showColumnMenu;
+    private int usagePageSize = 20;
+    private int errorPageSize = 20;
+
+    private IReadOnlyList<UserUsageModelStatDto> ModelRows => modelsResponse.Models.OrderByDescending(item => item.TotalTokens).ToList();
+    private IReadOnlyList<UserUsageGroupStatDto> GroupRows => snapshot.Groups.OrderByDescending(item => item.TotalTokens).ToList();
+    private IReadOnlyList<UserUsageEndpointStatDto> EndpointRows => stats?.Endpoints.OrderByDescending(item => item.TotalTokens).ToList() ?? [];
+    private IReadOnlyList<UserUsageTrendPointDto> TrendRows => snapshot.Trend.OrderBy(item => item.Date).ToList();
+    private IReadOnlyList<DistributionLegendRow> ModelLegend => ModelRows.Select(x => new DistributionLegendRow(x.Model, x.TotalTokens, x.ActualCost)).ToList();
+    private IReadOnlyList<DistributionLegendRow> GroupLegend => GroupRows.Select(x => new DistributionLegendRow(string.IsNullOrWhiteSpace(x.GroupName) ? $"分组 #{x.GroupId}" : x.GroupName, x.TotalTokens, x.ActualCost)).ToList();
+    private IReadOnlyList<DistributionLegendRow> EndpointLegend => EndpointRows.Select(x => new DistributionLegendRow(string.IsNullOrWhiteSpace(x.Endpoint) ? "未知端点" : x.Endpoint, x.TotalTokens, x.ActualCost)).ToList();
+    private IEnumerable<string> ModelOptions => modelsResponse.Models.Select(x => x.Model).Append(model).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Order();
+    private IEnumerable<string> ErrorModelOptions => errors.Items.Select(x => x.Model).Append(errorModel).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Order();
+    private IReadOnlyList<ColumnOption> CurrentToggleableColumns => activeTab == "errors" ? ErrorColumns : UsageColumns;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadFilterOptionsAsync();
+        await LoadAllAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await LoadColumnPreferencesAsync();
+    }
+
+    private async Task LoadFilterOptionsAsync()
+    {
+        var keysTask = Api.GetMyApiKeysAsync();
+        var groupsTask = Api.GetMyAvailableGroupsAsync();
+        var settingsTask = Api.GetPublicSettingsAsync();
+        try { apiKeys = await keysTask; } catch (ApiException) { apiKeys = []; }
+        try { groups = await groupsTask; } catch (ApiException) { groups = []; }
+        try { errorViewEnabled = (await settingsTask).AllowUserViewErrorRequests; } catch (ApiException) { errorViewEnabled = false; }
+    }
+
+    private async Task LoadAllAsync()
+    {
+        await Task.WhenAll(LoadLogsAsync(), LoadStatsAsync(), LoadModelStatsAsync(), LoadChartsAsync());
+    }
+
+    private async Task LoadLogsAsync()
+    {
+        logsLoading = true; logsError = null;
+        try { logs = await Api.GetMyUsageLogsAsync(BuildUsageQuery(logs.Page <= 0 ? 1 : logs.Page, usagePageSize)); }
+        catch (ApiException ex) { logsError = ex.Message; logs = new PagedEnvelope<GoUsageLog> { Page = 1, PageSize = usagePageSize }; }
+        finally { logsLoading = false; }
+    }
+
+    private async Task LoadStatsAsync()
+    {
+        statsLoading = true;
+        try { stats = await Api.GetMyUsageStatsAsync(BuildUsageQuery(1, usagePageSize)); }
+        catch (ApiException) { stats = null; }
+        finally { statsLoading = false; }
+    }
+
+    private async Task LoadModelStatsAsync()
+    {
+        modelStatsLoading = true;
+        try { modelsResponse = await Api.GetMyUsageModelsAsync(BuildUsageQuery(1, usagePageSize)); }
+        catch (ApiException) { modelsResponse = new(); }
+        finally { modelStatsLoading = false; }
+    }
+
+    private async Task LoadChartsAsync()
+    {
+        chartsLoading = true;
+        try { snapshot = await Api.GetMyUsageSnapshotAsync(BuildUsageQuery(1, usagePageSize), granularity); }
+        catch (ApiException) { snapshot = new(); }
+        finally { chartsLoading = false; }
+    }
+
+    private async Task LoadErrorsAsync()
+    {
+        if (!errorViewEnabled) return;
+        errorLoading = true; errorListError = null;
+        try { errors = await Api.GetMyErrorRequestsAsync(BuildErrorQuery(errors.Page <= 0 ? 1 : errors.Page, errorPageSize)); }
+        catch (ApiException ex) { errorListError = ex.Message; errors = new PagedEnvelope<UserErrorRequestDto> { Page = 1, PageSize = errorPageSize }; }
+        finally { errorLoading = false; }
+    }
+
+    private UserUsageQuery BuildUsageQuery(int page, int pageSize) => new()
+    {
+        Page = page, PageSize = pageSize, ApiKeyId = ParseLong(apiKeyId), GroupId = ParseLong(groupId), Model = model,
+        RequestType = requestType, BillingType = ParseInt(billingType), BillingMode = billingMode,
+        StartDate = startDate.ToString("yyyy-MM-dd"), EndDate = endDate.ToString("yyyy-MM-dd"),
+        Timezone = TimeZoneInfo.Local.Id, SortBy = usageSortBy, SortOrder = usageSortOrder
+    };
+
+    private UserErrorRequestQuery BuildErrorQuery(int page, int pageSize) => new()
+    {
+        Page = page, PageSize = pageSize, ApiKeyId = ParseLong(errorApiKeyId), Model = errorModel.Trim(),
+        Category = errorCategory, StatusCode = ParseInt(errorStatusCode), StartDate = startDate.ToString("yyyy-MM-dd"),
+        EndDate = endDate.ToString("yyyy-MM-dd"), Timezone = TimeZoneInfo.Local.Id, SortBy = errorSortBy, SortOrder = errorSortOrder
+    };
+
+    private async Task ApplyUsageFiltersAsync() { logs.Page = 1; await LoadAllAsync(); }
+    private async Task ApplyErrorFiltersAsync() { errors.Page = 1; await LoadErrorsAsync(); }
+    private async Task RefreshAsync() { showColumnMenu = false; await LoadAllAsync(); if (activeTab == "errors") await LoadErrorsAsync(); }
+
+    private async Task ResetFiltersAsync()
+    {
+        startDate = DateTime.Today.AddDays(-1); endDate = DateTime.Today; granularity = "hour";
+        apiKeyId = groupId = model = requestType = billingType = billingMode = string.Empty;
+        errorApiKeyId = errorModel = errorCategory = errorStatusCode = string.Empty;
+        logs.Page = errors.Page = 1;
+        await LoadAllAsync();
+        if (activeTab == "errors") await LoadErrorsAsync();
+    }
+
+    private async Task OnStartDateChangedAsync(DateTime value) { startDate = value.Date; if (endDate < startDate) endDate = startDate; granularity = RangeGranularity(); await ApplyUsageFiltersAsync(); if (activeTab == "errors") await ApplyErrorFiltersAsync(); }
+    private async Task OnEndDateChangedAsync(DateTime value) { endDate = value.Date; if (startDate > endDate) startDate = endDate; granularity = RangeGranularity(); await ApplyUsageFiltersAsync(); if (activeTab == "errors") await ApplyErrorFiltersAsync(); }
+    private string RangeGranularity() => (endDate - startDate).TotalDays <= 1 ? "hour" : "day";
+    private async Task GranularityChangedAsync(ChangeEventArgs e) { granularity = e.Value?.ToString() == "hour" ? "hour" : "day"; await LoadChartsAsync(); }
+    private async Task ApiKeyChangedAsync(ChangeEventArgs e) { apiKeyId = e.Value?.ToString() ?? string.Empty; await ApplyUsageFiltersAsync(); }
+    private async Task GroupChangedAsync(ChangeEventArgs e) { groupId = e.Value?.ToString() ?? string.Empty; await ApplyUsageFiltersAsync(); }
+    private async Task ModelChangedAsync(ChangeEventArgs e) { model = e.Value?.ToString()?.Trim() ?? string.Empty; await ApplyUsageFiltersAsync(); }
+    private async Task RequestTypeChangedAsync(ChangeEventArgs e) { requestType = e.Value?.ToString() ?? string.Empty; await ApplyUsageFiltersAsync(); }
+    private async Task BillingTypeChangedAsync(ChangeEventArgs e) { billingType = e.Value?.ToString() ?? string.Empty; await ApplyUsageFiltersAsync(); }
+    private async Task BillingModeChangedAsync(ChangeEventArgs e) { billingMode = e.Value?.ToString() ?? string.Empty; await ApplyUsageFiltersAsync(); }
+    private async Task ErrorApiKeyChangedAsync(ChangeEventArgs e) { errorApiKeyId = e.Value?.ToString() ?? string.Empty; await ApplyErrorFiltersAsync(); }
+    private async Task ErrorModelChangedAsync(ChangeEventArgs e) { errorModel = e.Value?.ToString()?.Trim() ?? string.Empty; await ApplyErrorFiltersAsync(); }
+    private async Task ErrorCategoryChangedAsync(ChangeEventArgs e) { errorCategory = e.Value?.ToString() ?? string.Empty; await ApplyErrorFiltersAsync(); }
+    private async Task ErrorStatusChangedAsync(ChangeEventArgs e) { errorStatusCode = e.Value?.ToString() ?? string.Empty; await ApplyErrorFiltersAsync(); }
+    private Task ShowUsageAsync() { activeTab = "usage"; showColumnMenu = false; return Task.CompletedTask; }
+    private async Task ShowErrorsAsync() { activeTab = "errors"; showColumnMenu = false; if (errors.Items.Count == 0) await LoadErrorsAsync(); }
+
+    private async Task ChangeUsageSortAsync(string key) { if (usageSortBy == key) usageSortOrder = usageSortOrder == "asc" ? "desc" : "asc"; else { usageSortBy = key; usageSortOrder = "asc"; } logs.Page = 1; await LoadLogsAsync(); }
+    private async Task ChangeErrorSortAsync(string key) { if (errorSortBy == key) errorSortOrder = errorSortOrder == "asc" ? "desc" : "asc"; else { errorSortBy = key; errorSortOrder = "asc"; } errors.Page = 1; await LoadErrorsAsync(); }
+    private static string SortIndicator(string key, string sortBy, string sortOrder) => sortBy == key ? (sortOrder == "asc" ? "↑" : "↓") : string.Empty;
+    private async Task GoUsagePageAsync(int target) { logs.Page = Math.Max(1, target); await LoadLogsAsync(); }
+    private async Task UsagePageSizeChangedAsync(int size) { usagePageSize = Math.Clamp(size, 1, 100); logs.Page = 1; await LoadLogsAsync(); }
+    private async Task GoErrorPageAsync(int target) { errors.Page = Math.Max(1, target); await LoadErrorsAsync(); }
+    private async Task ErrorPageSizeChangedAsync(int size) { errorPageSize = Math.Clamp(size, 1, 100); errors.Page = 1; await LoadErrorsAsync(); }
+
+    private void ToggleColumnMenu() => showColumnMenu = !showColumnMenu;
+    private bool IsUsageColumnVisible(string key) => !hiddenUsageColumns.Contains(key);
+    private bool IsErrorColumnVisible(string key) => !hiddenErrorColumns.Contains(key);
+    private bool IsCurrentColumnVisible(string key) => activeTab == "errors" ? IsErrorColumnVisible(key) : IsUsageColumnVisible(key);
+    private async Task ToggleColumnAsync(string key)
+    {
+        var set = activeTab == "errors" ? hiddenErrorColumns : hiddenUsageColumns;
+        if (!set.Remove(key)) set.Add(key);
+        await SaveColumnPreferencesAsync();
+    }
+
+    private async Task LoadColumnPreferencesAsync()
+    {
+        try
+        {
+            await LoadColumnSetAsync(UsageHiddenColumnsKey, hiddenUsageColumns, UsageColumns);
+            await LoadColumnSetAsync(ErrorHiddenColumnsKey, hiddenErrorColumns, ErrorColumns);
+            StateHasChanged();
+        }
+        catch (JSException) { }
+    }
+
+    private async Task LoadColumnSetAsync(string key, HashSet<string> target, IReadOnlyList<ColumnOption> allowed)
+    {
+        var saved = await JS.InvokeAsync<string?>("localStorage.getItem", key);
+        if (string.IsNullOrWhiteSpace(saved)) return;
+        var values = JsonSerializer.Deserialize<List<string>>(saved, PreferenceJson);
+        if (values is null) return;
+        target.Clear();
+        foreach (var value in values.Where(x => allowed.Any(c => c.Key == x))) target.Add(value);
+    }
+
+    private async Task SaveColumnPreferencesAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("localStorage.setItem", UsageHiddenColumnsKey, JsonSerializer.Serialize(hiddenUsageColumns, PreferenceJson));
+            await JS.InvokeVoidAsync("localStorage.setItem", ErrorHiddenColumnsKey, JsonSerializer.Serialize(hiddenErrorColumns, PreferenceJson));
+        }
+        catch (JSException) { }
+    }
+
+    private async Task ExportCsvAsync()
+    {
+        if (logs.Total <= 0) { Toasts.Info("没有可导出的数据"); return; }
+        exporting = true;
+        try
+        {
+            var all = new List<GoUsageLog>();
+            var pages = (int)Math.Ceiling(logs.Total / 100d);
+            for (var current = 1; current <= pages; current++)
+            {
+                var response = await Api.GetMyUsageLogsAsync(BuildUsageQuery(current, 100));
+                all.AddRange(response.Items);
+            }
+            var builder = new StringBuilder();
+            builder.AppendLine("Time,API Key Name,Model,Reasoning Effort,Inbound Endpoint,IP Address,Type,Billing Mode,Input Tokens,Output Tokens,Cache Read Tokens,Cache Creation Tokens,Rate Multiplier,Billed Cost,Original Cost,First Token (ms),Duration (ms)");
+            foreach (var row in all)
+            {
+                var values = new object?[] { row.CreatedAt.ToString("O"), row.ApiKey?.Name, row.Model, ReasoningLabel(row.ReasoningEffort), row.InboundEndpoint, row.IpAddress, RequestTypeLabel(row), BillingModeLabel(row), row.InputTokens, row.OutputTokens, row.CacheReadTokens, row.CacheCreationTokens, row.RateMultiplier, row.ActualCost.ToString("0.00000000", CultureInfo.InvariantCulture), row.TotalCost.ToString("0.00000000", CultureInfo.InvariantCulture), row.FirstTokenMs, row.DurationMs };
+                builder.AppendLine(string.Join(',', values.Select(CsvValue)));
+            }
+            var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(builder.ToString())).ToArray();
+            await JS.InvokeVoidAsync("paraGateway.downloadBytes", Convert.ToBase64String(bytes), "text/csv;charset=utf-8", $"usage_{startDate:yyyy-MM-dd}_to_{endDate:yyyy-MM-dd}.csv");
+            Toasts.Success($"已导出 {all.Count} 条使用记录");
+        }
+        catch (Exception ex) when (ex is ApiException or JSException) { Toasts.Error($"导出失败：{ex.Message}"); }
+        finally { exporting = false; }
+    }
+
+    private static string CsvValue(object? value)
+    {
+        if (value is null) return string.Empty;
+        var text = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+        if (text.Length > 0 && "=+-@\t\r".Contains(text[0])) text = "'" + text;
+        return text.IndexOfAny([',', '"', '\r', '\n']) >= 0 ? $"\"{text.Replace("\"", "\"\"")}\"" : text;
+    }
+
+    private async Task OpenErrorDetailAsync(long id)
+    {
+        detailId = id; detailLoading = true; detailError = null; errorDetail = null;
+        try { errorDetail = await Api.GetMyErrorRequestDetailAsync(id); }
+        catch (ApiException ex) { detailError = ex.Message; }
+        finally { detailLoading = false; }
+    }
+
+    private void CloseErrorDetail() { detailId = null; errorDetail = null; detailError = null; }
+
+    private RenderFragment TokenCell(GoUsageLog row) => builder =>
+    {
+        if (row.ImageCount > 0 && BillingModeValue(row) is "image" or "per_request")
+        {
+            builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "image-token-cell");
+            builder.AddContent(2, $"{row.ImageCount} 张");
+            builder.OpenElement(3, "small"); builder.AddContent(4, ImageSizeLabel(row)); builder.CloseElement(); builder.CloseElement();
+            return;
+        }
+        builder.OpenElement(10, "div"); builder.AddAttribute(11, "class", "token-cell");
+        builder.OpenElement(12, "span"); builder.AddAttribute(13, "title", "输入 Token"); builder.AddContent(14, $"↓ {FormatInteger(row.InputTokens)}"); builder.CloseElement();
+        builder.OpenElement(15, "span"); builder.AddAttribute(16, "title", "输出 Token"); builder.AddContent(17, $"↑ {FormatInteger(row.OutputTokens)}"); builder.CloseElement();
+        if (row.CacheReadTokens > 0) { builder.OpenElement(18, "small"); builder.AddAttribute(19, "title", "缓存读取"); builder.AddContent(20, $"读 {FormatTokens(row.CacheReadTokens)}"); builder.CloseElement(); }
+        if (row.CacheCreationTokens > 0) { builder.OpenElement(21, "small"); builder.AddAttribute(22, "title", "缓存写入"); builder.AddContent(23, $"写 {FormatTokens(row.CacheCreationTokens)}{(row.CacheCreation1hTokens > 0 ? " · 1h" : string.Empty)}"); builder.CloseElement(); }
+        builder.CloseElement();
+    };
+
+    private static string ImageSizeLabel(GoUsageLog row)
+    {
+        if (row.ImageSizeBreakdown is { Count: > 0 }) return string.Join(" + ", row.ImageSizeBreakdown.Select(x => $"{x.Key}×{x.Value}"));
+        return row.ImageOutputSize ?? row.ImageSize ?? row.ImageInputSize ?? "默认尺寸";
+    }
+
+    private static string RequestTypeLabel(GoUsageLog row)
+    {
+        var value = row.RequestType?.Trim().ToLowerInvariant();
+        return value switch { "cyber" => "Cyber", "live" => "Live", "ws_v2" => "WS", "stream" => "Stream", "sync" => "Sync", _ => row.OpenAiWsMode ? "WS" : row.Stream ? "Stream" : "Sync" };
+    }
+    private static string RequestTypeClass(GoUsageLog row) => RequestTypeLabel(row) switch { "WS" => "violet", "Live" => "rose", "Stream" => "blue", "Cyber" => "danger", _ => "gray" };
+    private static string ErrorRequestTypeLabel(UserErrorRequestDto row) => row.RequestType switch { 2 => "Stream", 3 => "WS", 4 => "Cyber", 5 => "Live", 1 => "Sync", _ => row.Stream ? "Stream" : "Sync" };
+    private static string ErrorRequestTypeClass(UserErrorRequestDto row) => ErrorRequestTypeLabel(row) switch { "WS" => "violet", "Live" => "rose", "Stream" => "blue", "Cyber" => "danger", _ => "gray" };
+    private static string BillingModeValue(GoUsageLog row) => string.IsNullOrWhiteSpace(row.BillingMode) ? (row.ImageCount > 0 ? "image" : "token") : row.BillingMode.Trim().ToLowerInvariant();
+    private static string BillingModeLabel(GoUsageLog row) => BillingModeValue(row) switch { "per_request" => "按次", "image" => "图片", "video" => "视频", _ => "Token" };
+    private static string BillingModeClass(GoUsageLog row) => BillingModeValue(row) switch { "per_request" => "amber", "image" => "violet", "video" => "rose", _ => "green" };
+    private static string ReasoningLabel(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value.Trim().ToLowerInvariant() switch { "low" => "Low", "medium" => "Medium", "high" => "High", "xhigh" => "XHigh", "max" => "Max", _ => value };
+    private static string ErrorCategoryLabel(string value) => ErrorCategories.TryGetValue(value ?? string.Empty, out var label) ? label : "其他";
+    private static string StatusClass(int code) => code >= 500 ? "danger" : code == 429 ? "warning" : "neutral";
+    private static long? ParseLong(string value) => long.TryParse(value, out var parsed) ? parsed : null;
+    private static int? ParseInt(string value) => int.TryParse(value, out var parsed) ? parsed : null;
+    private static string Display(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
+    private static string FormatInteger(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+    private static string FormatTokens(long value) => value switch { >= 1_000_000_000 => $"{value / 1_000_000_000d:0.##}B", >= 1_000_000 => $"{value / 1_000_000d:0.##}M", >= 1_000 => $"{value / 1_000d:0.##}K", _ => value.ToString("N0", CultureInfo.InvariantCulture) };
+    private static string FormatCost(double value, int decimals) => value.ToString($"0.{new string('0', decimals)}", CultureInfo.InvariantCulture);
+    private static string FormatDuration(double milliseconds) => milliseconds < 1000 ? $"{milliseconds:0}ms" : $"{milliseconds / 1000:0.00}s";
+
+    private sealed record ColumnOption(string Key, string Label);
+}

@@ -1,0 +1,121 @@
+@inject AuthSession Auth
+@inject NavigationManager Navigation
+
+@if (CanRender)
+{
+    <RouteView RouteData="RouteData" DefaultLayout="@DefaultLayout" />
+}
+else
+{
+    <div class="app-boot" role="status">
+        <span class="spinner"></span>
+        <span>正在跳转到登录页</span>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public RouteData RouteData { get; set; } = default!;
+
+    private bool IsPublicPage => RouteData.PageType == typeof(Pages.PublicHome)
+        || RouteData.PageType == typeof(Pages.Setup)
+        || RouteData.PageType == typeof(Pages.Login)
+        || RouteData.PageType == typeof(Pages.Register)
+        || RouteData.PageType == typeof(Pages.ForgotPassword)
+        || RouteData.PageType == typeof(Pages.ResetPassword)
+        || RouteData.PageType == typeof(Pages.EmailVerify)
+        || RouteData.PageType == typeof(Pages.ModelPlaza)
+        || RouteData.PageType == typeof(Pages.KeyUsage)
+        || RouteData.PageType == typeof(Pages.LegalDocument)
+        || RouteData.PageType == typeof(Pages.NotFound)
+        || RouteData.PageType == typeof(Pages.AuthCallback);
+
+    private Type DefaultLayout => RouteData.PageType == typeof(Pages.ModelPlaza) && !IsEmbeddedModelPlaza
+        ? typeof(BareLayout)
+        : typeof(MainLayout);
+
+    private bool IsEmbeddedModelPlaza => Auth.IsAuthenticated && HasQueryValue("embedded", "1");
+
+    private bool IsStandardUserPage => RouteData.PageType == typeof(Pages.Account)
+        || RouteData.PageType == typeof(Pages.Home)
+        || RouteData.PageType == typeof(Pages.ApiKeys)
+        || RouteData.PageType == typeof(Pages.Usage)
+        || RouteData.PageType == typeof(Pages.Redeem)
+        || RouteData.PageType == typeof(Pages.Subscriptions)
+        || RouteData.PageType == typeof(Pages.UserAnnouncements)
+        || RouteData.PageType == typeof(Pages.AvailableChannels)
+        || RouteData.PageType == typeof(Pages.Affiliate)
+        || RouteData.PageType == typeof(Pages.ChannelStatus)
+        || RouteData.PageType == typeof(Pages.BatchImage)
+        || RouteData.PageType == typeof(Pages.CustomPage);
+
+    private bool IsAdminPage => RouteData.PageType == typeof(Pages.Users)
+        || RouteData.PageType == typeof(Pages.Providers)
+        || RouteData.PageType == typeof(Pages.Models)
+        || RouteData.PageType == typeof(Pages.Groups)
+        || RouteData.PageType == typeof(Pages.Channels)
+        || RouteData.PageType == typeof(Pages.ProviderOAuth)
+        || RouteData.PageType == typeof(Pages.AdminRedeem)
+        || RouteData.PageType == typeof(Pages.AdminPromoCodes)
+        || RouteData.PageType == typeof(Pages.AdminSettings)
+        || RouteData.PageType == typeof(Pages.AdminOps)
+        || RouteData.PageType == typeof(Pages.AdminRiskControl)
+        || RouteData.PageType == typeof(Pages.AdminBackup)
+        || RouteData.PageType == typeof(Pages.AdminDataManagement)
+        || RouteData.PageType == typeof(Pages.AdminPromptAudit)
+        || RouteData.PageType == typeof(Pages.AdminErrorPassthrough)
+        || RouteData.PageType == typeof(Pages.AdminTlsProfiles)
+        || RouteData.PageType == typeof(Pages.AdminSystem)
+        || RouteData.PageType == typeof(Pages.AdminChannelMonitor)
+        || RouteData.PageType == typeof(Pages.AdminAffiliates)
+        || RouteData.PageType == typeof(Pages.AdminUserAttributes);
+
+    private bool IsExtendedAdminPage => RouteData.PageType == typeof(Pages.Proxies)
+        || RouteData.PageType == typeof(Pages.Announcements)
+        || RouteData.PageType == typeof(Pages.AuditLogs);
+
+    private bool IsAdminPath
+    {
+        get
+        {
+            var path = Navigation.ToBaseRelativePath(Navigation.Uri);
+            return path.Equals("admin", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("admin/", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private bool CanRender => IsPublicPage
+        || (Auth.IsAuthenticated && (Auth.User?.IsAdmin == true || (IsStandardUserPage && !IsAdminPath)));
+
+    private bool HasQueryValue(string name, string expected)
+    {
+        var query = new Uri(Navigation.Uri).Query.TrimStart('?');
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = pair.Split('=', 2);
+            if (Uri.UnescapeDataString(parts[0]).Equals(name, StringComparison.OrdinalIgnoreCase)
+                && parts.Length == 2
+                && Uri.UnescapeDataString(parts[1]).Equals(expected, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!IsPublicPage && !Auth.IsAuthenticated)
+        {
+            var relative = Navigation.ToBaseRelativePath(Navigation.Uri);
+            var returnUrl = string.IsNullOrWhiteSpace(relative) ? "/" : $"/{relative}";
+            Navigation.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}", replace: true);
+            return;
+        }
+
+        if (!IsPublicPage && Auth.IsAuthenticated && Auth.User?.IsAdmin != true && (IsAdminPath || IsAdminPage || IsExtendedAdminPage || !IsStandardUserPage))
+        {
+            Navigation.NavigateTo("/account", replace: true);
+        }
+    }
+}

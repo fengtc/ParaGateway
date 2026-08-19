@@ -1,0 +1,373 @@
+@page "/admin/risk-control"
+@implements IAsyncDisposable
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>风控中心 · ParaGateway</PageTitle>
+
+<div class="risk-page">
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@error</span></div>
+    }
+
+    @if (loading)
+    {
+        <LoadingState Text="正在载入风控中心" />
+    }
+    else
+    {
+        <header class="risk-heading">
+            <div><h1>风控中心</h1><p>配置内容审计策略并查看审核记录</p></div>
+            <div class="risk-actions">
+                <button type="button" class="button secondary" disabled="@statusLoading" @onclick="RefreshStatusAsync"><Icon Name="refresh" Size="16" />刷新状态</button>
+                <button type="button" class="button primary" @onclick="OpenSettings"><Icon Name="settings" Size="16" />风控设置</button>
+            </div>
+        </header>
+
+        <section class="overview-grid" aria-label="风控概览">
+            <article class="overview-card"><span class="overview-icon green"><Icon Name="shield" Size="18" /></span><div><small>运行状态</small><strong>@RuntimeTitle</strong><p>@ModeLabel(status.Mode.Length > 0 ? status.Mode : config.Mode)</p></div><b class="state-pill @RuntimeTone">@RuntimeBadge</b></article>
+            <article class="overview-card"><span class="overview-icon blue"><Icon Name="key" Size="18" /></span><div><small>API Key</small><strong>@(config.ApiKeyConfigured ? $"{config.ApiKeyCount} 个 Key" : "未配置")</strong><p>@ApiKeyHealthSummary</p></div></article>
+            <article class="overview-card"><span class="overview-icon purple"><Icon Name="users" Size="18" /></span><div><small>审计范围</small><strong>@(config.AllGroups ? "全部分组" : $"{config.GroupIds.Count} 个分组")</strong><p>@ModelFilterSummary</p></div></article>
+            <article class="overview-card"><span class="overview-icon amber"><Icon Name="file-text" Size="18" /></span><div><small>审核记录</small><strong>@logsPage.Total.ToString("N0")</strong><p>当前筛选结果</p></div></article>
+        </section>
+
+        @if (RuntimeMode == "pre_block")
+        {
+            <div class="runtime-split" data-test="pre-block-runtime-cards">
+                <section class="risk-card">
+                    <header class="card-header"><div><h2>前置拦截同步状态</h2><p>同步审核链路的实时计数，不包含异步写记录任务。</p></div><span class="soft-pill">@ModeLabel(RuntimeMode)</span></header>
+                    <div class="runtime-metrics">
+                        <article class="sky"><small>同步处理中</small><strong>@status.PreBlockActive.ToString("N0")</strong><p>当前正在审核</p></article>
+                        <article><small>已检查</small><strong>@status.PreBlockChecked.ToString("N0")</strong><p>进入前置拦截链路</p></article>
+                        <article class="green"><small>已放行</small><strong>@status.PreBlockAllowed.ToString("N0")</strong><p>未触发拦截</p></article>
+                        <article class="red"><small>已拦截</small><strong>@status.PreBlockBlocked.ToString("N0")</strong><p>命中后拒绝请求</p></article>
+                        <article class="amber"><small>审核异常</small><strong>@status.PreBlockErrors.ToString("N0")</strong><p>失败或无可用 Key</p></article>
+                        <article class="purple"><small>平均耗时</small><strong>@status.PreBlockAvgLatencyMs.ToString("N0") ms</strong><p>同步链路平均值</p></article>
+                    </div>
+                </section>
+                <section class="risk-card">
+                    <header class="card-header"><div><h2>审核 Key 负载</h2><p>同步前置拦截直接轮询可用审核 Key。</p></div><span class="soft-pill">并发 @status.PreBlockApiKeyActive / 可用 @status.PreBlockApiKeyAvailableCount · 累计 @status.PreBlockApiKeyTotalCalls</span></header>
+                    @if (status.PreBlockApiKeyLoads.Count == 0)
+                    {
+                        <EmptyState Title="暂无审核 Key 负载数据" Description="产生同步审核请求后会显示各 Key 的负载。" />
+                    }
+                    else
+                    {
+                        <div class="key-load-list">
+                            @foreach (var item in status.PreBlockApiKeyLoads.OrderBy(x => x.Index))
+                            {
+                                <article><div class="key-load-head"><span><b>#@(item.Index + 1)</b><code>@(string.IsNullOrWhiteSpace(item.Masked) ? "-" : item.Masked)</code><i class="status-dot @ApiKeyTone(item.Status)"></i></span><small>累计 @item.Total.ToString("N0") · 成功 @item.Success.ToString("N0") · 异常 @item.Errors.ToString("N0")</small></div><dl><div><dt>并发</dt><dd>@item.Active</dd></div><div><dt>平均</dt><dd>@item.AvgLatencyMs.ToString("N0") ms</dd></div><div><dt>最近</dt><dd>@item.LastLatencyMs ms</dd></div><div><dt>HTTP</dt><dd>@(item.LastHttpStatus == 0 ? "-" : item.LastHttpStatus)</dd></div></dl><div class="load-meter"><i style="width:@KeyLoadWidth(item.Total)%"></i></div></article>
+                            }
+                        </div>
+                    }
+                </section>
+            </div>
+        }
+        else if (RuntimeMode == "observe")
+        {
+            <section class="risk-card worker-card">
+                <header class="card-header"><div><h2>Worker 运行状态</h2><p>异步审计任务和前置拦截记录任务的队列与 Worker 池状态。</p></div><span class="auto-refresh">每 15 秒自动刷新@if (status.LastCleanupAt.HasValue) { <text> · 上次清理 @FormatDateTime(status.LastCleanupAt)</text> }</span></header>
+                <div class="worker-layout">
+                    <div class="queue-panel"><div class="queue-title"><span><b>队列占用</b><small>@status.QueueLength.ToString("N0") / @Math.Max(status.QueueSize, config.QueueSize).ToString("N0")</small></span><strong>@Math.Clamp(status.QueueUsagePercent, 0, 100).ToString("0.0")%</strong></div><div class="queue-meter"><i style="width:@Math.Clamp(status.QueueUsagePercent, 0, 100)%"></i></div><div class="worker-metrics"><article><small>处理中</small><strong>@status.ActiveWorkers</strong></article><article class="green"><small>空闲可用</small><strong>@status.IdleWorkers</strong></article><article><small>已处理</small><strong>@status.Processed.ToString("N0")</strong></article><article><small>丢弃/异常</small><strong>@((status.Dropped + status.Errors).ToString("N0"))</strong></article></div></div>
+                    <div class="worker-pool"><div><b>Worker 池</b><small>@status.ActiveWorkers 个处理中，@status.IdleWorkers 个空闲可用，共 @Math.Max(status.WorkerCount, config.WorkerCount) 个</small></div><div class="worker-slots">@for (var index = 1; index <= Math.Max(status.WorkerCount, config.WorkerCount); index++) { var workerActive = index <= status.ActiveWorkers; <span class="@(RuntimeEnabled ? workerActive ? "active" : "idle" : "disabled")"><b>#@index</b><i></i></span> }</div></div>
+                </div>
+            </section>
+        }
+
+        <section class="risk-card records-card">
+            <header class="records-header">
+                <div class="card-title-row"><div><h2>审核记录</h2><p>展示命中、拦截、异常和已采样记录。</p></div><button type="button" class="button secondary small" disabled="@logsLoading" @onclick="LoadLogsAsync"><Icon Name="refresh" Size="15" />刷新</button></div>
+                <div class="model-filter-summary"><Icon Name="filter" Size="15" /><b>模型范围</b><span>@ModelFilterSummary</span>@foreach (var model in config.ModelFilter.Models.Take(4)) { <code>@model</code> }@if (config.ModelFilter.Models.Count > 4) { <code>+@(config.ModelFilter.Models.Count - 4)</code> }</div>
+                <div class="log-filters">
+                    <select value="@resultFilter" @onchange="ResultFilterChangedAsync" aria-label="结果"><option value="">全部结果</option><option value="hit">命中</option><option value="blocked">已拦截</option><option value="pass">未命中</option><option value="error">异常</option></select>
+                    <select value="@groupFilter" @onchange="GroupFilterChangedAsync" aria-label="分组"><option value="">全部分组</option>@foreach (var group in groups) { <option value="@group.Id">@group.Name</option> }</select>
+                    <select value="@endpointFilter" @onchange="EndpointFilterChangedAsync" aria-label="端点"><option value="">全部端点</option>@foreach (var endpoint in EndpointOptions) { <option value="@endpoint">@endpoint</option> }</select>
+                    <div class="search-field"><Icon Name="search" Size="15" /><input value="@search" @oninput="e => search = e.Value?.ToString() ?? string.Empty" @onkeydown="SearchKeyDownAsync" placeholder="按用户/Key/摘要搜索" aria-label="搜索" /></div>
+                    <input type="datetime-local" value="@fromInput" @onchange="FromChangedAsync" title="开始时间" aria-label="开始时间" />
+                    <input type="datetime-local" value="@toInput" @onchange="ToChangedAsync" title="结束时间" aria-label="结束时间" />
+                </div>
+            </header>
+            @if (logsLoading)
+            {
+                <LoadingState Text="正在载入审核记录" />
+            }
+            else if (logsPage.Items.Count == 0)
+            {
+                <EmptyState Title="暂无审核记录" Description="当前筛选条件没有匹配的风控记录。" />
+            }
+            else
+            {
+                <div class="risk-table-wrap">
+                    <table class="risk-table">
+                        <thead><tr><th>时间</th><th>分组</th><th>用户</th><th>API Key</th><th>端点</th><th>结果</th><th>最高分</th><th>处置</th><th>上游耗时</th><th>输入摘要</th></tr></thead>
+                        <tbody>
+                            @foreach (var row in logsPage.Items)
+                            {
+                                <tr><td class="nowrap">@FormatDateTime(row.CreatedAt)</td><td>@Dash(row.GroupName)</td><td><span class="stacked"><b>@Dash(row.UserEmail)</b>@if (row.UserId.HasValue) { <small>#@row.UserId</small> }</span></td><td>@Dash(row.ApiKeyName)</td><td><span class="stacked"><b>@Dash(row.Endpoint)</b><small>@Dash(row.Provider) / @Dash(row.Model)</small></span></td><td><span class="result-pill @ResultTone(row)">@ResultLabel(row)</span></td><td><span class="stacked"><b>@Dash(row.HighestCategory)</b><small>@Percent(row.HighestScore)</small></span></td><td><span class="action-meta"><b>@ActionLabel(row.Action)</b>@if (row.ViolationCount > 0) { <small>@row.ViolationCount 次</small> }@if (row.EmailSent) { <small>已发邮件</small> }@if (row.QueueDelayMs.HasValue) { <small>排队 @row.QueueDelayMs ms</small> }@if (CanUnban(row)) { <button type="button" @onclick="() => UnbanAsync(row)">解封</button> }</span></td><td>@(row.UpstreamLatencyMs.HasValue ? $"{row.UpstreamLatencyMs} ms" : "-")</td><td><button type="button" class="excerpt-button" title="查看完整摘要" @onclick="() => OpenInputDetail(row)">@InputSummary(row)</button></td></tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <footer class="table-footer"><span>共 @logsPage.Total.ToString("N0") 条</span><div><select value="@pageSize" @onchange="PageSizeChangedAsync" aria-label="每页条数"><option value="10">10 / 页</option><option value="20">20 / 页</option><option value="50">50 / 页</option><option value="100">100 / 页</option></select><button type="button" class="icon-button" disabled="@(page <= 1)" @onclick="() => ChangePageAsync(page - 1)"><Icon Name="chevron-left" Size="15" /></button><span>@(page) / @TotalPages</span><button type="button" class="icon-button" disabled="@(page >= TotalPages)" @onclick="() => ChangePageAsync(page + 1)"><Icon Name="chevron-right" Size="15" /></button></div></footer>
+            }
+        </section>
+    }
+</div>
+
+<AppModal Open="settingsOpen" Title="内容审计设置" MaxWidth="1160px" OnClose="CloseSettings">
+    <ChildContent>
+        <nav class="settings-tabs" aria-label="风控设置页签">
+            @foreach (var tab in SettingsTabs) { <button type="button" class="@(settingsTab == tab.Id ? "active" : null)" @onclick="() => settingsTab = tab.Id">@tab.Label</button> }
+        </nav>
+        <div class="settings-content">
+            @if (settingsTab == "basic")
+            {
+                <div class="setting-block"><label class="setting-switch"><span><b>开启内容审计</b><small>关闭后即使风控中心菜单启用，也不会审核网关请求。</small></span><input type="checkbox" @bind="config.Enabled" /></label></div>
+                <div class="mode-options">@foreach (var mode in ModeOptions) { <button type="button" class="@(config.Mode == mode.Id ? "active" : null)" @onclick="() => config.Mode = mode.Id"><span><b>@mode.Label</b><small>@mode.Description</small></span><i></i></button> }</div>
+                <div class="form-grid risk-form"><label><span>OpenAI Base URL</span><input @bind="config.BaseUrl" /></label><label><span>模型名</span><input @bind="config.Model" /></label><label><span>HTTP 超时 (ms)</span><input type="number" min="100" max="120000" @bind="config.TimeoutMs" /></label><label><span>失败重试次数</span><input type="number" min="0" max="10" @bind="config.RetryCount" /></label><label><span>采样率</span><input type="number" min="0" max="100" @bind="config.SampleRate" /></label><label><span>代理服务器</span><select value="@ProxyValue" @onchange="ProxyChanged"><option value="">直连（不使用代理）</option>@foreach (var proxy in proxies) { <option value="@proxy.Id">@proxy.Name · @proxy.Protocol://@proxy.Host:@proxy.Port</option> }</select><small>审计请求经指定代理发出；默认直连。</small></label></div>
+                <section class="api-key-panel">
+                    <header><div><span class="panel-icon"><Icon Name="key" Size="18" /></span><span><b>OpenAI API Keys</b><small>当前已保存 @config.ApiKeyCount 个 Key；输入区只用于新增或覆盖，保存后不会回显明文。</small></span></div><div><button type="button" class="button secondary small" disabled="@(apiKeyTesting || InputApiKeys.Count == 0 || clearApiKeys)" @onclick="() => TestApiKeysAsync(true)"><Icon Name="pulse" Size="15" />测试输入区 Key</button><button type="button" class="button secondary small" disabled="@(apiKeyTesting || config.ApiKeyCount == 0 || pendingDeleteHashes.Count > 0 || clearApiKeys || apiKeysMode == "replace")" @onclick="() => TestApiKeysAsync(false)"><Icon Name="shield" Size="15" />@(HasAuditInput ? "用已保存 Key 试跑内容" : "测试已保存 Key")</button>@if (config.ApiKeyConfigured) { <button type="button" class="button secondary small" @onclick="ToggleClearApiKeys"><Icon Name="trash" Size="15" />@(clearApiKeys ? "保留已保存 Key" : "清除已保存 Key")</button> }</div></header>
+                    <div class="api-key-layout">
+                        <div class="api-key-input"><div class="write-mode"><span><b>写入方式</b><small>@(apiKeysMode == "append" ? "保存时追加并自动去重" : "用输入区 Key 替换全部已保存 Key")</small></span><div><button type="button" class="@(apiKeysMode == "append" ? "active" : null)" disabled="@clearApiKeys" @onclick='() => SetApiKeysMode("append")'>增量添加</button><button type="button" class="replace @(apiKeysMode == "replace" ? "active" : null)" disabled="@clearApiKeys" @onclick='() => SetApiKeysMode("replace")'>覆盖保存</button></div></div><textarea value="@newApiKeysText" @oninput="e => newApiKeysText = e.Value?.ToString() ?? string.Empty" rows="7" disabled="@clearApiKeys" autocomplete="new-password" placeholder="新增 API Key，每行一个；保存后会追加到已保存 Key"></textarea><div class="tag-line"><span>输入区 @InputApiKeys.Count 个 Key</span><span>已保存 @config.ApiKeyCount 个 Key</span>@if (clearApiKeys) { <b class="danger">保存后清除已配置 Key</b> }@if (pendingDeleteHashes.Count > 0) { <b class="warning">待删除 @pendingDeleteHashes.Count 个 Key</b> }</div>
+                            <div class="audit-input"><header><div><b>审计试跑输入</b><small>可填写提示词并上传一张图片；图片以 base64 发送，不保存文件。</small></div>@if (HasAuditInput || auditResult is not null) { <button type="button" @onclick="ClearAuditInput">清空试跑</button> }</header><textarea @bind="testPrompt" rows="4" placeholder="输入要测试的用户提示词；留空时仅测试 Key 可用性。"></textarea><div class="image-upload"><label><Icon Name="image" Size="18" /><span><b>测试图片</b><small>最多 1 张，不超过 8MB</small></span><InputFile OnChange="ReadTestImageAsync" accept="image/*" /></label>@if (!string.IsNullOrWhiteSpace(testImageDataUrl)) { <div class="image-preview"><img src="@testImageDataUrl" alt="审核测试图片预览" /><span>@testImageName</span><button type="button" title="移除图片" @onclick="RemoveTestImage"><Icon Name="x" Size="13" /></button></div> }</div></div>
+                        </div>
+                        <aside class="api-key-health"><header><span><b>Key 可用状态</b><small>401/403 冻结 10 分钟；429/529 冻结 1 分钟；其他 HTTP 错误冻结 10 秒。</small></span><em>@EffectiveApiKeyRows.Count 个 Key</em></header>@if (EffectiveApiKeyRows.Count == 0) { <div class="health-empty"><Icon Name="info" Size="22" /><b>暂无 Key 状态</b><small>保存 Key 或测试输入区 Key 后会显示可用性。</small></div> } else { <div class="key-status-list">@foreach (var row in EffectiveApiKeyRows) { <article class="@(pendingDeleteHashes.Contains(row.KeyHash) ? "pending" : null)"><div><code>@Dash(row.Masked)</code><span class="key-origin">@(pendingDeleteHashes.Contains(row.KeyHash) ? "待删除" : row.Configured ? "已配置" : "待保存")</span><small>@ApiKeyMeta(row)</small>@if (!string.IsNullOrWhiteSpace(row.LastError)) { <p>@row.LastError</p> }</div><span class="key-state @ApiKeyTone(row.Status)"><i></i>@ApiKeyStatusLabel(row.Status)</span>@if (row.Configured && !clearApiKeys) { <button type="button" title="@(pendingDeleteHashes.Contains(row.KeyHash) ? "撤销删除" : "删除这个 Key")" @onclick="() => ToggleDeleteApiKey(row)"><Icon Name="@(pendingDeleteHashes.Contains(row.KeyHash) ? "refresh" : "trash")" Size="13" /></button> }</article> }</div> }
+                            @if (auditResult is not null) { <section class="audit-result"><header><span><b>审计试跑结果</b><small>最高分类 @Dash(auditResult.HighestCategory)，分数 @Percent(auditResult.HighestScore)</small></span><em class="@(auditResult.Flagged ? "danger" : "success")">@(auditResult.Flagged ? "命中阈值" : "未命中")</em></header><div class="score-summary"><span>综合评分</span><b>@Percent(auditResult.CompositeScore)</b></div><div class="score-meter"><i class="@(auditResult.Flagged ? "danger" : "success")" style="width:@PercentWidth(auditResult.CompositeScore)%"></i></div><div class="score-list">@foreach (var score in auditResult.CategoryScores.OrderByDescending(x => x.Value)) { var threshold = auditResult.Thresholds.GetValueOrDefault(score.Key, 1); <div><span>@score.Key</span><b class="@(score.Value >= threshold ? "danger" : null)">@Percent(score.Value)</b><small>阈值 @Percent(threshold)</small></div> }</div></section> }
+                        </aside>
+                    </div>
+                </section>
+            }
+            else if (settingsTab == "scope")
+            {
+                <div class="setting-block"><label class="setting-switch"><span><b>审计分组</b><small>@(config.AllGroups ? "当前审计全部分组" : "当前审计指定分组")</small></span><input type="checkbox" @bind="config.AllGroups" /></label></div>
+                @if (!config.AllGroups) { <div class="group-picker"><input @bind="groupSearch" @bind:event="oninput" placeholder="搜索分组名称或平台" />@if (FilteredGroups.Count == 0) { <p>暂无可用分组</p> } else { <div>@foreach (var group in FilteredGroups) { var id = ParseGroupId(group.Id); <label><input type="checkbox" checked="@config.GroupIds.Contains(id)" @onchange="e => ToggleGroup(id, e)" /><span><b>@group.Name</b><small>@group.Platform · #@group.Id</small></span></label> }</div> }</div> }
+                <div class="scope-block"><h3>模型范围</h3><p>按客户端请求的模型名决定是否执行内容审计。</p><div class="mode-options compact">@foreach (var option in ModelFilterOptions) { <button type="button" class="@(config.ModelFilter.Type == option.Id ? "active" : null)" @onclick="() => SetModelFilterType(option.Id)"><span><b>@option.Label</b><small>@option.Description</small></span><i></i></button> }</div>@if (config.ModelFilter.Type != "all") { <label class="full-field"><span>模型列表（每行一个）</span><textarea value="@modelsText" @oninput="e => modelsText = e.Value?.ToString() ?? string.Empty" rows="8" placeholder="gpt-4o&#10;claude-sonnet-4"></textarea><small>已配置 @ParseLines(modelsText).Count 个模型</small></label> }</div>
+            }
+            else if (settingsTab == "runtime")
+            {
+                <div class="form-grid risk-form"><label><span>Worker 数</span><input type="number" min="1" max="128" @bind="config.WorkerCount" /></label><label><span>异步队列大小</span><input type="number" min="128" max="1048576" @bind="config.QueueSize" /></label></div>
+                <div class="switch-grid"><label class="setting-switch"><span><b>记录未命中输入</b><small>开启后会记录抽样但未命中的脱敏摘要。</small></span><input type="checkbox" @bind="config.RecordNonHits" /></label><label class="setting-switch"><span><b>启用前置哈希比对</b><small>历史命中输入可在调用上游前直接拦截。</small></span><input type="checkbox" @bind="config.PreHashCheckEnabled" /></label></div>
+                <div class="hash-panel"><header><span><b>当前哈希集合数量：@status.FlaggedHashCount.ToString("N0") 个</b><small>可删除误拦截项，或清空全部风险哈希；不会删除审核记录。</small></span><button type="button" class="button secondary small danger-text" disabled="@(hashActionLoading || status.FlaggedHashCount == 0)" @onclick="ClearHashesAsync"><Icon Name="trash" Size="15" />一键清空</button></header><div><input value="@hash" @oninput="e => hash = e.Value?.ToString() ?? string.Empty" maxlength="64" placeholder="粘贴完整 64 位输入哈希" /><button type="button" class="button secondary small" disabled="@(hashActionLoading || !IsHashValid)" @onclick="DeleteHashAsync"><Icon Name="trash" Size="14" />删除指定哈希</button></div></div>
+            }
+            else if (settingsTab == "response")
+            {
+                <div class="form-grid risk-form"><label><span>拦截 HTTP 状态码</span><input type="number" min="400" max="599" @bind="config.BlockStatus" /></label><label><span>自定义拦截提示</span><input @bind="config.BlockMessage" /></label></div>
+                <div class="switch-grid"><label class="setting-switch"><span><b>命中后发送邮件</b><small>达到阈值时向用户发送风控提醒。</small></span><input type="checkbox" @bind="config.EmailOnHit" /></label><label class="setting-switch"><span><b>自动封禁用户</b><small>命中次数达到阈值后禁用用户并刷新认证缓存。</small></span><input type="checkbox" @bind="config.AutoBanEnabled" /></label><label class="setting-switch span-two"><span><b>cyber_policy 不计入封号次数</b><small>风控日志与通知照常，但不累计自动封禁次数。</small></span><input type="checkbox" @bind="config.CyberPolicyExcludeFromBanCount" /></label></div>
+                <div class="form-grid risk-form"><label><span>封禁触发次数</span><input type="number" min="1" max="1000" @bind="config.BanThreshold" /></label><label><span>累计窗口（小时）</span><input type="number" min="1" max="8760" @bind="config.ViolationWindowHours" /></label></div>
+            }
+            else if (settingsTab == "thresholds")
+            {
+                <div class="section-intro"><div><h3>风险阈值</h3><p>按 OpenAI Moderations 分类调整命中阈值，达到或超过阈值即命中。</p></div><button type="button" class="button secondary small" @onclick="ResetThresholds"><Icon Name="refresh" Size="14" />恢复默认阈值</button></div>
+                <div class="threshold-grid">@foreach (var category in ThresholdDefaults.Keys) { var thresholdCategory = category; <label><span><b>@thresholdCategory</b><small>默认 @ThresholdDefaults[thresholdCategory].ToString("0.0")%</small></span><div><input type="number" min="0" max="100" step="0.1" value="@ThresholdPercent(thresholdCategory)" @onchange="e => SetThreshold(thresholdCategory, e)" /><em>%</em></div></label> }</div>
+            }
+            else if (settingsTab == "keywords")
+            {
+                <div class="keyword-notice @KeywordNoticeTone"><Icon Name="info" Size="18" /><span><b>@KeywordNoticeTitle</b><small>@KeywordNoticeDescription</small></span></div>
+                <div class="mode-options compact">@foreach (var option in KeywordModeOptions) { <button type="button" class="@(config.KeywordBlockingMode == option.Id ? "active" : null)" @onclick="() => config.KeywordBlockingMode = option.Id"><span><b>@option.Label</b><small>@option.Description</small></span><i></i></button> }</div>
+                <label class="full-field"><span>拦截关键词 <em>@ParseLines(keywordsText).Count 个</em></span><textarea value="@keywordsText" @oninput="e => keywordsText = e.Value?.ToString() ?? string.Empty" disabled="@(config.KeywordBlockingMode == "api_only")" rows="12" placeholder="每行输入一个关键词"></textarea><small>匹配忽略大小写；最多 10000 个，重复项会自动去重。</small></label>
+            }
+            else
+            {
+                <div class="form-grid risk-form"><label><span>命中记录保留（天）</span><input type="number" min="1" max="3650" @bind="config.HitRetentionDays" /></label><label><span>未命中记录保留（天，最多 3 天）</span><input type="number" min="1" max="3" @bind="config.NonHitRetentionDays" /></label></div>
+                <div class="cleanup-card"><Icon Name="database" Size="19" /><span>上次清理删除命中 @status.LastCleanupDeletedHit.ToString("N0") 条，未命中 @status.LastCleanupDeletedNonHit.ToString("N0") 条@if (status.LastCleanupAt.HasValue) { <small>执行时间：@FormatDateTime(status.LastCleanupAt)</small> }</span></div>
+            }
+            @if (!string.IsNullOrWhiteSpace(modalError)) { <div class="inline-alert danger"><Icon Name="alert" Size="16" /><span>@modalError</span></div> }
+        </div>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseSettings">取消</button><button type="button" class="button primary" disabled="@saving" @onclick="SaveAsync"><Icon Name="check" Size="15" />@(saving ? "保存中…" : "保存内容审计配置")</button></Footer>
+</AppModal>
+
+<AppModal Open="inputDetailRow is not null" Title="输入摘要详情" MaxWidth="920px" OnClose="CloseInputDetail">
+    <ChildContent>@if (inputDetailRow is not null) { <div class="detail-metrics"><article><small>时间</small><b>@FormatDateTime(inputDetailRow.CreatedAt)</b></article><article><small>用户</small><b>@Dash(inputDetailRow.UserEmail)</b></article><article><small>结果</small><span class="result-pill @ResultTone(inputDetailRow)">@ResultLabel(inputDetailRow)</span></article><article><small>最高分</small><b>@Dash(inputDetailRow.HighestCategory) / @Percent(inputDetailRow.HighestScore)</b></article>@if (!string.IsNullOrWhiteSpace(inputDetailRow.MatchedKeyword)) { <article class="keyword"><small>命中关键词</small><b>@inputDetailRow.MatchedKeyword</b></article> }</div><section class="detail-content"><header><span><b>完整内容</b><small>@Dash(inputDetailRow.Endpoint) · @Dash(inputDetailRow.Provider) / @Dash(inputDetailRow.Model)</small></span>@if (!string.IsNullOrWhiteSpace(inputDetailRow.GroupName)) { <em>@inputDetailRow.GroupName</em> }</header><pre>@InputSummary(inputDetailRow)</pre></section> }</ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseInputDetail">关闭</button></Footer>
+</AppModal>
+
+@code {
+    private const long MaxImageBytes = 8 * 1024 * 1024;
+    private static readonly string[] EndpointOptions = ["/v1/messages", "/v1/responses", "/v1/chat/completions", "/v1beta/models", "/v1/images/generations", "/v1/images/edits"];
+    private static readonly (string Id, string Label)[] SettingsTabs = [("basic", "基础"), ("scope", "审计范围"), ("runtime", "运行队列"), ("response", "命中通知"), ("thresholds", "风险阈值"), ("keywords", "关键词拦截"), ("retention", "日志保留")];
+    private static readonly (string Id, string Label, string Description)[] ModeOptions = [("pre_block", "前置拦截", "同步审核最新用户输入，命中后立即拒绝请求。"), ("observe", "仅观察", "请求直接放行，输入进入异步审核队列。"), ("off", "关闭", "不执行内容审计，也不写入审核记录。")];
+    private static readonly (string Id, string Label, string Description)[] ModelFilterOptions = [("all", "所有模型", "所有模型请求都会进入内容审计。"), ("include", "仅指定模型", "只有列表中的模型会执行内容审计。"), ("exclude", "排除指定模型", "列表中的模型跳过内容审计。")];
+    private static readonly (string Id, string Label, string Description)[] KeywordModeOptions = [("keyword_and_api", "关键词 + API", "命中关键词直接拦截；未命中再调用上游。"), ("keyword_only", "仅关键词", "只用关键词判断，未命中直接放行。"), ("api_only", "仅 API", "只调用上游，本页关键词不生效。")];
+    private static readonly Dictionary<string, double> ThresholdDefaults = new() { ["harassment"] = 98, ["harassment/threatening"] = 90, ["hate"] = 65, ["hate/threatening"] = 65, ["illicit"] = 95, ["illicit/violent"] = 95, ["self-harm"] = 65, ["self-harm/intent"] = 85, ["self-harm/instructions"] = 65, ["sexual"] = 65, ["sexual/minors"] = 65, ["violence"] = 95, ["violence/graphic"] = 95 };
+
+    private RiskControlConfigDto config = new();
+    private RiskControlStatusDto status = new();
+    private PagedEnvelope<RiskControlLogDto> logsPage = new();
+    private List<GroupDto> groups = [];
+    private List<ProxyDto> proxies = [];
+    private List<RiskApiKeyStatusDto> testedApiKeyStatuses = [];
+    private readonly HashSet<string> pendingDeleteHashes = new(StringComparer.OrdinalIgnoreCase);
+    private RiskAuditResultDto? auditResult;
+    private RiskControlLogDto? inputDetailRow;
+    private CancellationTokenSource? refreshCts;
+    private string settingsTab = "basic", apiKeysMode = "append", newApiKeysText = string.Empty, testPrompt = string.Empty, testImageDataUrl = string.Empty, testImageName = string.Empty;
+    private string keywordsText = string.Empty, modelsText = string.Empty, groupSearch = string.Empty, hash = string.Empty, search = string.Empty, resultFilter = string.Empty, groupFilter = string.Empty, endpointFilter = string.Empty, fromInput = string.Empty, toInput = string.Empty;
+    private bool loading = true, statusLoading, logsLoading, settingsOpen, saving, apiKeyTesting, clearApiKeys, hashActionLoading;
+    private int page = 1, pageSize = 20;
+    private string? error, modalError;
+
+    protected override async Task OnInitializedAsync() { await LoadAllAsync(); StartAutoRefresh(); }
+
+    private async Task LoadAllAsync()
+    {
+        loading = true; error = null;
+        try
+        {
+            var configTask = Api.GetRiskConfigTypedAsync(); var statusTask = Api.GetRiskStatusAsync(); var groupsTask = Api.GetGroupsAsync(); var proxiesTask = LoadProxiesSafeAsync();
+            await Task.WhenAll(configTask, statusTask, groupsTask, proxiesTask);
+            config = await configTask; status = await statusTask; groups = await groupsTask; proxies = await proxiesTask;
+            ApplyConfig(); ApplyRuntimeKeyStatuses(); await LoadLogsAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        catch (Exception ex) { error = $"内容审核页面加载失败：{ex.Message}"; }
+        finally { loading = false; }
+    }
+
+    private async Task<List<ProxyDto>> LoadProxiesSafeAsync() { try { return await Api.GetProxiesAsync(); } catch { return []; } }
+    private void ApplyConfig()
+    {
+        config.NormalizeCollections();
+        if (string.IsNullOrWhiteSpace(config.BaseUrl)) config.BaseUrl = "https://api.openai.com"; if (string.IsNullOrWhiteSpace(config.Model)) config.Model = "omni-moderation-latest";
+        if (config.TimeoutMs <= 0) config.TimeoutMs = 3000; if (config.WorkerCount <= 0) config.WorkerCount = 4; if (config.QueueSize <= 0) config.QueueSize = 32768; if (config.BlockStatus == 0) config.BlockStatus = 403;
+        if (string.IsNullOrWhiteSpace(config.BlockMessage)) config.BlockMessage = "内容审计命中风险规则，请调整输入后重试";
+        var normalized = new Dictionary<string, double>(); foreach (var item in ThresholdDefaults) normalized[item.Key] = config.Thresholds.TryGetValue(item.Key, out var value) ? Math.Clamp(value * 100, 0, 100) : item.Value; config.Thresholds = normalized;
+        keywordsText = string.Join(Environment.NewLine, config.BlockedKeywords); modelsText = string.Join(Environment.NewLine, config.ModelFilter.Models); newApiKeysText = string.Empty; apiKeysMode = "append"; clearApiKeys = false; pendingDeleteHashes.Clear(); testedApiKeyStatuses = [];
+    }
+    private void ApplyRuntimeKeyStatuses() { status.NormalizeCollections(); config.NormalizeCollections(); if (status.ApiKeyStatuses.Count > 0) { foreach (var item in status.ApiKeyStatuses) item.Configured = true; config.ApiKeyStatuses = status.ApiKeyStatuses; } else foreach (var item in config.ApiKeyStatuses) item.Configured = true; }
+
+    private async Task RefreshStatusAsync()
+    {
+        statusLoading = true; error = null;
+        try { status = await Api.GetRiskStatusAsync(); ApplyRuntimeKeyStatuses(); }
+        catch (ApiException ex) { error = ex.Message; }
+        catch (Exception ex) { error = $"刷新内容审核状态失败：{ex.Message}"; }
+        finally { statusLoading = false; }
+    }
+    private async Task LoadLogsAsync()
+    {
+        logsLoading = true;
+        try { logsPage = await Api.GetRiskLogsAsync(page, pageSize, search, resultFilter, ParseNullableLong(groupFilter), endpointFilter, ParseLocalDateTime(fromInput), ParseLocalDateTime(toInput)); logsPage.Items ??= []; page = logsPage.Page <= 0 ? page : logsPage.Page; }
+        catch (ApiException ex) { error = ex.Message; }
+        catch (Exception ex) { error = $"载入审核记录失败：{ex.Message}"; }
+        finally { logsLoading = false; }
+    }
+
+    private void OpenSettings() { settingsTab = "basic"; modalError = null; settingsOpen = true; }
+    private Task CloseSettings() { settingsOpen = false; modalError = null; return Task.CompletedTask; }
+    private async Task SaveAsync()
+    {
+        modalError = ValidateConfig(); if (modalError is not null) return; saving = true;
+        try
+        {
+            var keys = InputApiKeys; var models = ParseLines(modelsText); var thresholds = config.Thresholds.ToDictionary(x => x.Key, x => Math.Round(Math.Clamp(x.Value, 0, 100) / 100d, 4));
+            var payload = new Dictionary<string, object?> { ["enabled"] = config.Enabled, ["mode"] = config.Mode, ["base_url"] = config.BaseUrl.Trim(), ["model"] = config.Model.Trim(), ["proxy_id"] = config.ProxyId ?? 0, ["timeout_ms"] = config.TimeoutMs, ["retry_count"] = config.RetryCount, ["sample_rate"] = config.SampleRate, ["all_groups"] = config.AllGroups, ["group_ids"] = config.AllGroups ? new List<long>() : config.GroupIds, ["record_non_hits"] = config.RecordNonHits, ["clear_api_key"] = clearApiKeys, ["worker_count"] = config.WorkerCount, ["queue_size"] = config.QueueSize, ["block_status"] = config.BlockStatus, ["block_message"] = config.BlockMessage.Trim(), ["email_on_hit"] = config.EmailOnHit, ["auto_ban_enabled"] = config.AutoBanEnabled, ["cyber_policy_exclude_from_ban_count"] = config.CyberPolicyExcludeFromBanCount, ["ban_threshold"] = config.BanThreshold, ["violation_window_hours"] = config.ViolationWindowHours, ["hit_retention_days"] = config.HitRetentionDays, ["non_hit_retention_days"] = Math.Clamp(config.NonHitRetentionDays, 1, 3), ["pre_hash_check_enabled"] = config.PreHashCheckEnabled, ["thresholds"] = thresholds, ["blocked_keywords"] = ParseLines(keywordsText), ["keyword_blocking_mode"] = config.KeywordBlockingMode, ["model_filter"] = new { type = config.ModelFilter.Type, models } };
+            if (keys.Count > 0) { payload["api_keys"] = keys; payload["api_keys_mode"] = apiKeysMode; payload["clear_api_key"] = false; }
+            if (!clearApiKeys && apiKeysMode != "replace" && pendingDeleteHashes.Count > 0) payload["delete_api_key_hashes"] = pendingDeleteHashes.ToList();
+            config = await Api.UpdateRiskConfigTypedAsync(payload); ApplyConfig(); settingsOpen = false; Toasts.Success("内容审计配置已保存"); await Task.WhenAll(RefreshStatusAsync(), ReloadLogsFromFirstPageAsync());
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+    private string? ValidateConfig()
+    {
+        if (string.IsNullOrWhiteSpace(config.BaseUrl) || !Uri.TryCreate(config.BaseUrl.Trim(), UriKind.Absolute, out _)) return "请输入有效的 OpenAI Base URL。";
+        if (string.IsNullOrWhiteSpace(config.Model)) return "模型名不能为空。"; if (config.ModelFilter.Type != "all" && ParseLines(modelsText).Count == 0) return "当前模型范围至少需要配置 1 个模型。";
+        if (!clearApiKeys && apiKeysMode == "replace" && InputApiKeys.Count == 0) return "覆盖保存至少需要输入 1 个 API Key。"; if (config.TimeoutMs < 100) return "HTTP 超时不能小于 100 毫秒。"; return null;
+    }
+
+    private async Task TestApiKeysAsync(bool useInputKeys)
+    {
+        var keys = useInputKeys ? InputApiKeys : [];
+        if (useInputKeys && keys.Count == 0) { modalError = "请先输入需要测试的 OpenAI API Key。"; return; }
+        apiKeyTesting = true; modalError = null;
+        try
+        {
+            var payload = new Dictionary<string, object?> { ["base_url"] = config.BaseUrl.Trim(), ["model"] = config.Model.Trim(), ["timeout_ms"] = config.TimeoutMs, ["proxy_id"] = config.ProxyId ?? 0, ["prompt"] = testPrompt.Trim(), ["images"] = string.IsNullOrWhiteSpace(testImageDataUrl) ? new List<string>() : new List<string> { testImageDataUrl } }; if (useInputKeys) payload["api_keys"] = keys;
+            var result = await Api.TestRiskApiKeysAsync(payload); auditResult = result.AuditResult;
+            if (useInputKeys) { foreach (var item in result.Items) item.Configured = false; testedApiKeyStatuses = result.Items; } else { foreach (var item in result.Items) item.Configured = true; config.ApiKeyStatuses = result.Items; testedApiKeyStatuses = []; await RefreshStatusAsync(); }
+            Toasts.Success($"Key 测试完成，共 {result.Items.Count} 个");
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { apiKeyTesting = false; }
+    }
+    private async Task ReadTestImageAsync(InputFileChangeEventArgs args)
+    {
+        var file = args.File; if (!file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) { modalError = "请选择图片文件。"; return; } if (file.Size > MaxImageBytes) { modalError = "单张测试图片不能超过 8MB。"; return; }
+        try { await using var stream = file.OpenReadStream(MaxImageBytes); using var memory = new MemoryStream(); await stream.CopyToAsync(memory); testImageDataUrl = $"data:{file.ContentType};base64,{Convert.ToBase64String(memory.ToArray())}"; testImageName = file.Name; auditResult = null; }
+        catch (Exception ex) { modalError = $"读取测试图片失败：{ex.Message}"; }
+    }
+    private void RemoveTestImage() { testImageDataUrl = string.Empty; testImageName = string.Empty; auditResult = null; }
+    private void ClearAuditInput() { testPrompt = string.Empty; RemoveTestImage(); }
+    private void ToggleClearApiKeys() { clearApiKeys = !clearApiKeys; if (clearApiKeys) { newApiKeysText = string.Empty; apiKeysMode = "append"; testedApiKeyStatuses = []; pendingDeleteHashes.Clear(); } }
+    private void SetApiKeysMode(string value) { apiKeysMode = value; if (value == "replace") pendingDeleteHashes.Clear(); }
+    private void ToggleDeleteApiKey(RiskApiKeyStatusDto row) { if (!row.Configured || string.IsNullOrWhiteSpace(row.KeyHash)) return; if (!pendingDeleteHashes.Add(row.KeyHash)) pendingDeleteHashes.Remove(row.KeyHash); }
+
+    private void ToggleGroup(long id, ChangeEventArgs args) { if (args.Value is true || string.Equals(args.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase)) { if (!config.GroupIds.Contains(id)) config.GroupIds.Add(id); } else config.GroupIds.Remove(id); }
+    private void SetModelFilterType(string value) { config.ModelFilter.Type = value; if (value == "all") modelsText = string.Empty; }
+    private void ProxyChanged(ChangeEventArgs args) => config.ProxyId = ParseNullableLong(args.Value?.ToString());
+    private void ResetThresholds() => config.Thresholds = ThresholdDefaults.ToDictionary(x => x.Key, x => x.Value);
+    private double ThresholdPercent(string category) => config.Thresholds.GetValueOrDefault(category, ThresholdDefaults[category]);
+    private void SetThreshold(string category, ChangeEventArgs args) { if (double.TryParse(args.Value?.ToString(), out var value)) config.Thresholds[category] = Math.Clamp(value, 0, 100); }
+
+    private async Task DeleteHashAsync() { if (!IsHashValid) return; hashActionLoading = true; modalError = null; try { var result = await Api.DeleteRiskHashAsync(hash.Trim()); hash = string.Empty; Toasts.Success(result.Deleted ? "风险哈希已删除" : "该风险哈希不存在"); await RefreshStatusAsync(); } catch (ApiException ex) { modalError = ex.Message; } finally { hashActionLoading = false; } }
+    private async Task ClearHashesAsync() { if (!await JS.InvokeAsync<bool>("confirm", "确定要清空全部风险输入哈希吗？此操作不会删除审核记录。")) return; hashActionLoading = true; modalError = null; try { var result = await Api.ClearRiskHashesAsync(); Toasts.Success($"已清空 {result.Deleted} 个风险哈希"); await RefreshStatusAsync(); } catch (ApiException ex) { modalError = ex.Message; } finally { hashActionLoading = false; } }
+    private async Task UnbanAsync(RiskControlLogDto row) { if (!CanUnban(row) || !await JS.InvokeAsync<bool>("confirm", $"确认解封用户 {row.UserEmail}？")) return; try { var result = await Api.UnbanRiskUserAsync(row.UserId!.Value); foreach (var item in logsPage.Items.Where(x => x.UserId == row.UserId)) item.UserStatus = result.Status; Toasts.Success("用户已解封"); } catch (ApiException ex) { error = ex.Message; } }
+    private void OpenInputDetail(RiskControlLogDto row) => inputDetailRow = row;
+    private Task CloseInputDetail() { inputDetailRow = null; return Task.CompletedTask; }
+
+    private async Task ReloadLogsFromFirstPageAsync() { page = 1; await LoadLogsAsync(); }
+    private async Task ChangePageAsync(int value) { page = Math.Clamp(value, 1, TotalPages); await LoadLogsAsync(); }
+    private async Task PageSizeChangedAsync(ChangeEventArgs args) { if (int.TryParse(args.Value?.ToString(), out var value)) pageSize = value; await ReloadLogsFromFirstPageAsync(); }
+    private async Task ResultFilterChangedAsync(ChangeEventArgs args) { resultFilter = args.Value?.ToString() ?? string.Empty; await ReloadLogsFromFirstPageAsync(); }
+    private async Task GroupFilterChangedAsync(ChangeEventArgs args) { groupFilter = args.Value?.ToString() ?? string.Empty; await ReloadLogsFromFirstPageAsync(); }
+    private async Task EndpointFilterChangedAsync(ChangeEventArgs args) { endpointFilter = args.Value?.ToString() ?? string.Empty; await ReloadLogsFromFirstPageAsync(); }
+    private async Task FromChangedAsync(ChangeEventArgs args) { fromInput = args.Value?.ToString() ?? string.Empty; await ReloadLogsFromFirstPageAsync(); }
+    private async Task ToChangedAsync(ChangeEventArgs args) { toInput = args.Value?.ToString() ?? string.Empty; await ReloadLogsFromFirstPageAsync(); }
+    private async Task SearchKeyDownAsync(KeyboardEventArgs args) { if (args.Key == "Enter") await ReloadLogsFromFirstPageAsync(); }
+
+    private void StartAutoRefresh() { refreshCts?.Cancel(); refreshCts?.Dispose(); refreshCts = new(); _ = RunAutoRefreshAsync(refreshCts.Token); }
+    private async Task RunAutoRefreshAsync(CancellationToken token) { try { using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15)); while (await timer.WaitForNextTickAsync(token)) await InvokeAsync(RefreshStatusAsync); } catch (OperationCanceledException) { } }
+
+    private string RuntimeMode => string.IsNullOrWhiteSpace(status.Mode) ? config.Mode : status.Mode;
+    private bool RuntimeEnabled => status.RiskControlEnabled && status.Enabled && RuntimeMode != "off";
+    private string RuntimeTitle => RuntimeEnabled ? "已启用" : "未启用";
+    private string RuntimeBadge => !status.RiskControlEnabled ? "系统开关关闭" : RuntimeEnabled ? "运行中" : "已停用";
+    private string RuntimeTone => RuntimeEnabled ? "success" : "neutral";
+    private string ProxyValue => config.ProxyId?.ToString() ?? string.Empty;
+    private bool HasAuditInput => !string.IsNullOrWhiteSpace(testPrompt) || !string.IsNullOrWhiteSpace(testImageDataUrl);
+    private bool IsHashValid => hash.Trim().Length == 64 && hash.Trim().All(Uri.IsHexDigit);
+    private int TotalPages => Math.Max(1, logsPage.Pages > 0 ? logsPage.Pages : (int)Math.Ceiling(logsPage.Total / (double)Math.Max(1, pageSize)));
+    private List<string> InputApiKeys => ParseLines(newApiKeysText);
+    private List<RiskApiKeyStatusDto> EffectiveApiKeyRows { get { var configured = config.ApiKeyStatuses.Count > 0 ? config.ApiKeyStatuses : config.ApiKeyMasks.Select((mask, index) => new RiskApiKeyStatusDto { Index = index, Masked = mask, Configured = true }).ToList(); return configured.Concat(testedApiKeyStatuses).OrderBy(x => x.Configured ? 0 : 1).ThenBy(x => x.Index).ToList(); } }
+    private List<GroupDto> FilteredGroups => groups.Where(x => string.IsNullOrWhiteSpace(groupSearch) || x.Name.Contains(groupSearch, StringComparison.OrdinalIgnoreCase) || x.Platform.Contains(groupSearch, StringComparison.OrdinalIgnoreCase)).ToList();
+    private string ApiKeyHealthSummary { get { if (!config.ApiKeyConfigured) return config.Model; var rows = EffectiveApiKeyRows.Where(x => x.Configured).ToList(); if (rows.Count == 0) return config.Model; return string.Join(" · ", rows.GroupBy(x => x.Status).Select(x => $"{ApiKeyStatusLabel(x.Key)} {x.Count()}")); } }
+    private string ModelFilterSummary => config.ModelFilter.Type switch { "include" => $"仅 {config.ModelFilter.Models.Count} 个模型生效", "exclude" => $"排除 {config.ModelFilter.Models.Count} 个模型", _ => "全部模型生效" };
+    private string KeywordNoticeTone => config.Mode != "pre_block" ? "warning" : config.KeywordBlockingMode == "api_only" ? "info" : "success";
+    private string KeywordNoticeTitle => config.Mode != "pre_block" ? $"当前为“{ModeLabel(config.Mode)}”模式，关键词拦截不会生效" : config.KeywordBlockingMode switch { "keyword_only" => "仅关键词：未命中直接放行", "api_only" => "仅 API：关键词列表不会生效", _ => "关键词 + API：先匹配关键词，再调用上游" };
+    private string KeywordNoticeDescription => "关键词匹配忽略大小写；关键词拦截仅在前置拦截模式下生效。";
+
+    private static string ModeLabel(string value) => value switch { "pre_block" => "前置拦截", "observe" => "仅观察", "off" => "关闭", _ => value };
+    private static string ApiKeyStatusLabel(string value) => value switch { "ok" => "可用", "error" => "异常", "frozen" => "冻结", _ => "未测试" };
+    private static string ApiKeyTone(string value) => value switch { "ok" => "success", "error" => "danger", "frozen" => "warning", _ => "neutral" };
+    private static string ApiKeyMeta(RiskApiKeyStatusDto row) { var parts = new List<string> { $"失败 {row.FailureCount} 次" }; if (row.LastLatencyMs > 0) parts.Add($"{row.LastLatencyMs} ms"); if (row.LastHttpStatus > 0) parts.Add($"HTTP {row.LastHttpStatus}"); if (row.FrozenUntil.HasValue) parts.Add($"冻结至 {FormatDateTime(row.FrozenUntil)}"); else if (row.LastCheckedAt.HasValue) parts.Add($"检查于 {FormatDateTime(row.LastCheckedAt)}"); else parts.Add("尚未测试"); return string.Join(" · ", parts); }
+    private double KeyLoadWidth(long total) { var max = status.PreBlockApiKeyLoads.Count == 0 ? 1 : Math.Max(1, status.PreBlockApiKeyLoads.Max(x => x.Total)); return Math.Clamp(total * 100d / max, total > 0 ? 2 : 0, 100); }
+    private static string ResultLabel(RiskControlLogDto row) { if (row.Action == "cyber_policy") return "网络安全策略"; if (row.Action == "keyword_block") return "关键词拦截"; if (row.Action == "block") return "已拦截"; if (row.Action == "error" || !string.IsNullOrWhiteSpace(row.Error)) return "异常"; return row.Flagged ? "命中" : "未命中"; }
+    private static string ResultTone(RiskControlLogDto row) => row.Action is "block" or "keyword_block" or "cyber_policy" ? "danger" : row.Action == "error" || !string.IsNullOrWhiteSpace(row.Error) ? "warning" : row.Flagged ? "hit" : "success";
+    private static string ActionLabel(string value) => value switch { "block" => "拦截", "keyword_block" => "关键词拦截", "cyber_policy" => "网络安全策略", "error" => "异常", _ => string.IsNullOrWhiteSpace(value) ? "-" : value };
+    private static bool CanUnban(RiskControlLogDto row) => row.AutoBanned && row.UserId.HasValue && row.UserStatus == "disabled";
+    private static string InputSummary(RiskControlLogDto row) => !string.IsNullOrWhiteSpace(row.InputExcerpt) ? row.InputExcerpt : !string.IsNullOrWhiteSpace(row.Error) ? row.Error : "-";
+    private static string Dash(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
+    private static string Percent(double value) => $"{Math.Clamp(value, 0, 1) * 100:0.0}%";
+    private static double PercentWidth(double value) => Math.Clamp(value * 100, 0, 100);
+    private static string FormatDateTime(DateTimeOffset? value) => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+    private static long ParseGroupId(string value) => long.TryParse(value, out var id) ? id : 0;
+    private static long? ParseNullableLong(string? value) => long.TryParse(value, out var id) ? id : null;
+    private static DateTimeOffset? ParseLocalDateTime(string? value) => DateTimeOffset.TryParse(value, out var result) ? result : null;
+    private static List<string> ParseLines(string? value) => (value ?? string.Empty).Split(['\r', '\n', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    public ValueTask DisposeAsync() { refreshCts?.Cancel(); refreshCts?.Dispose(); return ValueTask.CompletedTask; }
+}

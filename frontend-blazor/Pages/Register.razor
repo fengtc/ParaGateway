@@ -1,0 +1,154 @@
+@page "/register"
+@layout AuthLayout
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject NavigationManager Navigation
+
+<PageTitle>注册 · ParaGateway</PageTitle>
+
+<div class="login-page">
+    <div class="login-brand">
+        <BrandMark />
+        <span><strong>ParaGateway</strong><small>Gateway</small></span>
+    </div>
+
+    <section class="login-panel">
+        @if (registered)
+        {
+            <header>
+                <h1>注册申请已提交</h1>
+                <p>管理员启用账户后即可登录。</p>
+            </header>
+            <div class="inline-alert success" role="status">
+                <Icon Name="circle-check" Size="18" />
+                <span>@model.Email</span>
+            </div>
+            <a class="button primary login-button" href="/login">返回登录</a>
+        }
+        else
+        {
+            <header>
+                <h1>创建账户</h1>
+                <p>注册后需要管理员启用。</p>
+            </header>
+
+            @if (error is not null)
+            {
+                <div class="inline-alert danger" role="alert">
+                    <Icon Name="alert" Size="18" />
+                    <span>@error</span>
+                </div>
+            }
+
+            <EditForm Model="model" OnValidSubmit="RegisterAsync" FormName="register">
+                <DataAnnotationsValidator />
+                <div class="form-field">
+                    <label for="register-name">显示名称</label>
+                    <InputText id="register-name" @bind-Value="model.DisplayName" autocomplete="name" />
+                    <ValidationMessage For="() => model.DisplayName" />
+                </div>
+                <div class="form-field">
+                    <label for="register-email">邮箱</label>
+                    <InputText id="register-email" @bind-Value="model.Email" type="email" autocomplete="username" />
+                    <ValidationMessage For="() => model.Email" />
+                </div>
+                <div class="form-field">
+                    <label for="register-password">密码</label>
+                    <div class="password-input">
+                        <InputText id="register-password" @bind-Value="model.Password" type="@(showPassword ? "text" : "password")" autocomplete="new-password" />
+                        <button type="button" class="icon-button" title="@(showPassword ? "隐藏密码" : "显示密码")" aria-label="@(showPassword ? "隐藏密码" : "显示密码")" @onclick="TogglePassword">
+                            <Icon Name="@(showPassword ? "eye-off" : "eye")" Size="17" />
+                        </button>
+                    </div>
+                    <ValidationMessage For="() => model.Password" />
+                </div>
+                <div class="form-field">
+                    <label for="register-confirm-password">确认密码</label>
+                    <InputText id="register-confirm-password" @bind-Value="model.ConfirmPassword" type="@(showPassword ? "text" : "password")" autocomplete="new-password" />
+                    <ValidationMessage For="() => model.ConfirmPassword" />
+                </div>
+                @if (emailVerifyEnabled)
+                {
+                    <div class="form-field">
+                        <label for="register-verify-code">邮箱验证码（启用邮箱验证时填写）</label>
+                        <InputText id="register-verify-code" @bind-Value="model.VerifyCode" autocomplete="one-time-code" />
+                    </div>
+                }
+                @if (!emailVerifyEnabled || string.IsNullOrWhiteSpace(model.VerifyCode))
+                {
+                    <CaptchaChallenge @ref="captcha" TurnstileEnabled="settings.TurnstileEnabled" TurnstileSiteKey="settings.TurnstileSiteKey" TencentEnabled="settings.TencentCaptchaEnabled" TencentAppId="settings.TencentCaptchaAppId" TencentRegion="settings.TencentCaptchaRegion" AliyunEnabled="settings.AliyunCaptchaEnabled" AliyunSceneId="settings.AliyunCaptchaSceneId" AliyunPrefix="settings.AliyunCaptchaPrefix" AliyunRegion="settings.AliyunCaptchaRegion" />
+                }
+                <button type="submit" class="button primary login-button" disabled="@submitting">
+                    @if (submitting)
+                    {
+                        <span class="spinner light"></span>
+                        <span>正在提交</span>
+                    }
+                    else
+                    {
+                        <span>注册</span>
+                    }
+                </button>
+            </EditForm>
+            <div class="auth-footer">已有账户？<a href="/login">登录</a><span> · </span><a href="/email-verify">获取验证码</a></div>
+        }
+    </section>
+</div>
+
+@code {
+    private readonly RegisterRequest model = new();
+    private bool submitting;
+    private bool showPassword;
+    private bool registered;
+    private string? error;
+    private bool emailVerifyEnabled;
+    private PublicSettingsDto settings = new();
+    private CaptchaChallenge? captcha;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            settings = await Api.GetPublicSettingsAsync();
+            emailVerifyEnabled = settings.EmailVerifyEnabled;
+        }
+        catch (ApiException)
+        {
+            emailVerifyEnabled = false;
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        if (Auth.IsAuthenticated)
+        {
+            Navigation.NavigateTo(Auth.User?.IsAdmin == true ? "/" : "/account", replace: true);
+        }
+    }
+
+    private void TogglePassword() => showPassword = !showPassword;
+
+    private async Task RegisterAsync()
+    {
+        submitting = true;
+        error = null;
+        try
+        {
+            var proof = emailVerifyEnabled && !string.IsNullOrWhiteSpace(model.VerifyCode)
+                ? null
+                : captcha is null ? null : await captcha.GetProofAsync();
+            model.ApplyCaptcha(proof);
+            _ = await Api.RegisterAsync(model);
+            registered = true;
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            if (!registered && captcha is not null) await captcha.ResetAsync();
+            submitting = false;
+        }
+    }
+}

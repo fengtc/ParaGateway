@@ -1,0 +1,236 @@
+@page "/affiliate"
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>邀请返利 · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>邀请返利</h1>
+        <p>分享专属邀请码，查看返利额度和受邀用户，并将可用额度转入账户余额。</p>
+    </div>
+    <button type="button" class="icon-button" title="刷新" aria-label="刷新邀请返利" disabled="@loading" @onclick="LoadAsync">
+        <Icon Name="refresh" Size="17" />
+    </button>
+</div>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入邀请信息" />
+}
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else if (detail is not null)
+{
+    <section class="metrics-grid affiliate-metrics">
+        <div class="metric-card rate-card">
+            <span class="metric-label"><Icon Name="percent" Size="15" />返利比例</span>
+            <strong>@FormatRate(detail.EffectiveRebateRatePercent)<small>%</small></strong>
+            <span class="metric-hint">受邀用户产生符合条件的消费时，按此比例获得返利。</span>
+        </div>
+        <div class="metric-card">
+            <span class="metric-label">邀请人数</span>
+            <strong>@detail.AffCount.ToString("N0")</strong>
+        </div>
+        <div class="metric-card available-card">
+            <span class="metric-label">可转额度</span>
+            <strong>@FormatCurrency(detail.AffQuota)</strong>
+        </div>
+        <div class="metric-card">
+            <span class="metric-label">累计返利</span>
+            <strong>@FormatCurrency(detail.AffHistoryQuota)</strong>
+            @if (detail.AffFrozenQuota > 0)
+            {
+                <span class="metric-hint frozen">冻结中：@FormatCurrency(detail.AffFrozenQuota)</span>
+            }
+        </div>
+    </section>
+
+    <section class="content-section affiliate-share-card">
+        <div class="section-header">
+            <div>
+                <h2>专属邀请</h2>
+                <p>复制邀请码或完整注册链接发送给新用户。</p>
+            </div>
+        </div>
+
+        <div class="affiliate-share-grid">
+            <div class="affiliate-copy-field">
+                <label>我的邀请码</label>
+                <div>
+                    <code>@detail.AffCode</code>
+                    <button type="button" class="button secondary small" disabled="@string.IsNullOrWhiteSpace(detail.AffCode)" @onclick="CopyCodeAsync">
+                        <Icon Name="copy" Size="15" />复制邀请码
+                    </button>
+                </div>
+            </div>
+            <div class="affiliate-copy-field">
+                <label>邀请链接</label>
+                <div>
+                    <code title="@InviteLink">@InviteLink</code>
+                    <button type="button" class="button secondary small" disabled="@string.IsNullOrWhiteSpace(InviteLink)" @onclick="CopyInviteLinkAsync">
+                        <Icon Name="copy" Size="15" />复制链接
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="affiliate-tips">
+            <strong>使用说明</strong>
+            <ol>
+                <li>新用户通过邀请链接注册，或注册时填写你的邀请码。</li>
+                <li>符合返利规则的消费会按 @FormatRate(detail.EffectiveRebateRatePercent)% 计入返利。</li>
+                <li>可用返利可以随时转入账户余额。</li>
+                @if (detail.AffFrozenQuota > 0)
+                {
+                    <li>冻结返利会在系统设定的冻结期结束后自动转为可用。</li>
+                }
+            </ol>
+        </div>
+    </section>
+
+    <section class="content-section affiliate-transfer-card">
+        <div class="section-header">
+            <div>
+                <h2>转入余额</h2>
+                <p>将全部可用返利额度一次性转入当前账户余额。</p>
+            </div>
+            <button type="button" class="button primary" disabled="@(transferring || detail.AffQuota <= 0)" @onclick="TransferAsync">
+                @if (transferring)
+                {
+                    <span class="spinner light"></span>
+                }
+                <Icon Name="dollar" Size="16" />@(transferring ? "转入中…" : "转入余额")
+            </button>
+        </div>
+        @if (detail.AffQuota <= 0)
+        {
+            <div class="inline-alert warning"><Icon Name="alert" Size="17" /><span>当前没有可转入的返利额度。</span></div>
+        }
+    </section>
+
+    <section class="content-section">
+        <div class="section-header">
+            <div>
+                <h2>受邀用户</h2>
+                <p>最近通过你的邀请码建立邀请关系的用户及累计返利。</p>
+            </div>
+            <span class="status-badge">@detail.Invitees.Count.ToString("N0") 人</span>
+        </div>
+
+        @if (detail.Invitees.Count == 0)
+        {
+            <EmptyState Title="暂无受邀用户" Description="分享上方邀请链接，成功邀请后会显示在这里。" />
+        }
+        else
+        {
+            <div class="affiliate-table-wrap">
+                <table class="affiliate-table">
+                    <thead>
+                        <tr>
+                            <th>邮箱</th>
+                            <th>用户名</th>
+                            <th class="number-cell">累计返利</th>
+                            <th>加入时间</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var invitee in detail.Invitees)
+                        {
+                            <tr>
+                                <td>@Display(invitee.Email)</td>
+                                <td>@Display(invitee.Username)</td>
+                                <td class="number-cell rebate-value">@FormatCurrency(invitee.TotalRebate)</td>
+                                <td>@FormatDateTime(invitee.CreatedAt)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private UserAffiliateDetailDto? detail;
+    private bool loading = true;
+    private bool transferring;
+    private string? error;
+
+    private string InviteLink => detail is null || string.IsNullOrWhiteSpace(detail.AffCode)
+        ? string.Empty
+        : $"{Navigation.BaseUri.TrimEnd('/')}/register?aff={Uri.EscapeDataString(detail.AffCode)}";
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            detail = await Api.GetAffiliateDetailAsync();
+            detail.Invitees ??= [];
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task CopyCodeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(detail?.AffCode)) return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", detail.AffCode);
+        Toasts.Success("邀请码已复制");
+    }
+
+    private async Task CopyInviteLinkAsync()
+    {
+        if (string.IsNullOrWhiteSpace(InviteLink)) return;
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", InviteLink);
+        Toasts.Success("邀请链接已复制");
+    }
+
+    private async Task TransferAsync()
+    {
+        if (detail is null || detail.AffQuota <= 0 || transferring) return;
+
+        transferring = true;
+        error = null;
+        try
+        {
+            var result = await Api.TransferAffiliateQuotaAsync();
+            Toasts.Success($"已将 {FormatCurrency(result.TransferredQuota)} 转入余额");
+            await Task.WhenAll(LoadAsync(), RefreshAuthQuietlyAsync());
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            transferring = false;
+        }
+    }
+
+    private async Task RefreshAuthQuietlyAsync()
+    {
+        try { await Auth.RefreshAsync(); }
+        catch (ApiException) { }
+    }
+
+    private static string FormatRate(double value) => Math.Round(value, 2).ToString("0.##");
+    private static string FormatCurrency(double value) => value > 0 && value < 0.01 ? $"${value:0.000000}" : $"${value:0.00}";
+    private static string Display(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
+    private static string FormatDateTime(DateTimeOffset? value) => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-";
+}

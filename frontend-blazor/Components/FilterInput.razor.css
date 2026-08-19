@@ -1,0 +1,2 @@
+.filter-input { display: grid; gap: 5px; color: var(--muted); font-size: .61rem; }
+.filter-input input { width: 100%; min-width: 0; min-height: 35px; padding: 6px 8px; color: var(--ink); background: var(--surface); border: 1px solid #cad3ce; border-radius: 6px; font: inherit; font-size: .68rem; }

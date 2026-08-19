@@ -1,0 +1,159 @@
+@page "/admin/models"
+@using Microsoft.AspNetCore.Components
+@inject ApiClient Api
+@inject ToastService Toasts
+
+<PageTitle>账号模型 · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>账号模型</h1>
+        <p>查看官方 Go 网关从每个上游账号发现的可用模型，并按账号刷新上游目录。</p>
+    </div>
+    <button type="button" class="button secondary" disabled="@(loading || string.IsNullOrWhiteSpace(accountId))" @onclick="SyncAsync">
+        <Icon Name="refresh" Size="17" /> 同步上游模型
+    </button>
+</div>
+
+<div class="toolbar">
+    <div class="filter-field">
+        <label for="model-account">上游账号</label>
+        <select id="model-account" value="@accountId" @onchange="AccountChangedAsync">
+            <option value="">请选择账号</option>
+            @foreach (var account in accounts)
+            {
+                <option value="@account.Id">@account.Name · @account.Platform</option>
+            }
+        </select>
+    </div>
+    <div class="search-box">
+        <Icon Name="search" Size="17" />
+        <input value="@search" @oninput="SearchChanged" placeholder="搜索模型" aria-label="搜索模型" />
+    </div>
+    <span class="result-count">@FilteredModels.Count 个模型</span>
+    <button type="button" class="icon-button" title="刷新模型" aria-label="刷新模型" disabled="@loading" @onclick="LoadModelsAsync">
+        <Icon Name="refresh" Size="17" />
+    </button>
+</div>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入账号模型" />
+}
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else if (string.IsNullOrWhiteSpace(accountId))
+{
+    <EmptyState Title="请选择上游账号" Description="官方模型目录按账号返回，请先选择一个账号。" />
+}
+else if (FilteredModels.Count == 0)
+{
+    <EmptyState Title="没有可用模型" Description="可以点击“同步上游模型”重新读取账号支持的模型。" />
+}
+else
+{
+    <DxGrid Data="@FilteredModels" KeyFieldName="Id" ShowFilterRow="true" ShowSearchPanel="true" PageSize="25" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer">
+        <Columns>
+            <DxGridDataColumn FieldName="Id" Caption="模型 ID" MinWidth="220" />
+            <DxGridDataColumn FieldName="DisplayName" Caption="显示名称" MinWidth="180" />
+            <DxGridDataColumn FieldName="OwnedBy" Caption="归属平台" Width="150" />
+        </Columns>
+    </DxGrid>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "account")]
+    public string? AccountQuery { get; set; }
+
+    private List<AccountDto> accounts = [];
+    private List<AvailableModelDto> models = [];
+    private string accountId = string.Empty;
+    private string search = string.Empty;
+    private string? error;
+    private bool loading = true;
+
+    private List<AvailableModelDto> FilteredModels => models
+        .Where(m => string.IsNullOrWhiteSpace(search)
+            || m.Id.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || m.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || m.OwnedBy.Contains(search, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            accounts = await Api.GetAccountsAsync();
+            accountId = !string.IsNullOrWhiteSpace(AccountQuery) && accounts.Any(a => a.Id == AccountQuery)
+                ? AccountQuery!
+                : accountId != string.Empty && accounts.Any(a => a.Id == accountId)
+                    ? accountId
+                    : accounts.FirstOrDefault()?.Id ?? string.Empty;
+            await LoadModelsAsync();
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+            loading = false;
+        }
+    }
+
+    private async Task LoadModelsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(accountId))
+        {
+            models = [];
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        error = null;
+        try
+        {
+            models = await Api.GetAccountModelsAsync(accountId);
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task AccountChangedAsync(ChangeEventArgs args)
+    {
+        accountId = args.Value?.ToString() ?? string.Empty;
+        await LoadModelsAsync();
+    }
+
+    private void SearchChanged(ChangeEventArgs args) => search = args.Value?.ToString() ?? string.Empty;
+
+    private async Task SyncAsync()
+    {
+        if (string.IsNullOrWhiteSpace(accountId)) return;
+        loading = true;
+        error = null;
+        try
+        {
+            models = await Api.SyncAccountModelsAsync(accountId);
+            Toasts.Success("上游模型已同步");
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+}

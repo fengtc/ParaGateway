@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="ParaGateway">
+  <title>ParaGateway</title>
+  <rect x="1" y="1" width="62" height="62" rx="14" fill="#17201d"/>
+  <path d="M14 45V25c0-6.075 4.925-11 11-11h13c6.075 0 11 4.925 11 11v5" fill="none" stroke="#79ddb0" stroke-width="5" stroke-linecap="round"/>
+  <path d="M14 45h35" fill="none" stroke="#e4fff2" stroke-width="5" stroke-linecap="round"/>
+  <path d="M27 25v20" fill="none" stroke="#79ddb0" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="50" cy="45" r="4" fill="#ffb454"/>
+</svg>

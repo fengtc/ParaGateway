@@ -1,0 +1,24 @@
+<div class="settings-field @(Full ? "settings-field-full" : null)">
+    <label class="settings-field-label">@Label</label>
+    <div class="settings-field-control">
+        @ChildContent
+    </div>
+    @if (!string.IsNullOrWhiteSpace(Hint))
+    {
+        <p class="settings-field-hint">@Hint</p>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Hint { get; set; }
+
+    [Parameter]
+    public bool Full { get; set; }
+
+    [Parameter, EditorRequired]
+    public RenderFragment ChildContent { get; set; } = default!;
+}

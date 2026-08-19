@@ -1,0 +1,29 @@
+@using ParaGateway.Frontend.Models
+
+<div class="quota-section">
+    <div class="quota-heading"><h3>@Title</h3><p>@Hint</p></div>
+    <div class="quota-table-wrap">
+        <table class="quota-table">
+            <thead><tr><th>平台</th><th>每日</th><th>每周</th><th>每月</th></tr></thead>
+            <tbody>
+                @foreach (var platform in Platforms)
+                {
+                    var quota = Quotas[platform];
+                    <tr @key="platform">
+                        <td><code>@platform</code></td>
+                        <td><InputNumber @bind-Value="quota.Daily" min="0" step="0.01" placeholder="不限制" /></td>
+                        <td><InputNumber @bind-Value="quota.Weekly" min="0" step="0.01" placeholder="不限制" /></td>
+                        <td><InputNumber @bind-Value="quota.Monthly" min="0" step="0.01" placeholder="不限制" /></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private static readonly string[] Platforms = ["anthropic", "openai", "gemini", "antigravity", "grok"];
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string Hint { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public Dictionary<string, PlatformQuotaLimitsDto> Quotas { get; set; } = [];
+}

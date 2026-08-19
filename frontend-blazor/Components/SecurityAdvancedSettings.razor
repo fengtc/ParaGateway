@@ -1,0 +1,240 @@
+@using ParaGateway.Frontend.Models
+
+<section class="settings-card security-advanced-card">
+    <header>
+        <div>
+            <h2>API Key 来源与验证码</h2>
+            <p>与官方后台一致：可选择一种验证码服务，并控制反向代理来源 IP 的信任规则。</p>
+        </div>
+    </header>
+
+    <div class="settings-grid">
+        <ToggleField Label="信任代理转发 IP" Hint="启用后，API Key ACL 会按配置的请求头解析真实客户端 IP">
+            <InputCheckbox @bind-Value="Settings.ApiKeyAclTrustForwardedIp" />
+        </ToggleField>
+        <Field Label="客户端 IP 请求头" Hint="每行或逗号分隔一个请求头，按顺序尝试" Full="true">
+            <InputTextArea @bind-Value="ForwardedHeadersText" rows="3" placeholder="CF-Connecting-IP&#10;X-Forwarded-For&#10;X-Real-IP" />
+        </Field>
+        <Field Label="验证码提供商">
+            <InputSelect @bind-Value="CaptchaProvider">
+                <option value="none">不启用</option>
+                <option value="turnstile">Cloudflare Turnstile</option>
+                <option value="tencent">腾讯云验证码</option>
+                <option value="aliyun">阿里云验证码 2.0</option>
+            </InputSelect>
+        </Field>
+    </div>
+
+    @if (CaptchaProvider == "turnstile")
+    {
+        <div class="security-provider-grid">
+            <Field Label="Turnstile Site Key"><InputText @bind-Value="Settings.TurnstileSiteKey" /></Field>
+            <Field Label="Turnstile Secret Key" Hint="@(Settings.TurnstileSecretKeyConfigured ? "已配置；留空保留原值" : "尚未配置")">
+                <input type="password" autocomplete="new-password" @bind="Secrets.TurnstileSecretKey" />
+            </Field>
+        </div>
+    }
+    else if (CaptchaProvider == "tencent")
+    {
+        <div class="security-provider-grid">
+            <Field Label="服务区域"><InputSelect @bind-Value="Settings.TencentCaptchaRegion"><option value="cn">中国大陆</option><option value="intl">国际站</option></InputSelect></Field>
+            <Field Label="CaptchaAppId"><InputText @bind-Value="Settings.TencentCaptchaAppId" /></Field>
+            <Field Label="App Secret Key" Hint="@(Settings.TencentCaptchaAppSecretKeyConfigured ? "已配置；留空保留原值" : "尚未配置")"><input type="password" autocomplete="new-password" @bind="Secrets.TencentCaptchaAppSecretKey" /></Field>
+            <Field Label="Cloud SecretId" Hint="@(Settings.TencentCaptchaCloudSecretIdConfigured ? "已配置；留空保留原值" : "尚未配置")"><input type="password" autocomplete="new-password" @bind="Secrets.TencentCaptchaCloudSecretId" /></Field>
+            <Field Label="Cloud SecretKey" Hint="@(Settings.TencentCaptchaCloudSecretKeyConfigured ? "已配置；留空保留原值" : "尚未配置")"><input type="password" autocomplete="new-password" @bind="Secrets.TencentCaptchaCloudSecretKey" /></Field>
+        </div>
+    }
+    else if (CaptchaProvider == "aliyun")
+    {
+        <div class="security-provider-grid">
+            <Field Label="服务区域"><InputSelect @bind-Value="Settings.AliyunCaptchaRegion"><option value="cn">中国大陆</option><option value="sgp">新加坡</option></InputSelect></Field>
+            <Field Label="身份标"><InputText @bind-Value="Settings.AliyunCaptchaPrefix" /></Field>
+            <Field Label="场景 ID"><InputText @bind-Value="Settings.AliyunCaptchaSceneId" /></Field>
+            <Field Label="AccessKey ID"><InputText @bind-Value="Settings.AliyunCaptchaAccessKeyId" /></Field>
+            <Field Label="AccessKey Secret" Hint="@(Settings.AliyunCaptchaAccessKeySecretConfigured ? "已配置；留空保留原值" : "尚未配置")"><input type="password" autocomplete="new-password" @bind="Secrets.AliyunCaptchaAccessKeySecret" /></Field>
+        </div>
+    }
+</section>
+
+<section class="settings-card security-advanced-card">
+    <header><div><h2>第三方登录</h2><p>配置官方登录来源。所有 Client Secret 留空时保留服务端已有值。</p></div></header>
+
+    <div class="security-provider-block">
+        <ToggleField Label="LinuxDo OAuth" Hint="@(Settings.LinuxDoConnectClientSecretConfigured ? "Client Secret 已配置" : "Client Secret 未配置")"><InputCheckbox @bind-Value="Settings.LinuxDoConnectEnabled" /></ToggleField>
+        @if (Settings.LinuxDoConnectEnabled)
+        {
+            <div class="security-provider-grid">
+                <Field Label="Client ID"><InputText @bind-Value="Settings.LinuxDoConnectClientId" /></Field>
+                <Field Label="Client Secret" Hint="留空保留原值"><input type="password" autocomplete="new-password" @bind="Secrets.LinuxDoConnectClientSecret" /></Field>
+                <Field Label="后端回调地址" Full="true"><InputText @bind-Value="Settings.LinuxDoConnectRedirectUrl" /></Field>
+            </div>
+        }
+    </div>
+
+    <div class="security-provider-block">
+        <ToggleField Label="GitHub OAuth" Hint="@(Settings.GitHubOAuthClientSecretConfigured ? "Client Secret 已配置" : "Client Secret 未配置")"><InputCheckbox @bind-Value="Settings.GitHubOAuthEnabled" /></ToggleField>
+        @if (Settings.GitHubOAuthEnabled)
+        {
+            <div class="security-provider-grid">
+                <Field Label="Client ID"><InputText @bind-Value="Settings.GitHubOAuthClientId" /></Field>
+                <Field Label="Client Secret" Hint="留空保留原值"><input type="password" autocomplete="new-password" @bind="Secrets.GitHubOAuthClientSecret" /></Field>
+                <Field Label="后端回调地址"><InputText @bind-Value="Settings.GitHubOAuthRedirectUrl" /></Field>
+                <Field Label="前端回调地址"><InputText @bind-Value="Settings.GitHubOAuthFrontendRedirectUrl" /></Field>
+            </div>
+        }
+    </div>
+
+    <div class="security-provider-block">
+        <ToggleField Label="Google OAuth" Hint="@(Settings.GoogleOAuthClientSecretConfigured ? "Client Secret 已配置" : "Client Secret 未配置")"><InputCheckbox @bind-Value="Settings.GoogleOAuthEnabled" /></ToggleField>
+        @if (Settings.GoogleOAuthEnabled)
+        {
+            <div class="security-provider-grid">
+                <Field Label="Client ID"><InputText @bind-Value="Settings.GoogleOAuthClientId" /></Field>
+                <Field Label="Client Secret" Hint="留空保留原值"><input type="password" autocomplete="new-password" @bind="Secrets.GoogleOAuthClientSecret" /></Field>
+                <Field Label="后端回调地址"><InputText @bind-Value="Settings.GoogleOAuthRedirectUrl" /></Field>
+                <Field Label="前端回调地址"><InputText @bind-Value="Settings.GoogleOAuthFrontendRedirectUrl" /></Field>
+            </div>
+        }
+    </div>
+</section>
+
+<section class="settings-card security-advanced-card">
+    <header><div><h2>微信登录</h2><p>支持开放平台 PC 应用、公众号和移动应用；公众号与移动应用不能同时启用。</p></div></header>
+    <ToggleField Label="启用微信登录" Hint="开启后至少配置一种应用模式"><InputCheckbox @bind-Value="Settings.WeChatConnectEnabled" /></ToggleField>
+    @if (Settings.WeChatConnectEnabled)
+    {
+        <div class="security-provider-grid">
+            <ToggleField Label="开放平台 PC 应用" Hint="使用 snsapi_login"><InputCheckbox @bind-Value="Settings.WeChatConnectOpenEnabled" /></ToggleField>
+            <ToggleField Label="微信公众号" Hint="使用 snsapi_userinfo"><InputCheckbox @bind-Value="WeChatMpEnabled" /></ToggleField>
+            <ToggleField Label="移动应用" Hint="与公众号模式互斥"><InputCheckbox @bind-Value="WeChatMobileEnabled" /></ToggleField>
+            <Field Label="授权 Scope"><InputText @bind-Value="Settings.WeChatConnectScopes" /></Field>
+            <Field Label="后端回调地址"><InputText @bind-Value="Settings.WeChatConnectRedirectUrl" /></Field>
+            <Field Label="前端回调地址"><InputText @bind-Value="Settings.WeChatConnectFrontendRedirectUrl" /></Field>
+        </div>
+
+        @if (Settings.WeChatConnectOpenEnabled)
+        {
+            <div class="security-mode-card"><h3>开放平台 PC 应用</h3><div class="security-provider-grid"><Field Label="App ID"><InputText @bind-Value="Settings.WeChatConnectOpenAppId" /></Field><Field Label="App Secret" Hint="@(Settings.WeChatConnectOpenAppSecretConfigured ? "已配置；留空保留原值" : "尚未配置")"><input type="password" autocomplete="new-password" @bind="Secrets.WeChatConnectOpenAppSecret" /></Field></div></div>
+        }
+        @if (Settings.WeChatConnectMpEnabled)
+        {
+            <div class="security-mode-card"><h3>微信公众号</h3><div class="security-provider-grid"><Field Label="App ID"><InputText @bind-Value="Settings.WeChatConnectMpAppId" /></Field><Field Label="App Secret" Hint="@(Settings.WeChatConnectMpAppSecretConfigured ? "已配置；留空保留原值" : "尚未配置")"><input type="password" autocomplete="new-password" @bind="Secrets.WeChatConnectMpAppSecret" /></Field></div></div>
+        }
+        @if (Settings.WeChatConnectMobileEnabled)
+        {
+            <div class="security-mode-card"><h3>移动应用</h3><div class="security-provider-grid"><Field Label="App ID"><InputText @bind-Value="Settings.WeChatConnectMobileAppId" /></Field><Field Label="App Secret" Hint="@(Settings.WeChatConnectMobileAppSecretConfigured ? "已配置；留空保留原值" : "尚未配置")"><input type="password" autocomplete="new-password" @bind="Secrets.WeChatConnectMobileAppSecret" /></Field></div></div>
+        }
+    }
+</section>
+
+<section class="settings-card security-advanced-card">
+    <header><div><h2>钉钉登录</h2><p>支持企业限定、免注册进入以及企业属性同步。</p></div></header>
+    <ToggleField Label="启用钉钉登录" Hint="@(Settings.DingTalkConnectClientSecretConfigured ? "Client Secret 已配置" : "Client Secret 未配置")"><InputCheckbox @bind-Value="Settings.DingTalkConnectEnabled" /></ToggleField>
+    @if (Settings.DingTalkConnectEnabled)
+    {
+        <div class="security-provider-grid">
+            <Field Label="Client ID"><InputText @bind-Value="Settings.DingTalkConnectClientId" /></Field>
+            <Field Label="Client Secret" Hint="留空保留原值"><input type="password" autocomplete="new-password" @bind="Secrets.DingTalkConnectClientSecret" /></Field>
+            <Field Label="回调地址"><InputText @bind-Value="Settings.DingTalkConnectRedirectUrl" /></Field>
+            <Field Label="企业限制"><InputSelect @bind-Value="Settings.DingTalkConnectCorpRestrictionPolicy"><option value="none">不限制企业</option><option value="internal_only">仅允许指定企业</option></InputSelect></Field>
+        </div>
+        @if (Settings.DingTalkConnectCorpRestrictionPolicy == "internal_only")
+        {
+            <div class="security-provider-grid">
+                <Field Label="内部企业 Corp ID"><InputText @bind-Value="Settings.DingTalkConnectInternalCorpId" /></Field>
+                <ToggleField Label="绕过普通注册限制" Hint="企业成员首次登录可直接创建账号"><InputCheckbox @bind-Value="Settings.DingTalkConnectBypassRegistration" /></ToggleField>
+                <ToggleField Label="同步企业邮箱" Hint="写入用户扩展属性"><InputCheckbox @bind-Value="Settings.DingTalkConnectSyncCorpEmail" /></ToggleField>
+                <ToggleField Label="同步显示名称" Hint="写入用户扩展属性"><InputCheckbox @bind-Value="Settings.DingTalkConnectSyncDisplayName" /></ToggleField>
+                <ToggleField Label="同步部门" Hint="写入用户扩展属性"><InputCheckbox @bind-Value="Settings.DingTalkConnectSyncDept" /></ToggleField>
+                @if (Settings.DingTalkConnectSyncCorpEmail) { <Field Label="邮箱属性 Key"><InputText @bind-Value="Settings.DingTalkConnectSyncCorpEmailAttrKey" /></Field><Field Label="邮箱属性名称"><InputText @bind-Value="Settings.DingTalkConnectSyncCorpEmailAttrName" /></Field> }
+                @if (Settings.DingTalkConnectSyncDisplayName) { <Field Label="姓名属性 Key"><InputText @bind-Value="Settings.DingTalkConnectSyncDisplayNameAttrKey" /></Field><Field Label="姓名属性名称"><InputText @bind-Value="Settings.DingTalkConnectSyncDisplayNameAttrName" /></Field> }
+                @if (Settings.DingTalkConnectSyncDept) { <Field Label="部门属性 Key"><InputText @bind-Value="Settings.DingTalkConnectSyncDeptAttrKey" /></Field><Field Label="部门属性名称"><InputText @bind-Value="Settings.DingTalkConnectSyncDeptAttrName" /></Field> }
+            </div>
+        }
+    }
+</section>
+
+<section class="settings-card security-advanced-card">
+    <header><div><h2>通用 OIDC</h2><p>支持 Discovery 自动发现和手工端点配置，可校验 ID Token、PKCE 与用户字段 JSON Path。</p></div></header>
+    <ToggleField Label="启用 OIDC" Hint="@(Settings.OidcConnectClientSecretConfigured ? "Client Secret 已配置" : "Client Secret 未配置")"><InputCheckbox @bind-Value="Settings.OidcConnectEnabled" /></ToggleField>
+    @if (Settings.OidcConnectEnabled)
+    {
+        <div class="security-provider-grid">
+            <Field Label="提供商名称"><InputText @bind-Value="Settings.OidcConnectProviderName" /></Field>
+            <Field Label="Client ID"><InputText @bind-Value="Settings.OidcConnectClientId" /></Field>
+            <Field Label="Client Secret" Hint="留空保留原值"><input type="password" autocomplete="new-password" @bind="Secrets.OidcConnectClientSecret" /></Field>
+            <Field Label="Issuer URL"><InputText @bind-Value="Settings.OidcConnectIssuerUrl" /></Field>
+            <Field Label="Discovery URL"><InputText @bind-Value="Settings.OidcConnectDiscoveryUrl" /></Field>
+            <Field Label="Authorize URL"><InputText @bind-Value="Settings.OidcConnectAuthorizeUrl" /></Field>
+            <Field Label="Token URL"><InputText @bind-Value="Settings.OidcConnectTokenUrl" /></Field>
+            <Field Label="UserInfo URL"><InputText @bind-Value="Settings.OidcConnectUserinfoUrl" /></Field>
+            <Field Label="JWKS URL"><InputText @bind-Value="Settings.OidcConnectJwksUrl" /></Field>
+            <Field Label="Scopes"><InputText @bind-Value="Settings.OidcConnectScopes" /></Field>
+            <Field Label="后端回调地址"><InputText @bind-Value="Settings.OidcConnectRedirectUrl" /></Field>
+            <Field Label="前端回调地址"><InputText @bind-Value="Settings.OidcConnectFrontendRedirectUrl" /></Field>
+            <Field Label="Token 认证方式"><InputSelect @bind-Value="Settings.OidcConnectTokenAuthMethod"><option value="client_secret_post">client_secret_post</option><option value="client_secret_basic">client_secret_basic</option><option value="none">none</option></InputSelect></Field>
+            <Field Label="允许的签名算法"><InputText @bind-Value="Settings.OidcConnectAllowedSigningAlgs" /></Field>
+            <Field Label="时钟偏差（秒）"><InputNumber @bind-Value="Settings.OidcConnectClockSkewSeconds" /></Field>
+            <ToggleField Label="使用 PKCE" Hint="推荐公开客户端启用"><InputCheckbox @bind-Value="Settings.OidcConnectUsePkce" /></ToggleField>
+            <ToggleField Label="校验 ID Token" Hint="校验签名、issuer、audience 和时间声明"><InputCheckbox @bind-Value="Settings.OidcConnectValidateIdToken" /></ToggleField>
+            <ToggleField Label="要求邮箱已验证" Hint="拒绝 email_verified 不为 true 的账号"><InputCheckbox @bind-Value="Settings.OidcConnectRequireEmailVerified" /></ToggleField>
+            <Field Label="邮箱 JSON Path"><InputText @bind-Value="Settings.OidcConnectUserinfoEmailPath" /></Field>
+            <Field Label="用户 ID JSON Path"><InputText @bind-Value="Settings.OidcConnectUserinfoIdPath" /></Field>
+            <Field Label="用户名 JSON Path"><InputText @bind-Value="Settings.OidcConnectUserinfoUsernamePath" /></Field>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public AdminSettingsDto Settings { get; set; } = default!;
+    [Parameter, EditorRequired] public AdminSecuritySecretInputs Secrets { get; set; } = default!;
+
+    private string CaptchaProvider
+    {
+        get => Settings.TurnstileEnabled ? "turnstile" : Settings.TencentCaptchaEnabled ? "tencent" : Settings.AliyunCaptchaEnabled ? "aliyun" : "none";
+        set
+        {
+            Settings.TurnstileEnabled = value == "turnstile";
+            Settings.TencentCaptchaEnabled = value == "tencent";
+            Settings.AliyunCaptchaEnabled = value == "aliyun";
+        }
+    }
+
+    private string ForwardedHeadersText
+    {
+        get => string.Join(Environment.NewLine, Settings.ForwardedClientIpHeaders);
+        set => Settings.ForwardedClientIpHeaders = value
+            .Split([',', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+    }
+
+    private bool WeChatMpEnabled
+    {
+        get => Settings.WeChatConnectMpEnabled;
+        set
+        {
+            Settings.WeChatConnectMpEnabled = value;
+            if (value) Settings.WeChatConnectMobileEnabled = false;
+            UpdateWeChatMode();
+        }
+    }
+
+    private bool WeChatMobileEnabled
+    {
+        get => Settings.WeChatConnectMobileEnabled;
+        set
+        {
+            Settings.WeChatConnectMobileEnabled = value;
+            if (value) Settings.WeChatConnectMpEnabled = false;
+            UpdateWeChatMode();
+        }
+    }
+
+    private void UpdateWeChatMode()
+    {
+        Settings.WeChatConnectMode = Settings.WeChatConnectMpEnabled ? "mp" : Settings.WeChatConnectMobileEnabled ? "mobile" : "open";
+        Settings.WeChatConnectScopes = Settings.WeChatConnectMode switch { "mp" => "snsapi_userinfo", "mobile" => string.Empty, _ => "snsapi_login" };
+    }
+}

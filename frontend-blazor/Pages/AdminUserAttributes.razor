@@ -1,0 +1,164 @@
+@page "/admin/user-attributes"
+@using System.Text.Json
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>用户自定义属性 · ParaGateway</PageTitle>
+
+<div class="page-header">
+    <div><h1>用户自定义属性</h1><p>定义用户资料字段，并编辑指定用户的属性值。</p></div>
+    <button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 新建属性</button>
+</div>
+
+@if (error is not null) { <ErrorState Message="@error" OnRetry="LoadAsync" /> }
+else
+{
+    <section class="content-section">
+        <div class="section-header"><div><h2>属性定义</h2><p>字段由 Go 后端校验并持久化。</p></div><button type="button" class="icon-button" title="刷新" aria-label="刷新" @onclick="LoadAsync" disabled="@loading"><Icon Name="refresh" Size="17" /></button></div>
+        @if (loading) { <LoadingState Text="正在载入属性定义" /> }
+        else if (definitions.Count == 0) { <EmptyState Title="暂无自定义属性" Description="创建属性后可以在用户资料中维护。" /> }
+        else
+        {
+            <div class="data-table-wrap"><table class="data-table"><thead><tr><th>名称</th><th>键</th><th>类型</th><th>必填</th><th>状态</th><th class="actions-column">操作</th></tr></thead><tbody>
+                @foreach (var item in definitions)
+                {
+                    <tr @key="item.Id"><td><span class="primary-cell">@item.Name</span><small>@item.Description</small></td><td><code>@item.Key</code></td><td>@item.Type</td><td>@(item.Required ? "是" : "否")</td><td><span class="status-badge @(item.Enabled ? "success" : "neutral")">@(item.Enabled ? "启用" : "停用")</span></td><td class="actions-cell"><button type="button" class="icon-button" title="编辑" aria-label="编辑" @onclick="() => OpenEdit(item)"><Icon Name="pencil" Size="16" /></button><button type="button" class="icon-button danger-text" title="删除" aria-label="删除" @onclick="() => DeleteAsync(item)"><Icon Name="trash" Size="16" /></button></td></tr>
+                }
+            </tbody></table></div>
+        }
+    </section>
+
+    <section class="content-section">
+        <div class="section-header"><div><h2>用户属性值</h2><p>选择用户后编辑已启用字段。</p></div></div>
+        <div class="form-grid"><div class="form-field"><label for="attribute-user">用户</label><select id="attribute-user" value="@selectedUserId" @onchange="UserChangedAsync"><option value="">请选择用户</option>@foreach (var user in users) { <option value="@user.Id">@user.DisplayName · @user.Email</option> }</select></div></div>
+        @if (selectedUserId is not null)
+        {
+            @if (valueLoading) { <LoadingState Text="正在载入用户属性" /> }
+            else if (definitions.Count == 0) { <div class="muted-text">请先创建属性定义。</div> }
+            else
+            {
+                <EditForm Model="valueForm" OnValidSubmit="SaveValuesAsync" FormName="user-attributes-values">
+                    <div class="form-grid">
+                        @foreach (var definition in definitions.Where(x => x.Enabled))
+                        {
+                            <div class="form-field"><label for="attribute-@definition.Id">@definition.Name @(definition.Required ? "*" : "")</label>
+                                @if (definition.Type is "select" or "multi_select")
+                                {
+                                    <InputText id="@($"attribute-{definition.Id}")" @bind-Value="valueForm[definition.Id]" placeholder="@definition.Placeholder" />
+                                }
+                                else
+                                {
+                                    <InputText id="@($"attribute-{definition.Id}")" @bind-Value="valueForm[definition.Id]" placeholder="@definition.Placeholder" />
+                                }
+                                @if (!string.IsNullOrWhiteSpace(definition.Description)) { <small class="field-hint">@definition.Description</small> }
+                            </div>
+                        }
+                    </div>
+                    <button type="submit" class="button primary" disabled="@savingValues">@(savingValues ? "保存中…" : "保存属性值")</button>
+                </EditForm>
+            }
+        }
+    </section>
+}
+
+<AppModal Open="definitionModalOpen" Title="@(editingDefinition is null ? "新建属性" : "编辑属性")" OnClose="() => definitionModalOpen = false">
+    <ChildContent>
+        <EditForm Model="definitionForm" OnValidSubmit="SaveDefinitionAsync" FormName="attribute-definition"><DataAnnotationsValidator />
+            <div class="form-grid"><div class="form-field"><label for="attribute-key">键</label><InputText id="attribute-key" @bind-Value="definitionForm.Key" disabled="@(editingDefinition is not null)" /></div><div class="form-field"><label for="attribute-name">名称</label><InputText id="attribute-name" @bind-Value="definitionForm.Name" /></div><div class="form-field"><label for="attribute-type">类型</label><InputSelect id="attribute-type" @bind-Value="definitionForm.Type"><option value="text">文本</option><option value="number">数字</option><option value="select">单选</option><option value="multi_select">多选</option><option value="boolean">布尔</option></InputSelect></div><div class="form-field"><label for="attribute-placeholder">占位提示</label><InputText id="attribute-placeholder" @bind-Value="definitionForm.Placeholder" /></div><div class="form-field full"><label for="attribute-description">说明</label><InputTextArea id="attribute-description" @bind-Value="definitionForm.Description" /></div><label class="toggle-row"><InputCheckbox @bind-Value="definitionForm.Required" /><span>必填</span></label><label class="toggle-row"><InputCheckbox @bind-Value="definitionForm.Enabled" /><span>启用</span></label></div>
+            @if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="() => definitionModalOpen = false">取消</button><button type="button" class="button primary" @onclick="SaveDefinitionAsync" disabled="@savingDefinition">保存</button></Footer>
+</AppModal>
+
+@code {
+    private List<UserAttributeDefinitionDto> definitions = [];
+    private List<UserDto> users = [];
+    private Dictionary<long, string> valueForm = new();
+    private string? selectedUserId;
+    private bool loading = true;
+    private bool valueLoading;
+    private bool savingValues;
+    private bool savingDefinition;
+    private bool definitionModalOpen;
+    private string? error;
+    private string? modalError;
+    private UserAttributeDefinitionDto? editingDefinition;
+    private DefinitionForm definitionForm = new();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true; error = null;
+        try { definitions = await Api.GetUserAttributeDefinitionsAsync(); users = await Api.GetUsersAsync(); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private void OpenCreate() { editingDefinition = null; definitionForm = new(); modalError = null; definitionModalOpen = true; }
+    private void OpenEdit(UserAttributeDefinitionDto item) { editingDefinition = item; definitionForm = new() { Key = item.Key, Name = item.Name, Description = item.Description, Type = item.Type, Required = item.Required, Enabled = item.Enabled, Placeholder = item.Placeholder }; modalError = null; definitionModalOpen = true; }
+
+    private async Task SaveDefinitionAsync()
+    {
+        savingDefinition = true; modalError = null;
+        try
+        {
+            object payload = editingDefinition is null
+                ? new { key = definitionForm.Key.Trim(), name = definitionForm.Name.Trim(), description = definitionForm.Description.Trim(), type = definitionForm.Type, required = definitionForm.Required, enabled = definitionForm.Enabled, placeholder = definitionForm.Placeholder.Trim(), options = Array.Empty<object>() }
+                : new { name = definitionForm.Name.Trim(), description = definitionForm.Description.Trim(), type = definitionForm.Type, required = definitionForm.Required, enabled = definitionForm.Enabled, placeholder = definitionForm.Placeholder.Trim() };
+            if (editingDefinition is null) await Api.CreateUserAttributeDefinitionAsync(payload);
+            else await Api.UpdateUserAttributeDefinitionAsync(editingDefinition.Id, payload);
+            definitionModalOpen = false; Toasts.Success("属性定义已保存"); await LoadAsync();
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { savingDefinition = false; }
+    }
+
+    private async Task DeleteAsync(UserAttributeDefinitionDto item)
+    {
+        if (!await JsConfirmAsync($"确认删除属性“{item.Name}”？")) return;
+        try { await Api.DeleteUserAttributeDefinitionAsync(item.Id); Toasts.Success("属性定义已删除"); await LoadAsync(); }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task<bool> JsConfirmAsync(string message) => await JS.InvokeAsync<bool>("confirm", message);
+
+    private async Task UserChangedAsync(ChangeEventArgs args)
+    {
+        selectedUserId = string.IsNullOrWhiteSpace(args.Value?.ToString()) ? null : args.Value?.ToString();
+        valueForm = new();
+        // Keep every enabled definition present so InputText can bind even when
+        // the selected user has not saved a value for that field yet.
+        foreach (var definition in definitions.Where(x => x.Enabled))
+        {
+            valueForm[definition.Id] = string.Empty;
+        }
+        if (selectedUserId is null) return;
+        valueLoading = true;
+        try { foreach (var value in await Api.GetUserAttributeValuesAsync(selectedUserId)) valueForm[value.AttributeId] = value.Value; }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { valueLoading = false; }
+    }
+
+    private async Task SaveValuesAsync()
+    {
+        if (selectedUserId is null) return;
+        savingValues = true;
+        try { await Api.UpdateUserAttributeValuesAsync(selectedUserId, valueForm); Toasts.Success("用户属性值已保存"); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { savingValues = false; }
+    }
+
+    private sealed class DefinitionForm
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Type { get; set; } = "text";
+        public string Placeholder { get; set; } = string.Empty;
+        public bool Required { get; set; }
+        public bool Enabled { get; set; } = true;
+    }
+}

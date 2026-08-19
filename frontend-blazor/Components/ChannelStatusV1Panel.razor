@@ -1,0 +1,334 @@
+@implements IAsyncDisposable
+@using System.Globalization
+
+@inject ApiClient Api
+
+<div class="page-header monitor-page-header">
+    <div>
+        <h1>渠道状态</h1>
+        <p>查看渠道可用性、延迟和近期状态</p>
+    </div>
+    <div class="monitor-hero-controls">
+        <div class="segmented-control monitor-window-tabs" role="tablist" aria-label="统计窗口">
+            @foreach (var window in Windows)
+            {
+                <button type="button" role="tab" aria-selected="@(currentWindow == window.Value)" class="@(currentWindow == window.Value ? "active" : null)" @onclick="() => SelectWindowAsync(window.Value)">@window.Label</button>
+            }
+        </div>
+        <span class="overall-status @OverallStatus"><i></i>@OverallLabel</span>
+        <button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="RefreshAsync"><Icon Name="refresh" Size="17" /></button>
+        <div class="auto-refresh-control">
+            <button type="button" class="auto-refresh-toggle @(autoRefreshEnabled ? "enabled" : null)" title="自动刷新" aria-pressed="@autoRefreshEnabled" @onclick="ToggleAutoRefresh">
+                <Icon Name="clock" Size="14" />
+                @(autoRefreshEnabled ? $"{countdown}s" : "已暂停")
+            </button>
+            <select value="@refreshIntervalSeconds" aria-label="自动刷新间隔" @onchange="ChangeRefreshInterval">
+                <option value="30">30 秒</option>
+                <option value="60">60 秒</option>
+                <option value="120">120 秒</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+@if (loading && items.Count == 0)
+{
+    <div class="monitor-card-grid monitor-skeleton-grid" aria-hidden="true">
+        @for (var index = 0; index < 6; index++) { <div class="monitor-card skeleton-card"><i></i><i></i><i></i></div> }
+    </div>
+}
+else if (error is not null && items.Count == 0)
+{
+    <ErrorState Message="@error" OnRetry="RefreshAsync" />
+}
+else if (items.Count == 0)
+{
+    <section class="content-section monitor-empty"><EmptyState Title="暂无可显示的渠道" Description="管理员尚未配置可监控的渠道。" /></section>
+}
+else
+{
+    @if (error is not null)
+    {
+        <div class="inline-alert warning" role="status"><Icon Name="alert" Size="17" /><span>@error</span></div>
+    }
+    <div class="monitor-card-grid">
+        @foreach (var item in items)
+        {
+            var availability = Availability(item);
+            <button type="button" class="monitor-card" @onclick="() => OpenDetailAsync(item)" @key="item.Id">
+                <span class="monitor-card-header">
+                    <span class="provider-icon provider-@ProviderTone(item.Provider)"><Icon Name="@ProviderIcon(item.Provider)" Size="19" /></span>
+                    <span class="monitor-card-title">
+                        <strong>@item.Name</strong>
+                        <span class="monitor-card-subtitle">
+                            <span class="provider-label provider-@ProviderTone(item.Provider)">@ProviderLabel(item.Provider)</span>
+                            <code>@item.PrimaryModel</code>
+                            @if (!string.IsNullOrWhiteSpace(item.GroupName)) { <span class="monitor-group">@item.GroupName</span> }
+                        </span>
+                    </span>
+                    <span class="monitor-status @StatusTone(item.PrimaryStatus)">@StatusLabel(item.PrimaryStatus)</span>
+                </span>
+
+                <span class="monitor-metric-pair">
+                    <span><small><Icon Name="pulse" Size="12" /> 对话延迟</small><strong>@FormatLatency(item.PrimaryLatencyMs)<em>ms</em></strong></span>
+                    <span><small><Icon Name="globe" Size="12" /> 端点 PING</small><strong>@FormatLatency(item.PrimaryPingLatencyMs)<em>ms</em></strong></span>
+                </span>
+
+                <span class="monitor-availability">
+                    <small>可用性 · @WindowLabel(currentWindow)</small>
+                    <strong style="@AvailabilityColor(availability)">@(availability.HasValue ? availability.Value.ToString("0.00", CultureInfo.InvariantCulture) : "-")<em>%</em></strong>
+                    @if (item.ExtraModels.Count > 0) { <span>+ @item.ExtraModels.Count 模型</span> }
+                </span>
+
+                <span class="monitor-timeline">
+                    <span class="timeline-heading"><small>近 60 次记录</small><small>@countdown.ToString(CultureInfo.InvariantCulture)s 后刷新</small></span>
+                    <span class="timeline-bars">
+                        @foreach (var bar in TimelineBars(item))
+                        {
+                            <i class="@bar.Tone" style="height:@bar.Height%" title="@bar.Title"></i>
+                        }
+                    </span>
+                    <span class="timeline-axis"><small>PAST</small><small>NOW</small></span>
+                </span>
+            </button>
+        }
+    </div>
+}
+
+<AppModal Open="@(detailTarget is not null)" Title="@(detailTarget?.Name ?? "渠道详情")" MaxWidth="980px" OnClose="CloseDetail">
+    <ChildContent>
+        @if (detailLoading)
+        {
+            <LoadingState Text="正在载入渠道详情" />
+        }
+        else if (detailError is not null)
+        {
+            <ErrorState Message="@detailError" OnRetry="ReloadDetailAsync" />
+        }
+        else if (selectedDetail is not null)
+        {
+            <div class="monitor-detail-summary">
+                <span class="channel-platform-badge">@ProviderLabel(selectedDetail.Provider)</span>
+                @if (!string.IsNullOrWhiteSpace(selectedDetail.GroupName)) { <span>@selectedDetail.GroupName</span> }
+            </div>
+            <div class="data-table-wrap monitor-detail-table">
+                <table class="data-table">
+                    <thead><tr><th>模型</th><th>最新状态</th><th>最新延迟</th><th>7 天可用率</th><th>15 天可用率</th><th>30 天可用率</th><th>7 天平均延迟</th></tr></thead>
+                    <tbody>
+                        @foreach (var model in selectedDetail.Models)
+                        {
+                            <tr>
+                                <td data-label="模型"><strong class="primary-cell">@model.Model</strong></td>
+                                <td data-label="最新状态"><span class="monitor-status @StatusTone(model.LatestStatus)">@StatusLabel(model.LatestStatus)</span></td>
+                                <td data-label="最新延迟">@FormatLatencyWithUnit(model.LatestLatencyMs)</td>
+                                <td data-label="7 天可用率">@FormatPercent(model.Availability7d)</td>
+                                <td data-label="15 天可用率">@FormatPercent(model.Availability15d)</td>
+                                <td data-label="30 天可用率">@FormatPercent(model.Availability30d)</td>
+                                <td data-label="7 天平均延迟">@FormatLatencyWithUnit(model.AvgLatency7dMs)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseDetail">关闭</button></Footer>
+</AppModal>
+
+@code {
+    private static readonly (string Value, string Label)[] Windows = [("7d", "7 天"), ("15d", "15 天"), ("30d", "30 天")];
+    private readonly Dictionary<long, UserMonitorDetailDto> detailCache = [];
+    private CancellationTokenSource? refreshCancellation;
+    private List<UserMonitorViewDto> items = [];
+    private bool loading = true;
+    private bool detailLoading;
+    private bool autoRefreshEnabled = true;
+    private string? error;
+    private string? detailError;
+    private string currentWindow = "7d";
+    private int refreshIntervalSeconds = 60;
+    private int countdown = 60;
+    private UserMonitorViewDto? detailTarget;
+    private UserMonitorDetailDto? selectedDetail;
+
+    [Parameter]
+    public int DefaultIntervalSeconds { get; set; } = 60;
+
+    [Parameter]
+    public bool Enabled { get; set; } = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        refreshIntervalSeconds = DefaultIntervalSeconds switch { <= 45 => 30, >= 90 => 120, _ => 60 };
+        countdown = refreshIntervalSeconds;
+        await ReloadAsync(false);
+        if (Enabled) StartAutoRefresh();
+        else autoRefreshEnabled = false;
+    }
+
+    private string OverallStatus => items.Any(item => item.PrimaryStatus is not "operational") ? "degraded" : "operational";
+    private string OverallLabel => OverallStatus == "operational" ? "OPERATIONAL" : "DEGRADED";
+
+    private Task RefreshAsync() => ReloadAsync(false);
+
+    private async Task ReloadAsync(bool silent)
+    {
+        if (!silent) loading = true;
+        error = null;
+        try
+        {
+            items = (await Api.GetChannelMonitorsAsync()).Items;
+            if (currentWindow != "7d") await EnsureWindowDetailsAsync(force: true);
+            countdown = refreshIntervalSeconds;
+        }
+        catch (ApiException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            if (!silent) loading = false;
+        }
+    }
+
+    private async Task SelectWindowAsync(string value)
+    {
+        currentWindow = value;
+        if (value != "7d") await EnsureWindowDetailsAsync(force: false);
+    }
+
+    private async Task EnsureWindowDetailsAsync(bool force)
+    {
+        var tasks = items.Select(item => LoadDetailSafeAsync(item.Id, force));
+        await Task.WhenAll(tasks);
+    }
+
+    private async Task LoadDetailSafeAsync(long id, bool force)
+    {
+        if (!force && detailCache.ContainsKey(id)) return;
+        try { detailCache[id] = await Api.GetChannelMonitorStatusAsync(id); }
+        catch (ApiException) { }
+    }
+
+    private double? Availability(UserMonitorViewDto item)
+    {
+        if (currentWindow == "7d") return item.Availability7d;
+        if (!detailCache.TryGetValue(item.Id, out var detail)) return null;
+        var primary = detail.Models.FirstOrDefault(model => string.Equals(model.Model, item.PrimaryModel, StringComparison.Ordinal));
+        return primary is null ? null : currentWindow == "15d" ? primary.Availability15d : primary.Availability30d;
+    }
+
+    private async Task OpenDetailAsync(UserMonitorViewDto item)
+    {
+        detailTarget = item;
+        selectedDetail = null;
+        detailError = null;
+        detailLoading = true;
+        try
+        {
+            selectedDetail = await Api.GetChannelMonitorStatusAsync(item.Id);
+            detailCache[item.Id] = selectedDetail;
+        }
+        catch (ApiException ex) { detailError = ex.Message; }
+        finally { detailLoading = false; }
+    }
+
+    private Task ReloadDetailAsync() => detailTarget is null ? Task.CompletedTask : OpenDetailAsync(detailTarget);
+    private void CloseDetail() { detailTarget = null; selectedDetail = null; detailError = null; }
+
+    private void ToggleAutoRefresh()
+    {
+        autoRefreshEnabled = !autoRefreshEnabled;
+        if (autoRefreshEnabled) StartAutoRefresh(); else StopAutoRefresh();
+    }
+
+    private void ChangeRefreshInterval(ChangeEventArgs args)
+    {
+        if (!int.TryParse(args.Value?.ToString(), out var value) || value is not (30 or 60 or 120)) return;
+        refreshIntervalSeconds = value;
+        countdown = value;
+        if (autoRefreshEnabled) StartAutoRefresh();
+    }
+
+    private void StartAutoRefresh()
+    {
+        StopAutoRefresh();
+        if (!autoRefreshEnabled) return;
+        countdown = refreshIntervalSeconds;
+        refreshCancellation = new CancellationTokenSource();
+        _ = RunAutoRefreshAsync(refreshCancellation.Token);
+    }
+
+    private void StopAutoRefresh()
+    {
+        refreshCancellation?.Cancel();
+        refreshCancellation?.Dispose();
+        refreshCancellation = null;
+    }
+
+    private async Task RunAutoRefreshAsync(CancellationToken token)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            while (await timer.WaitForNextTickAsync(token))
+            {
+                countdown--;
+                if (countdown <= 0)
+                {
+                    countdown = refreshIntervalSeconds;
+                    await InvokeAsync(() => ReloadAsync(true));
+                }
+                else
+                {
+                    await InvokeAsync(StateHasChanged);
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private static IReadOnlyList<TimelineBar> TimelineBars(UserMonitorViewDto item)
+    {
+        var real = item.Timeline.Take(60).Reverse().Select(point => new TimelineBar(
+            HeightForStatus(point.Status),
+            StatusTone(point.Status),
+            $"{RelativeTime(point.CheckedAt)} · {StatusLabel(point.Status)} · {FormatLatency(point.LatencyMs)}ms")).ToList();
+        var bars = Enumerable.Repeat(new TimelineBar(15, "empty", string.Empty), Math.Max(0, 60 - real.Count)).ToList();
+        bars.AddRange(real);
+        return bars;
+    }
+
+    private static int HeightForStatus(string? status) => status switch { "operational" => 100, "degraded" => 65, "failed" or "error" => 35, _ => 15 };
+    private static string StatusTone(string? status) => status switch { "operational" => "operational", "degraded" => "degraded", "failed" or "error" => "failed", _ => "unknown" };
+    private static string StatusLabel(string? status) => status switch { "operational" => "正常", "degraded" => "降级", "failed" => "失败", "error" => "错误", _ => "-" };
+    private static string ProviderLabel(string? provider) => provider?.ToLowerInvariant() switch { "openai" => "OpenAI", "anthropic" => "Anthropic", "gemini" => "Gemini", "grok" => "Grok", _ => provider ?? "-" };
+    private static string ProviderTone(string? provider)
+    {
+        var normalized = provider?.ToLowerInvariant();
+        return normalized is "openai" or "anthropic" or "gemini" or "grok" ? normalized : "default";
+    }
+    private static string ProviderIcon(string? provider) => provider?.ToLowerInvariant() == "grok" ? "pulse" : "sparkles";
+    private static string WindowLabel(string window) => window switch { "15d" => "15 天", "30d" => "30 天", _ => "7 天" };
+    private static string FormatLatency(int? value) => value?.ToString(CultureInfo.InvariantCulture) ?? "-";
+    private static string FormatLatencyWithUnit(int? value) => value.HasValue ? $"{value.Value} ms" : "-";
+    private static string FormatPercent(double value) => $"{value.ToString("0.00", CultureInfo.InvariantCulture)}%";
+    private static string AvailabilityColor(double? value) => value.HasValue ? $"color:hsl({Math.Clamp(value.Value * 1.2, 0, 120).ToString("0", CultureInfo.InvariantCulture)} 68% 37%)" : "color:var(--muted)";
+
+    private static string RelativeTime(DateTimeOffset value)
+    {
+        var span = DateTimeOffset.Now - value.ToLocalTime();
+        if (span.TotalSeconds < 60) return $"{Math.Max(0, (int)span.TotalSeconds)} 秒前";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes} 分钟前";
+        if (span.TotalHours < 24) return $"{(int)span.TotalHours} 小时前";
+        return $"{(int)span.TotalDays} 天前";
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        StopAutoRefresh();
+        return ValueTask.CompletedTask;
+    }
+
+    private sealed record TimelineBar(int Height, string Tone, string Title);
+}

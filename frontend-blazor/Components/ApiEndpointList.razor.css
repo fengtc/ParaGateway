@@ -1,0 +1,11 @@
+.api-endpoint-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.api-endpoint-chip { display: flex; min-width: 0; padding: 6px 9px; align-items: center; gap: 6px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; font-size: .68rem; }
+.api-endpoint-chip strong { color: var(--ink); font-size: .67rem; }
+.default-badge { padding: 1px 4px; color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); border-radius: 3px; font-size: .55rem; font-weight: 700; }
+.endpoint-divider { color: var(--line-strong, #cbd5e1); }
+.endpoint-copy { display: flex; min-width: 0; padding: 0; align-items: center; gap: 5px; color: var(--muted); background: transparent; border: 0; cursor: pointer; }
+.endpoint-copy:hover { color: var(--primary); }
+.endpoint-copy code { max-width: min(360px, 52vw); overflow: hidden; color: inherit; font-size: .64rem; text-overflow: ellipsis; white-space: nowrap; }
+.endpoint-speed { display: inline-flex; color: var(--muted); }
+.endpoint-speed:hover { color: #d97706; }
+@media (max-width: 640px) { .api-endpoint-chip { width: 100%; }.endpoint-copy { flex: 1; }.endpoint-copy code { max-width: calc(100vw - 190px); } }

@@ -1,0 +1,274 @@
+@inject AuthSession Auth
+@inject NavigationManager Navigation
+@inject ApiClient Api
+
+<div class="nav-shell @(Collapsed ? "collapsed" : null)">
+    <div class="brand-row">
+        <div class="brand">
+            <a class="brand-logo-link" href="@HomeHref" title="ParaGateway" @onclick="NavigateAsync"><BrandMark /></a>
+            <div class="brand-copy">
+                <a class="brand-title" href="@HomeHref" @onclick="NavigateAsync">ParaGateway</a>
+                @if (Auth.User?.IsAdmin == true)
+                {
+                    <button type="button"
+                            class="version-badge @(updateInfo?.HasUpdate == true ? "has-update" : null)"
+                            title="查看版本信息"
+                            aria-expanded="@versionMenuOpen"
+                            @onclick="ToggleVersionMenuAsync">
+                        @(string.IsNullOrWhiteSpace(systemVersion) ? "--" : $"v{systemVersion.TrimStart('v', 'V')}")
+                        @if (updateInfo?.HasUpdate == true)
+                        {
+                            <span class="version-dot" aria-label="有新版本"></span>
+                        }
+                    </button>
+                    @if (versionMenuOpen)
+                    {
+                        <div class="version-popover">
+                            <div class="version-popover-header">
+                                <strong>当前版本</strong>
+                                <button type="button" class="version-refresh" title="刷新版本信息" aria-label="刷新版本信息" disabled="@versionLoading" @onclick="RefreshVersionAsync">
+                                    <Icon Name="refresh" Size="14" />
+                                </button>
+                            </div>
+                            @if (versionLoading)
+                            {
+                                <div class="version-state">正在检查版本…</div>
+                            }
+                            else
+                            {
+                                <div class="version-current">@(string.IsNullOrWhiteSpace(systemVersion) ? "--" : $"v{systemVersion.TrimStart('v', 'V')}")</div>
+                                @if (updateInfo?.HasUpdate == true)
+                                {
+                                    <div class="version-update">最新版本：v@updateInfo.LatestVersion.TrimStart('v', 'V')</div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(versionError))
+                                {
+                                    <div class="version-error">@versionError</div>
+                                }
+                                else
+                                {
+                                    <div class="version-ok">当前已是最新版本</div>
+                                }
+                            }
+                            <a class="version-manage" href="/admin/system" @onclick="NavigateAsync">版本管理 <Icon Name="arrow-right" Size="14" /></a>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+
+    <nav class="side-nav" aria-label="主导航">
+        @if (Auth.User?.IsAdmin == true)
+        {
+            <div class="sidebar-section admin-section">
+                <NavLink href="/admin/dashboard" Match="NavLinkMatch.All" title="@(Collapsed ? "仪表盘" : null)" @onclick="NavigateAsync">
+                    <Icon Name="dashboard" />
+                    <span class="nav-label-copy">仪表盘</span>
+                </NavLink>
+                <NavLink href="/admin/ops" title="@(Collapsed ? "运维监控" : null)" @onclick="NavigateAsync">
+                    <Icon Name="activity" />
+                    <span class="nav-label-copy">运维监控</span>
+                </NavLink>
+                <NavLink href="/admin/users" title="@(Collapsed ? "用户管理" : null)" @onclick="NavigateAsync">
+                    <Icon Name="users" />
+                    <span class="nav-label-copy">用户管理</span>
+                </NavLink>
+                <NavLink href="/admin/groups" title="@(Collapsed ? "分组管理" : null)" @onclick="NavigateAsync">
+                    <Icon Name="folder" />
+                    <span class="nav-label-copy">分组管理</span>
+                </NavLink>
+
+                <NavLink href="/admin/subscriptions" title="@(Collapsed ? "订阅管理" : null)" @onclick="NavigateAsync">
+                    <Icon Name="calendar" />
+                    <span class="nav-label-copy">订阅管理</span>
+                </NavLink>
+                <NavLink href="/admin/accounts" title="@(Collapsed ? "账号管理" : null)" @onclick="NavigateAsync">
+                    <Icon Name="users" />
+                    <span class="nav-label-copy">账号管理</span>
+                </NavLink>
+                <NavLink href="/admin/announcements" title="@(Collapsed ? "公告管理" : null)" @onclick="NavigateAsync">
+                    <Icon Name="bell" />
+                    <span class="nav-label-copy">公告管理</span>
+                </NavLink>
+                <NavLink href="/admin/proxies" title="@(Collapsed ? "IP管理" : null)" @onclick="NavigateAsync">
+                    <Icon Name="server" />
+                    <span class="nav-label-copy">IP管理</span>
+                </NavLink>
+
+                <button type="button" class="nav-group-button @(IsPathIn("admin/risk-control") || IsPathIn("admin/prompt-audit") ? "group-active" : null)" title="@(Collapsed ? "安全审计" : null)" aria-expanded="@securityExpanded" @onclick="ToggleSecurityAsync">
+                    <Icon Name="shield" />
+                    <span class="nav-label-copy group-label"><span>安全审计</span><Icon Name="chevron-down" Size="15" /></span>
+                </button>
+                @if (!Collapsed && securityExpanded)
+                {
+                    <div class="nav-children">
+                        <NavLink href="/admin/risk-control" @onclick="NavigateAsync"><Icon Name="shield" Size="16" /><span>内容审核</span></NavLink>
+                        <NavLink href="/admin/prompt-audit" @onclick="NavigateAsync"><Icon Name="file-text" Size="16" /><span>提示词审计</span></NavLink>
+                    </div>
+                }
+
+                <NavLink href="/admin/usage" title="@(Collapsed ? "使用记录" : null)" @onclick="NavigateAsync">
+                    <Icon Name="activity" />
+                    <span class="nav-label-copy">使用记录</span>
+                </NavLink>
+                <NavLink href="/admin/audit-logs" title="@(Collapsed ? "操作日志" : null)" @onclick="NavigateAsync">
+                    <Icon Name="file-text" />
+                    <span class="nav-label-copy">操作日志</span>
+                </NavLink>
+                <NavLink href="/admin/settings" title="@(Collapsed ? "系统设置" : null)" @onclick="NavigateAsync">
+                    <Icon Name="settings" />
+                    <span class="nav-label-copy">系统设置</span>
+                </NavLink>
+
+                <button type="button" class="nav-group-button @(IsExtensionPath ? "group-active" : null)" title="@(Collapsed ? "扩展管理" : null)" aria-expanded="@extensionsExpanded" @onclick="ToggleExtensionsAsync">
+                    <Icon Name="plug" />
+                    <span class="nav-label-copy group-label"><span>扩展管理</span><Icon Name="chevron-down" Size="15" /></span>
+                </button>
+                @if (!Collapsed && extensionsExpanded)
+                {
+                    <div class="nav-children extension-children">
+                        <NavLink href="/provider-oauth" @onclick="NavigateAsync"><Icon Name="shield" Size="16" /><span>官方 OAuth</span></NavLink>
+                        <NavLink href="/admin/models" @onclick="NavigateAsync"><Icon Name="box" Size="16" /><span>账号模型</span></NavLink>
+                        <NavLink href="/admin/user-attributes" @onclick="NavigateAsync"><Icon Name="sliders" Size="16" /><span>用户属性</span></NavLink>
+                        <NavLink href="/admin/backup" @onclick="NavigateAsync"><Icon Name="database" Size="16" /><span>备份与恢复</span></NavLink>
+                        <NavLink href="/admin/data-management" @onclick="NavigateAsync"><Icon Name="database" Size="16" /><span>数据管理代理</span></NavLink>
+                        <NavLink href="/admin/error-passthrough" @onclick="NavigateAsync"><Icon Name="alert" Size="16" /><span>错误透传规则</span></NavLink>
+                        <NavLink href="/admin/tls-fingerprints" @onclick="NavigateAsync"><Icon Name="shield" Size="16" /><span>TLS 指纹模板</span></NavLink>
+                        <NavLink href="/admin/system" @onclick="NavigateAsync"><Icon Name="refresh" Size="16" /><span>系统更新</span></NavLink>
+                    </div>
+                }
+            </div>
+
+            <div class="sidebar-section personal-section">
+                <div class="nav-section-title"><span>我的账户</span></div>
+                <NavLink href="/api-keys" title="@(Collapsed ? "API 密钥" : null)" @onclick="NavigateAsync"><Icon Name="key" /><span class="nav-label-copy">API 密钥</span></NavLink>
+                <NavLink href="/batch-image" title="@(Collapsed ? "批量生图" : null)" @onclick="NavigateAsync"><Icon Name="image" /><span class="nav-label-copy">批量生图</span></NavLink>
+                <NavLink href="/usage" title="@(Collapsed ? "使用记录" : null)" @onclick="NavigateAsync"><Icon Name="activity" /><span class="nav-label-copy">使用记录</span></NavLink>
+                <NavLink href="/available-channels" title="@(Collapsed ? "可用渠道" : null)" @onclick="NavigateAsync"><Icon Name="layers" /><span class="nav-label-copy">可用渠道</span></NavLink>
+                <NavLink href="/monitor" title="@(Collapsed ? "渠道状态" : null)" @onclick="NavigateAsync"><Icon Name="pulse" /><span class="nav-label-copy">渠道状态</span></NavLink>
+                <NavLink href="/subscriptions" title="@(Collapsed ? "我的订阅" : null)" @onclick="NavigateAsync"><Icon Name="calendar" /><span class="nav-label-copy">我的订阅</span></NavLink>
+                <NavLink href="/account" title="@(Collapsed ? "个人资料" : null)" @onclick="NavigateAsync"><Icon Name="user" /><span class="nav-label-copy">个人资料</span></NavLink>
+            </div>
+        }
+        else
+        {
+            <div class="sidebar-section user-section">
+                <NavLink href="/dashboard" Match="NavLinkMatch.All" title="@(Collapsed ? "仪表盘" : null)" @onclick="NavigateAsync"><Icon Name="dashboard" /><span class="nav-label-copy">仪表盘</span></NavLink>
+                <NavLink href="/api-keys" title="@(Collapsed ? "API 密钥" : null)" @onclick="NavigateAsync"><Icon Name="key" /><span class="nav-label-copy">API 密钥</span></NavLink>
+                <NavLink href="/batch-image" title="@(Collapsed ? "批量生图" : null)" @onclick="NavigateAsync"><Icon Name="image" /><span class="nav-label-copy">批量生图</span></NavLink>
+                <NavLink href="/usage" title="@(Collapsed ? "使用记录" : null)" @onclick="NavigateAsync"><Icon Name="activity" /><span class="nav-label-copy">使用记录</span></NavLink>
+                <NavLink href="/available-channels" title="@(Collapsed ? "可用渠道" : null)" @onclick="NavigateAsync"><Icon Name="layers" /><span class="nav-label-copy">可用渠道</span></NavLink>
+                <NavLink href="/monitor" title="@(Collapsed ? "渠道状态" : null)" @onclick="NavigateAsync"><Icon Name="pulse" /><span class="nav-label-copy">渠道状态</span></NavLink>
+                <NavLink href="/subscriptions" title="@(Collapsed ? "我的订阅" : null)" @onclick="NavigateAsync"><Icon Name="calendar" /><span class="nav-label-copy">我的订阅</span></NavLink>
+                <NavLink href="/account" title="@(Collapsed ? "个人资料" : null)" @onclick="NavigateAsync"><Icon Name="user" /><span class="nav-label-copy">个人资料</span></NavLink>
+            </div>
+        }
+    </nav>
+
+    <div class="sidebar-bottom">
+        <button type="button" class="sidebar-control" title="@(Collapsed ? (IsDark ? "浅色模式" : "深色模式") : null)" @onclick="() => OnToggleTheme.InvokeAsync()">
+            <Icon Name="@(IsDark ? "sun" : "moon")" />
+            <span class="nav-label-copy">@(IsDark ? "浅色模式" : "深色模式")</span>
+        </button>
+        <button type="button" class="sidebar-control" title="@(Collapsed ? "展开侧栏" : "折叠侧栏")" @onclick="() => OnToggleCollapsed.InvokeAsync()">
+            <Icon Name="@(Collapsed ? "panel-left-open" : "panel-left-close")" />
+            <span class="nav-label-copy">折叠侧栏</span>
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public bool Collapsed { get; set; }
+    [Parameter] public bool IsDark { get; set; }
+    [Parameter] public EventCallback OnNavigate { get; set; }
+    [Parameter] public EventCallback OnToggleTheme { get; set; }
+    [Parameter] public EventCallback OnToggleCollapsed { get; set; }
+    [Parameter] public EventCallback OnExpandRequested { get; set; }
+
+    private bool securityExpanded;
+    private bool extensionsExpanded;
+    private bool versionMenuOpen;
+    private bool versionLoading;
+    private string systemVersion = string.Empty;
+    private string? versionError;
+    private SystemUpdateInfoDto? updateInfo;
+
+    private string HomeHref => Auth.User?.IsAdmin == true ? "/" : "/account";
+
+    private bool IsExtensionPath => CurrentPath is "provider-oauth" or "admin/models" or "admin/user-attributes" or "admin/backup" or "admin/backups"
+        or "admin/data-management" or "admin/error-passthrough" or "admin/tls-fingerprints" or "admin/system";
+
+    private string CurrentPath => Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/').ToLowerInvariant();
+
+    protected override async Task OnInitializedAsync()
+    {
+        securityExpanded = IsPathIn("admin/risk-control") || IsPathIn("admin/prompt-audit");
+        extensionsExpanded = IsExtensionPath;
+
+        if (Auth.User?.IsAdmin == true)
+        {
+            await LoadCurrentVersionAsync();
+        }
+    }
+
+    private bool IsPathIn(string prefix) => CurrentPath.Equals(prefix, StringComparison.Ordinal)
+        || CurrentPath.StartsWith(prefix + "/", StringComparison.Ordinal);
+
+    private Task NavigateAsync() => OnNavigate.InvokeAsync();
+
+    private async Task ToggleVersionMenuAsync()
+    {
+        versionMenuOpen = !versionMenuOpen;
+        if (versionMenuOpen && updateInfo is null)
+        {
+            await RefreshVersionAsync();
+        }
+    }
+
+    private async Task LoadCurrentVersionAsync()
+    {
+        try
+        {
+            systemVersion = (await Api.GetSystemVersionAsync()).Version;
+        }
+        catch (ApiException)
+        {
+            // 版本徽标属于辅助信息，加载失败不影响主导航。
+        }
+    }
+
+    private async Task RefreshVersionAsync()
+    {
+        versionLoading = true;
+        versionError = null;
+        try
+        {
+            var version = await Api.GetSystemVersionAsync();
+            systemVersion = version.Version;
+            updateInfo = await Api.CheckSystemUpdatesAsync(true);
+            if (!string.IsNullOrWhiteSpace(updateInfo.CurrentVersion)) systemVersion = updateInfo.CurrentVersion;
+            versionError = updateInfo.Warning;
+        }
+        catch (ApiException ex)
+        {
+            versionError = ex.Message;
+        }
+        finally
+        {
+            versionLoading = false;
+        }
+    }
+
+    private async Task ToggleSecurityAsync()
+    {
+        if (Collapsed) await OnExpandRequested.InvokeAsync();
+        securityExpanded = !securityExpanded || Collapsed;
+    }
+
+    private async Task ToggleExtensionsAsync()
+    {
+        if (Collapsed) await OnExpandRequested.InvokeAsync();
+        extensionsExpanded = !extensionsExpanded || Collapsed;
+    }
+}

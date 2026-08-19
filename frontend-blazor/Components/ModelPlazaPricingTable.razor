@@ -1,0 +1,266 @@
+@using System.Globalization
+
+<div class="plaza-pricing-table" style="@AccentStyle">
+    <table>
+        <colgroup>
+            <col class="model-column" />
+            <col class="price-column" />
+            <col class="price-column" />
+            <col class="cache-column" />
+            <col class="price-column" />
+            <col class="price-column" />
+            <col class="cache-column" />
+            <col class="rate-column" />
+        </colgroup>
+        <thead>
+            <tr class="pricing-heading-row">
+                <th rowspan="2" class="model-heading">模型</th>
+                <th colspan="3" class="paid-heading">
+                    <span>实付价格（折后）</span><small>$ / 1M token</small>
+                </th>
+                <th colspan="3" class="official-heading">
+                    <span>官方价格</span><small>$ / 1M token</small>
+                </th>
+                <th rowspan="2" class="rate-heading">折扣倍率</th>
+            </tr>
+            <tr class="pricing-subheading-row">
+                <th class="paid-cell">输入</th>
+                <th class="paid-cell">输出</th>
+                <th class="paid-cell">缓存</th>
+                <th class="official-first">输入</th>
+                <th>输出</th>
+                <th>缓存</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var model in SortedModels)
+            {
+                var mode = BillingMode(model);
+                var tokenIntervals = TokenIntervals(model);
+                var requestIntervals = RequestIntervals(model);
+                <tr @key="model">
+                    <td class="model-cell">
+                        <div class="model-identity">
+                            <strong>@model.Name</strong>
+                            @if (!string.IsNullOrWhiteSpace(Platform)
+                                && !string.Equals(model.Platform, Platform, StringComparison.OrdinalIgnoreCase))
+                            {
+                                <span class="model-platform @PlatformClass(model.Platform)">@PlatformLabel(model.Platform)</span>
+                            }
+                            @if (mode != "token")
+                            {
+                                <span class="billing-mode">@(mode == "image" ? "按图片计费" : "按次计费")</span>
+                            }
+                        </div>
+                    </td>
+
+                    @if (mode == "token")
+                    {
+                        <td class="paid-cell numeric-cell">
+                            @if (tokenIntervals.Count > 0)
+                            {
+                                @foreach (var interval in tokenIntervals)
+                                {
+                                    <div class="tier-price"><small>@TierLabel(interval)</small><span>@PaidPerMillion(interval.InputPrice)</span></div>
+                                }
+                            }
+                            else
+                            {
+                                <span>@PaidPerMillion(model.Pricing?.InputPrice)</span>
+                            }
+                        </td>
+                        <td class="paid-cell numeric-cell">
+                            @if (tokenIntervals.Count > 0)
+                            {
+                                @foreach (var interval in tokenIntervals)
+                                {
+                                    <div class="tier-price"><small>@TierLabel(interval)</small><span>@PaidPerMillion(interval.OutputPrice)</span></div>
+                                }
+                            }
+                            else
+                            {
+                                <span>@PaidPerMillion(model.Pricing?.OutputPrice)</span>
+                            }
+                        </td>
+                        <td class="paid-cell cache-cell">
+                            @if (HasCachePricing(model))
+                            {
+                                <div><small>写入</small><span>@PaidPerMillion(model.Pricing?.CacheWritePrice)</span></div>
+                                <div><small>读取</small><span>@PaidPerMillion(model.Pricing?.CacheReadPrice)</span></div>
+                            }
+                            else
+                            {
+                                <span class="empty-price">-</span>
+                            }
+                        </td>
+                    }
+                    else
+                    {
+                        <td colspan="3" class="paid-cell request-price-cell">
+                            @if (requestIntervals.Count > 0)
+                            {
+                                <div class="request-tiers">
+                                    @foreach (var interval in requestIntervals)
+                                    {
+                                        <span><small>@TierLabel(interval)</small>@PaidRequestPrice(model, interval.PerRequestPrice)<em>@PerUnitSuffix(model)</em></span>
+                                    }
+                                </div>
+                            }
+                            else if (model.Pricing?.PerRequestPrice is not null)
+                            {
+                                <strong>@PaidRequestPrice(model, model.Pricing.PerRequestPrice)</strong><em>@PerUnitSuffix(model)</em>
+                            }
+                            else
+                            {
+                                <span class="empty-price">-</span>
+                            }
+                        </td>
+                    }
+
+                    <td class="official-first numeric-cell">@Official(model.OfficialPricing?.InputPrice)</td>
+                    <td class="numeric-cell official-cell">@Official(model.OfficialPricing?.OutputPrice)</td>
+                    <td class="cache-cell official-cell">
+                        @if (HasOfficialCache(model.OfficialPricing))
+                        {
+                            <div>
+                                <small>写入</small><span>@Official(model.OfficialPricing?.CacheWritePrice)</span>
+                                @if (model.OfficialPricing?.CacheWrite1hPrice is not null)
+                                {
+                                    <span class="one-hour">（1h @Official(model.OfficialPricing.CacheWrite1hPrice)）</span>
+                                }
+                            </div>
+                            <div><small>读取</small><span>@Official(model.OfficialPricing?.CacheReadPrice)</span></div>
+                        }
+                        else
+                        {
+                            <span class="empty-price">-</span>
+                        }
+                    </td>
+                    <td class="rate-cell">
+                        @if (UsesIndependentImageRate(model))
+                        {
+                            <strong>@FormatRate(RequestRate(model))x</strong>
+                        }
+                        else if (HasCustomRate)
+                        {
+                            <s>@FormatRate(RateMultiplier)x</s><strong class="custom-rate">@FormatRate(EffectiveRate)x</strong>
+                        }
+                        else
+                        {
+                            <strong>@FormatRate(EffectiveRate)x</strong>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    private const double PerMillion = 1_000_000d;
+
+    [Parameter, EditorRequired] public IReadOnlyList<ModelPlazaModel> Models { get; set; } = [];
+    [Parameter] public string Platform { get; set; } = string.Empty;
+    [Parameter] public double RateMultiplier { get; set; } = 1;
+    [Parameter] public double? UserRateMultiplier { get; set; }
+    [Parameter] public bool ImageRateIndependent { get; set; }
+    [Parameter] public double ImageRateMultiplier { get; set; } = 1;
+
+    private double EffectiveRate => UserRateMultiplier ?? RateMultiplier;
+    private bool HasCustomRate => UserRateMultiplier.HasValue && !NearlyEqual(UserRateMultiplier.Value, RateMultiplier);
+    private string AccentStyle => $"--plaza-accent:{PlatformAccentColor(Platform)}";
+
+    private IEnumerable<ModelPlazaModel> SortedModels => Models
+        .OrderBy(model => BillingMode(model) == "token" ? 0 : 1)
+        .ThenByDescending(model => model.OfficialPricing?.OutputPrice ?? double.MinValue)
+        .ThenByDescending(model => model.Name, StringComparer.OrdinalIgnoreCase);
+
+    private static string BillingMode(ModelPlazaModel model) => string.IsNullOrWhiteSpace(model.Pricing?.BillingMode)
+        ? "token"
+        : model.Pricing.BillingMode.Trim().ToLowerInvariant();
+
+    private static List<UserPricingIntervalDto> TokenIntervals(ModelPlazaModel model) =>
+        model.Pricing?.Intervals ?? [];
+
+    private static List<UserPricingIntervalDto> RequestIntervals(ModelPlazaModel model) =>
+        model.Pricing?.Intervals.Where(interval => interval.PerRequestPrice.HasValue).ToList() ?? [];
+
+    private string PaidPerMillion(double? value) => FormatScaled(value, EffectiveRate * PerMillion);
+    private static string Official(double? value) => FormatScaled(value, PerMillion);
+
+    private string PaidRequestPrice(ModelPlazaModel model, double? value) =>
+        FormatScaled(value, RequestRate(model));
+
+    private bool UsesIndependentImageRate(ModelPlazaModel model) =>
+        ImageRateIndependent && BillingMode(model) == "image";
+
+    private double RequestRate(ModelPlazaModel model) =>
+        UsesIndependentImageRate(model) ? ImageRateMultiplier : EffectiveRate;
+
+    private static string PerUnitSuffix(ModelPlazaModel model) =>
+        BillingMode(model) == "image" ? "/ 张" : "/ 次";
+
+    private static bool HasCachePricing(ModelPlazaModel model) =>
+        model.Pricing?.CacheWritePrice is not null || model.Pricing?.CacheReadPrice is not null;
+
+    private static bool HasOfficialCache(ModelPlazaOfficialPricingDto? pricing) =>
+        pricing?.CacheWritePrice is not null || pricing?.CacheWrite1hPrice is not null || pricing?.CacheReadPrice is not null;
+
+    private static string TierLabel(UserPricingIntervalDto interval)
+    {
+        if (!string.IsNullOrWhiteSpace(interval.TierLabel)) return interval.TierLabel;
+        if (!interval.MaxTokens.HasValue) return $">{FormatTokenCount(interval.MinTokens)}";
+        if (interval.MinTokens == 0) return $"≤{FormatTokenCount(interval.MaxTokens.Value)}";
+        return $"{FormatTokenCount(interval.MinTokens)}–{FormatTokenCount(interval.MaxTokens.Value)}";
+    }
+
+    private static string FormatTokenCount(int value)
+    {
+        if (value >= 1_000_000) return $"{TrimNumber(value / 1_000_000d)}M";
+        if (value >= 1_000) return $"{TrimNumber(value / 1_000d)}K";
+        return value.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static string FormatScaled(double? value, double scale)
+    {
+        if (!value.HasValue) return "-";
+        return $"${(value.Value * scale).ToString("0.00########", CultureInfo.InvariantCulture)}";
+    }
+
+    private static string TrimNumber(double value) => value.ToString("0.##", CultureInfo.InvariantCulture);
+    private static string FormatRate(double value) => value.ToString("0.####", CultureInfo.InvariantCulture);
+    private static bool NearlyEqual(double left, double right) => Math.Abs(left - right) < 0.000000001d;
+
+    private static string PlatformLabel(string value) => value switch
+    {
+        "anthropic" => "Anthropic",
+        "openai" => "OpenAI",
+        "gemini" => "Gemini",
+        "antigravity" => "Antigravity",
+        "grok" => "Grok",
+        "composite" => "Composite",
+        _ => value
+    };
+
+    private static string PlatformClass(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "anthropic" => "anthropic",
+        "openai" => "openai",
+        "gemini" => "gemini",
+        "antigravity" => "antigravity",
+        "grok" => "grok",
+        "composite" => "composite",
+        _ => "other"
+    };
+
+    private static string PlatformAccentColor(string value) => value.Trim().ToLowerInvariant() switch
+    {
+        "anthropic" => "#d97706",
+        "openai" => "#059669",
+        "gemini" => "#2563eb",
+        "antigravity" => "#7c3aed",
+        "grok" => "#475569",
+        "composite" => "#0891b2",
+        _ => "#28745a"
+    };
+}

@@ -1,0 +1,71 @@
+@inject ApiClient Api
+@inject AuthSession Auth
+@inject NavigationManager Navigation
+@inject ToastService Toasts
+
+@if (visible && status is not null)
+{
+    <div class="modal-backdrop compliance-backdrop" role="presentation">
+        <section class="modal-dialog compliance-dialog" role="dialog" aria-modal="true" aria-labelledby="compliance-title">
+            <header class="modal-header"><h2 id="compliance-title">管理员合规确认</h2></header>
+            <div class="modal-body">
+                <div class="inline-alert warning" role="alert"><Icon Name="alert" Size="18" /><span>继续使用管理功能前，请阅读并确认管理员合规责任。</span></div>
+                <div class="legal-document-content" @((MarkupString)DocumentHtml)></div>
+                <div class="form-field"><label for="compliance-phrase">请输入确认短语</label><div class="compliance-phrase">@ExpectedPhrase</div><InputText id="compliance-phrase" @bind-Value="phrase" autocomplete="off" /></div>
+                @if (error is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@error</span></div> }
+            </div>
+            <footer class="modal-footer"><button type="button" class="button secondary" @onclick="LogoutAsync">退出登录</button><button type="button" class="button primary" disabled="@(!CanAccept || submitting)" @onclick="AcceptAsync">@(submitting ? "提交中…" : "确认并继续")</button></footer>
+        </section>
+    </div>
+}
+
+@code {
+    private AdminComplianceStatusDto? status;
+    private bool visible;
+    private bool submitting;
+    private string phrase = string.Empty;
+    private string? error;
+
+    private string ExpectedPhrase => string.IsNullOrWhiteSpace(status?.AckPhraseZh) ? "我已阅读并同意 ParaGateway 管理员合规责任" : status!.AckPhraseZh;
+    private bool CanAccept => string.Equals(phrase.Trim(), ExpectedPhrase, StringComparison.Ordinal);
+    private string DocumentHtml { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Auth.User?.IsAdmin != true) return;
+        try
+        {
+            status = await Api.GetAdminComplianceStatusAsync();
+            if (status.Required)
+            {
+                var markdown = await LoadDocumentAsync(status.DocumentPathZh);
+                DocumentHtml = MarkdownRenderer.ToSafeHtml(markdown);
+                visible = true;
+            }
+        }
+        catch (ApiException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden) { }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+
+    private async Task<string> LoadDocumentAsync(string path)
+    {
+        var slug = path.Replace('\\', '/').Split('/').LastOrDefault() ?? "admin-compliance.zh.md";
+        try { return await Api.GetCustomPageMarkdownAsync($"legal/{slug}"); }
+        catch { return "# 管理员合规确认\n\n请阅读 ParaGateway 部署文档后确认。"; }
+    }
+
+    private async Task AcceptAsync()
+    {
+        if (!CanAccept) { error = "确认短语不匹配。"; return; }
+        submitting = true; error = null;
+        try { status = await Api.AcceptAdminComplianceAsync(phrase.Trim(), "zh"); visible = status.Required; if (!visible) Toasts.Success("合规确认已记录"); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { submitting = false; }
+    }
+
+    private async Task LogoutAsync()
+    {
+        await Auth.LogoutAsync();
+        Navigation.NavigateTo("/login", replace: true);
+    }
+}

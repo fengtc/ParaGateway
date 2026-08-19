@@ -1,0 +1,21 @@
+<label class="settings-toggle-field">
+    <span class="settings-toggle-control">@ChildContent</span>
+    <span class="settings-toggle-copy">
+        <strong>@Label</strong>
+        @if (!string.IsNullOrWhiteSpace(Hint))
+        {
+            <small>@Hint</small>
+        }
+    </span>
+</label>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Hint { get; set; }
+
+    [Parameter, EditorRequired]
+    public RenderFragment ChildContent { get; set; } = default!;
+}

@@ -1,0 +1,677 @@
+@page "/api-keys"
+@page "/keys"
+@implements IDisposable
+@using System.Globalization
+@using System.Text
+@using System.Text.Json
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<PageTitle>API 密钥 · ParaGateway</PageTitle>
+
+<section class="keys-workspace">
+    <div class="keys-toolbar">
+        <div class="keys-toolbar-left">
+            <div class="search-box keys-search">
+                <Icon Name="search" Size="17" />
+                <input value="@search" @oninput="SearchChangedAsync" placeholder="搜索名称或 Key..." aria-label="搜索 API 密钥" />
+            </div>
+            <select class="compact-select" value="@groupFilter" @onchange="GroupFilterChangedAsync" aria-label="分组筛选">
+                <option value="">全部分组</option>
+                <option value="0">无分组</option>
+                @foreach (var group in groups)
+                {
+                    <option value="@group.Id">@group.Name</option>
+                }
+            </select>
+            <select class="compact-select" value="@statusFilter" @onchange="StatusFilterChangedAsync" aria-label="状态筛选">
+                <option value="">全部状态</option>
+                <option value="active">活跃</option>
+                <option value="inactive">已停用</option>
+                <option value="quota_exhausted">额度耗尽</option>
+                <option value="expired">已过期</option>
+            </select>
+            <ApiEndpointList ApiBaseUrl="@settings.ApiBaseUrl" CustomEndpoints="@settings.CustomEndpoints" />
+        </div>
+
+        <div class="keys-toolbar-actions">
+            <button type="button" class="button secondary icon-only" title="刷新" aria-label="刷新" disabled="@loading" @onclick="RefreshAsync"><Icon Name="refresh" Size="17" /></button>
+            <div class="menu-anchor">
+                <button type="button" class="button secondary" title="列设置" aria-expanded="@showColumnMenu" @onclick="ToggleColumnMenu"><Icon Name="columns" Size="16" /> 列设置</button>
+                @if (showColumnMenu)
+                {
+                    <div class="settings-menu columns-menu">
+                        @foreach (var column in ToggleableColumns)
+                        {
+                            <button type="button" @onclick="() => ToggleColumnAsync(column.Key)"><span>@column.Label</span>@if (IsColumnVisible(column.Key)) { <Icon Name="check" Size="15" /> }</button>
+                        }
+                    </div>
+                }
+            </div>
+            <button type="button" class="button primary" data-tour="keys-create-btn" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 创建密钥</button>
+        </div>
+    </div>
+
+    @if (loading && keys.Count == 0)
+    {
+        <div class="keys-state"><LoadingState Text="正在载入 API 密钥" /></div>
+    }
+    else if (error is not null && keys.Count == 0)
+    {
+        <div class="keys-state"><ErrorState Message="@error" OnRetry="RefreshAsync" /></div>
+    }
+    else if (keys.Count == 0)
+    {
+        <div class="keys-state"><EmptyState Title="暂无 API 密钥" Description="创建您的第一个 API 密钥以开始使用 API。"><Action><button type="button" class="button primary small" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> 创建密钥</button></Action></EmptyState></div>
+    }
+    else
+    {
+        @if (error is not null)
+        {
+            <div class="inline-alert danger keys-inline-error" role="alert"><Icon Name="alert" Size="17" /><span>@error</span></div>
+        }
+        <div class="keys-table-card" aria-busy="@loading">
+            <div class="keys-table-scroll">
+                <table class="keys-data-table">
+                    <thead>
+                        <tr>
+                            <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("name")'>名称 @SortIndicator("name")</button></th>
+                            @if (IsColumnVisible("id")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("id")'>ID @SortIndicator("id")</button></th> }
+                            @if (IsColumnVisible("key")) { <th>API 密钥</th> }
+                            @if (IsColumnVisible("group")) { <th>分组</th> }
+                            @if (IsColumnVisible("current_concurrency")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("current_concurrency")'>当前并发 @SortIndicator("current_concurrency")</button></th> }
+                            @if (IsColumnVisible("usage")) { <th>用量</th> }
+                            @if (IsColumnVisible("rate_limit")) { <th>速率限制</th> }
+                            @if (IsColumnVisible("expires_at")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("expires_at")'>过期时间 @SortIndicator("expires_at")</button></th> }
+                            @if (IsColumnVisible("status")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("status")'>状态 @SortIndicator("status")</button></th> }
+                            @if (IsColumnVisible("last_used_at")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("last_used_at")'>上次使用时间 @SortIndicator("last_used_at")</button></th> }
+                            @if (IsColumnVisible("last_used_ip")) { <th>最近使用 IP</th> }
+                            @if (IsColumnVisible("created_at")) { <th><button type="button" class="sort-header" @onclick='() => ChangeSortAsync("created_at")'>创建时间 @SortIndicator("created_at")</button></th> }
+                            <th class="actions-column">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in keys)
+                        {
+                            <tr @key="row.Id">
+                                <td class="name-cell">
+                                    <strong>@row.Name</strong>
+                                    @if (row.IpWhitelist.Count > 0 || row.IpBlacklist.Count > 0)
+                                    {
+                                        <span class="restriction-mark" title="已配置 IP 限制"><Icon Name="shield" Size="14" /></span>
+                                    }
+                                </td>
+                                @if (IsColumnVisible("id")) { <td class="numeric-cell">#@row.Id</td> }
+                                @if (IsColumnVisible("key"))
+                                {
+                                    <td>
+                                        <div class="key-copy-cell">
+                                            <code>@MaskApiKey(row.Key)</code>
+                                            <button type="button" class="mini-icon-button @(copiedKeyId == row.Id ? "copied" : null)" title="@(copiedKeyId == row.Id ? "已复制" : "复制到剪贴板")" aria-label="复制 @row.Name API 密钥" @onclick="() => CopyKeyAsync(row)"><Icon Name="@(copiedKeyId == row.Id ? "check" : "copy")" Size="14" /></button>
+                                        </div>
+                                    </td>
+                                }
+                                @if (IsColumnVisible("group"))
+                                {
+                                    <td>
+                                        <div class="group-select-cell">
+                                            @if (!string.IsNullOrWhiteSpace(row.GroupName)) { <span class="platform-dot @row.GroupPlatform"></span> }
+                                            <select value="@GroupValue(row)" disabled="@rowBusy.Contains(row.Id)" title="点击更换分组" aria-label="@($"{row.Name} 分组")" @onchange="e => ChangeGroupAsync(row, e)">
+                                                <option value="" disabled>无分组</option>
+                                                @foreach (var group in groups)
+                                                {
+                                                    <option value="@group.Id">@GroupOptionLabel(group)</option>
+                                                }
+                                            </select>
+                                        </div>
+                                    </td>
+                                }
+                                @if (IsColumnVisible("current_concurrency")) { <td><span class="concurrency-badge @(row.CurrentConcurrency > 0 ? "active" : null)">@row.CurrentConcurrency</span></td> }
+                                @if (IsColumnVisible("usage"))
+                                {
+                                    var usage = UsageFor(row);
+                                    <td>
+                                        <div class="usage-cell">
+                                            <span>今日：<strong>@Money4(usage.TodayActualCost)</strong></span>
+                                            <span>近 30 天：<strong>@Money4(usage.TotalActualCost)</strong></span>
+                                            @if (row.Quota > 0)
+                                            {
+                                                <span class="quota-line">额度：<strong class="@UsageTone(row.QuotaUsed, row.Quota)">@Money2(row.QuotaUsed) / @Money2(row.Quota)</strong></span>
+                                                <span class="usage-progress"><i class="@UsageTone(row.QuotaUsed, row.Quota)" style="@ProgressStyle(row.QuotaUsed, row.Quota)"></i></span>
+                                            }
+                                        </div>
+                                    </td>
+                                }
+                                @if (IsColumnVisible("rate_limit"))
+                                {
+                                    <td>
+                                        @if (HasRateLimit(row))
+                                        {
+                                            <div class="rate-limit-cell">
+                                                @if (row.RateLimit5h > 0) { @RateLimitLine("5h", row.Usage5h, row.RateLimit5h, row.Reset5hAt) }
+                                                @if (row.RateLimit1d > 0) { @RateLimitLine("1d", row.Usage1d, row.RateLimit1d, row.Reset1dAt) }
+                                                @if (row.RateLimit7d > 0) { @RateLimitLine("7d", row.Usage7d, row.RateLimit7d, row.Reset7dAt) }
+                                                @if (HasRateUsage(row)) { <button type="button" class="text-action" @onclick="() => OpenResetRate(row)"><Icon Name="refresh" Size="12" /> 重置</button> }
+                                            </div>
+                                        }
+                                        else { <span class="muted-dash">—</span> }
+                                    </td>
+                                }
+                                @if (IsColumnVisible("expires_at")) { <td><span class="date-cell @(row.ExpiresAt < DateTimeOffset.Now ? "expired" : null)">@(row.ExpiresAt.HasValue ? FormatDateTime(row.ExpiresAt.Value) : "永久有效")</span></td> }
+                                @if (IsColumnVisible("status")) { <td><span class="key-status @StatusClass(row.Status)">@StatusLabel(row.Status)</span></td> }
+                                @if (IsColumnVisible("last_used_at")) { <td><span class="date-cell">@(row.LastUsedAt.HasValue ? FormatDateTime(row.LastUsedAt.Value) : "—")</span></td> }
+                                @if (IsColumnVisible("last_used_ip")) { <td><span class="date-cell">@(string.IsNullOrWhiteSpace(row.LastUsedIp) ? "—" : row.LastUsedIp)</span></td> }
+                                @if (IsColumnVisible("created_at")) { <td><span class="date-cell">@FormatDateTime(row.CreatedAt)</span></td> }
+                                <td class="actions-column">
+                                    <div class="row-actions">
+                                        <button type="button" class="use-action" title="使用密钥" @onclick="() => OpenUseModal(row)"><Icon Name="terminal" Size="15" /><span>使用密钥</span></button>
+                                        @if (!settings.HideCcsImportButton) { <button type="button" class="ccs-action" title="导入到 CCS" @onclick="() => ImportToCcsAsync(row)"><Icon Name="upload" Size="15" /><span>导入到 CCS</span></button> }
+                                        <button type="button" class="toggle-action" title="@(row.Status == "active" ? "停用" : "启用")" disabled="@rowBusy.Contains(row.Id)" @onclick="() => ToggleStatusAsync(row)"><Icon Name="@(row.Status == "active" ? "ban" : "circle-check")" Size="15" /><span>@(row.Status == "active" ? "停用" : "启用")</span></button>
+                                        <button type="button" title="编辑" @onclick="() => OpenEdit(row)"><Icon Name="pencil" Size="15" /><span>编辑</span></button>
+                                        <button type="button" class="danger-action" title="删除" @onclick="() => OpenDelete(row)"><Icon Name="trash" Size="15" /><span>删除</span></button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (loading) { <div class="table-refresh-mask"><span class="spinner"></span></div> }
+        </div>
+
+        <div class="keys-pagination">
+            <span>第 @RangeStart-@RangeEnd 条，共 @total 条</span>
+            <div class="page-controls">
+                <label>每页<select value="@pageSize" disabled="@loading" @onchange="PageSizeChangedAsync" aria-label="每页条数">@foreach (var size in PageSizeOptions) { <option value="@size">@size</option> }</select>条</label>
+                <button type="button" class="icon-button" aria-label="上一页" disabled="@(loading || page <= 1)" @onclick="PreviousPageAsync"><Icon Name="chevron-left" Size="16" /></button>
+                @foreach (var pageNumber in VisiblePages) { <button type="button" class="page-button @(pageNumber == page ? "active" : null)" disabled="@loading" @onclick="() => GoToPageAsync(pageNumber)">@pageNumber</button> }
+                <button type="button" class="icon-button" aria-label="下一页" disabled="@(loading || page >= TotalPages)" @onclick="NextPageAsync"><Icon Name="chevron-right" Size="16" /></button>
+            </div>
+        </div>
+    }
+</section>
+
+<AppModal Open="@editorOpen" Title="@(editingId is null ? "创建密钥" : "编辑密钥")" MaxWidth="780px" OnClose="CloseEditor">
+    <ChildContent>
+        <EditForm id="key-editor" Model="form" OnValidSubmit="SaveAsync" FormName="key-editor">
+            <DataAnnotationsValidator />
+            @if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }
+
+            <div class="key-editor-section">
+                <h3>基本信息</h3>
+                <div class="form-grid">
+                    <div class="form-field full"><label for="key-name">名称</label><InputText id="key-name" @bind-Value="form.Name" @oninput="OnNameInput" placeholder="我的 API 密钥" data-tour="key-form-name" /><ValidationMessage For="() => form.Name" /></div>
+                    <div class="form-field full"><label for="key-group">分组</label><InputSelect id="key-group" TValue="long?" @bind-Value="form.GroupId" data-tour="key-form-group"><option value="">选择分组</option>@foreach (var group in groups) { <option value="@group.Id">@GroupOptionLabel(group)</option> }</InputSelect><ValidationMessage For="() => form.GroupId" /></div>
+                    @if (editingId is not null)
+                    {
+                        <div class="form-field full"><label for="key-status">状态</label><InputSelect id="key-status" @bind-Value="form.Status"><option value="active">活跃</option><option value="inactive">已停用</option></InputSelect></div>
+                    }
+                </div>
+            </div>
+
+            @if (editingId is null)
+            {
+                <div class="key-editor-section">
+                    <label class="key-toggle-row"><InputCheckbox @bind-Value="form.UseCustomKey" /><span><strong>自定义密钥</strong><small>使用您指定的密钥内容，而不是由系统自动生成。</small></span></label>
+                    @if (form.UseCustomKey)
+                    {
+                        <div class="form-field"><label for="custom-key">自定义密钥</label><InputText id="custom-key" class="mono-input" @bind-Value="form.CustomKey" @oninput="OnCustomKeyInput" placeholder="输入自定义密钥（至少 16 个字符）" /><small>仅允许字母、数字、下划线和连字符。</small><ValidationMessage For="() => form.CustomKey" /></div>
+                    }
+                </div>
+            }
+
+            <div class="key-editor-section">
+                <label class="key-toggle-row"><InputCheckbox @bind-Value="form.EnableIpRestriction" /><span><strong>IP 限制</strong><small>通过白名单和黑名单限制此密钥的来源地址。</small></span></label>
+                @if (form.EnableIpRestriction)
+                {
+                    <div class="form-grid key-editor-nested">
+                        <div class="form-field full"><label for="ip-whitelist">IP 白名单</label><InputTextArea id="ip-whitelist" class="mono-input" @bind-Value="form.IpWhitelistText" @oninput="OnIpWhitelistInput" rows="3" placeholder="192.168.1.100&#10;10.0.0.0/8" /><small>每行一个 IP 或 CIDR，设置后仅允许这些 IP 使用此密钥。</small></div>
+                        <div class="form-field full"><label for="ip-blacklist">IP 黑名单</label><InputTextArea id="ip-blacklist" class="mono-input" @bind-Value="form.IpBlacklistText" @oninput="OnIpBlacklistInput" rows="3" placeholder="1.2.3.4&#10;5.6.0.0/16" /><small>每行一个 IP 或 CIDR，这些 IP 将被禁止使用此密钥。</small></div>
+                    </div>
+                }
+            </div>
+
+            <div class="key-editor-section">
+                <h3>额度限制</h3>
+                <div class="form-field"><label for="key-quota">额度金额（USD）</label><div class="currency-input"><span>$</span><InputNumber id="key-quota" @bind-Value="form.Quota" @oninput="OnQuotaInput" min="0" step="0.01" placeholder="输入 USD 额度限制" /></div><small>设置此密钥可消费的最大金额。0 = 无限制。</small><ValidationMessage For="() => form.Quota" /></div>
+                @if (editingId is not null && selectedKey is { Quota: > 0 })
+                {
+                    <div class="editor-usage-row"><span>已用额度 <strong>@Money4(selectedKey.QuotaUsed)</strong> / @Money2(selectedKey.Quota)</span><button type="button" class="button secondary small" @onclick="OpenResetQuota">重置</button></div>
+                }
+            </div>
+
+            <div class="key-editor-section">
+                <label class="key-toggle-row"><InputCheckbox @bind-Value="form.EnableRateLimit" /><span><strong>速率限制</strong><small>设置指定时间窗口内的最大消费额；0 表示不限制。</small></span></label>
+                @if (form.EnableRateLimit)
+                {
+                    <div class="form-grid key-editor-nested rate-editor-grid">
+                        <div class="form-field"><label for="limit-5h">5 小时限额（USD）</label><div class="currency-input"><span>$</span><InputNumber id="limit-5h" @bind-Value="form.RateLimit5h" @oninput="OnRateLimit5hInput" min="0" step="0.01" /></div>@if (selectedKey?.RateLimit5h > 0) { @EditorUsage("5h", selectedKey.Usage5h, selectedKey.RateLimit5h) }</div>
+                        <div class="form-field"><label for="limit-1d">日限额（USD）</label><div class="currency-input"><span>$</span><InputNumber id="limit-1d" @bind-Value="form.RateLimit1d" @oninput="OnRateLimit1dInput" min="0" step="0.01" /></div>@if (selectedKey?.RateLimit1d > 0) { @EditorUsage("1d", selectedKey.Usage1d, selectedKey.RateLimit1d) }</div>
+                        <div class="form-field"><label for="limit-7d">7 天限额（USD）</label><div class="currency-input"><span>$</span><InputNumber id="limit-7d" @bind-Value="form.RateLimit7d" @oninput="OnRateLimit7dInput" min="0" step="0.01" /></div>@if (selectedKey?.RateLimit7d > 0) { @EditorUsage("7d", selectedKey.Usage7d, selectedKey.RateLimit7d) }</div>
+                    </div>
+                    @if (editingId is not null && selectedKey is not null && HasRateLimit(selectedKey))
+                    {
+                        <button type="button" class="button secondary small reset-editor-button" @onclick="OpenResetRateFromEditor"><Icon Name="refresh" Size="14" /> 重置速率限制用量</button>
+                    }
+                }
+            </div>
+
+            <div class="key-editor-section expiration-section">
+                <label class="key-toggle-row"><InputCheckbox @bind-Value="form.EnableExpiration" /><span><strong>密钥有效期</strong><small>关闭时永久有效。</small></span></label>
+                @if (form.EnableExpiration)
+                {
+                    <div class="expiration-options">
+                        @foreach (var days in ExpirationDays) { <button type="button" class="@(expirationPreset == days.ToString(CultureInfo.InvariantCulture) ? "active" : null)" @onclick="() => SetExpirationDays(days)">@(editingId is null ? $"{days} 天" : $"+{days} 天")</button> }
+                        <button type="button" class="@(expirationPreset == "custom" ? "active" : null)" @onclick='() => expirationPreset = "custom"'>自定义</button>
+                    </div>
+                    <div class="form-field"><label for="key-expires">过期时间</label><InputDate id="key-expires" TValue="DateTimeOffset?" @bind-Value="form.ExpiresAt" Type="InputDateType.DateTimeLocal" /><small>选择此 API 密钥的过期时间。</small><ValidationMessage For="() => form.ExpiresAt" /></div>
+                    @if (editingId is not null && selectedKey?.ExpiresAt is not null) { <p class="current-expiration">当前过期时间：<strong>@FormatDateTime(selectedKey.ExpiresAt.Value)</strong></p> }
+                }
+            </div>
+        </EditForm>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" disabled="@saving" @onclick="CloseEditor">取消</button><button type="submit" form="key-editor" class="button primary" disabled="@saving" data-tour="key-form-submit">@if (saving) { <span class="spinner light"></span> } @(editingId is null ? "创建" : "更新")</button></Footer>
+</AppModal>
+
+<AppModal Open="@(deleteTarget is not null)" Title="删除密钥" MaxWidth="480px" OnClose="CloseDelete">
+    <ChildContent>@if (deleteTarget is not null) { <div class="delete-confirm"><div class="delete-icon"><Icon Name="alert" Size="22" /></div><div><strong>确定要删除“@deleteTarget.Name”吗？</strong><p>此操作无法撤销，使用该密钥的客户端将立即失去访问权限。</p></div></div>@if (modalError is not null) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@modalError</span></div> } }</ChildContent>
+    <Footer><button type="button" class="button secondary" disabled="@saving" @onclick="CloseDelete">取消</button><button type="button" class="button danger" disabled="@saving" @onclick="DeleteAsync"><Icon Name="trash" Size="16" /> 删除</button></Footer>
+</AppModal>
+
+<AppModal Open="@(resetMode is not null && resetTarget is not null)" Title="@(resetMode == "quota" ? "确认重置额度" : "确认重置速率限制")" MaxWidth="500px" OnClose="CloseReset">
+    <ChildContent>@if (resetTarget is not null) { <p class="confirm-copy">@(resetMode == "quota" ? $"确定将密钥“{resetTarget.Name}”的已用额度（{Money4(resetTarget.QuotaUsed)}）重置为 0 吗？" : $"确定重置密钥“{resetTarget.Name}”所有时间窗口的已用额度吗？") 此操作不可撤销。</p>@if (modalError is not null) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@modalError</span></div> } }</ChildContent>
+    <Footer><button type="button" class="button secondary" disabled="@saving" @onclick="CloseReset">取消</button><button type="button" class="button danger" disabled="@saving" @onclick="ResetAsync"><Icon Name="refresh" Size="16" /> 重置</button></Footer>
+</AppModal>
+
+<AppModal Open="@ccsClientOpen" Title="选择客户端" MaxWidth="520px" OnClose="CloseCcsClient">
+    <ChildContent><p class="ccs-description">请选择您要导入到 CC-Switch 的客户端类型：</p><div class="ccs-client-grid"><button type="button" @onclick='() => SelectCcsClientAsync("claude")'><Icon Name="terminal" Size="25" /><strong>Claude Code</strong><small>导入为 Claude Code 配置</small></button><button type="button" @onclick='() => SelectCcsClientAsync("gemini")'><Icon Name="sparkles" Size="25" /><strong>Gemini CLI</strong><small>导入为 Gemini CLI 配置</small></button></div></ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseCcsClient">取消</button></Footer>
+</AppModal>
+
+<UseApiKeyModal Open="@useModalOpen" Key="@useKey" BaseUrl="@EffectiveBaseUrl" OnClose="CloseUseModal" />
+
+@code {
+    private const string HiddenColumnsKey = "api-key-hidden-columns";
+    private const string ColumnVersionKey = "api-key-column-settings-version";
+    private const string PageSizeKey = "api-key-page-size";
+    private const int ColumnVersion = 3;
+    private static readonly JsonSerializerOptions PreferenceJson = new(JsonSerializerDefaults.Web);
+    private static readonly int[] ExpirationDays = [7, 30, 90];
+    private static readonly IReadOnlyList<ColumnOption> ToggleableColumns =
+    [
+        new("id", "ID"), new("key", "API 密钥"), new("group", "分组"), new("current_concurrency", "当前并发"),
+        new("usage", "用量"), new("rate_limit", "速率限制"), new("expires_at", "过期时间"), new("status", "状态"),
+        new("last_used_at", "上次使用时间"), new("last_used_ip", "最近使用 IP"), new("created_at", "创建时间")
+    ];
+
+    private readonly HashSet<string> hiddenColumns = new(StringComparer.OrdinalIgnoreCase) { "id", "rate_limit", "last_used_at", "last_used_ip" };
+    private readonly HashSet<string> rowBusy = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ApiKeyUsageStatDto> usageStats = new(StringComparer.OrdinalIgnoreCase);
+    private List<ApiKeyDto> keys = [];
+    private List<GoGroup> groups = [];
+    private Dictionary<long, double> userGroupRates = [];
+    private PublicSettingsDto settings = new();
+    private SelfApiKeyInput form = new();
+    private ApiKeyDto? selectedKey;
+    private ApiKeyDto? deleteTarget;
+    private ApiKeyDto? resetTarget;
+    private ApiKeyDto? useKey;
+    private ApiKeyDto? pendingCcsKey;
+    private CancellationTokenSource? searchDebounce;
+    private Timer? resetTimer;
+    private string? editingId;
+    private string? resetMode;
+    private string? copiedKeyId;
+    private string? error;
+    private string? modalError;
+    private string search = string.Empty;
+    private string groupFilter = string.Empty;
+    private string statusFilter = string.Empty;
+    private string sortBy = "created_at";
+    private string sortOrder = "desc";
+    private string expirationPreset = "30";
+    private int page = 1;
+    private int pageSize = 20;
+    private long total;
+    private int loadSequence;
+    private bool loading = true;
+    private bool saving;
+    private bool editorOpen;
+    private bool useModalOpen;
+    private bool ccsClientOpen;
+    private bool showColumnMenu;
+    private bool preferencesLoaded;
+
+    private string EffectiveBaseUrl => (string.IsNullOrWhiteSpace(settings.ApiBaseUrl) ? Navigation.BaseUri : settings.ApiBaseUrl).TrimEnd('/');
+    private int TotalPages => Math.Max(1, (int)Math.Ceiling(total / (double)Math.Max(1, pageSize)));
+    private long RangeStart => total == 0 ? 0 : (page - 1L) * pageSize + 1;
+    private long RangeEnd => Math.Min(total, (long)page * pageSize);
+    private IEnumerable<int> VisiblePages { get { var start = Math.Max(1, Math.Min(page - 2, TotalPages - 4)); var end = Math.Min(TotalPages, start + 4); return Enumerable.Range(start, end - start + 1); } }
+    private IReadOnlyList<int> PageSizeOptions => settings.TablePageSizeOptions.Where(x => x is > 0 and <= 100).Distinct().Order().DefaultIfEmpty(20).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSupportingDataAsync();
+        await LoadKeysAsync();
+        resetTimer = new Timer(_ => _ = InvokeAsync(StateHasChanged), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || preferencesLoaded) return;
+        preferencesLoaded = true;
+        var oldPageSize = pageSize;
+        try
+        {
+            var savedColumns = await JS.InvokeAsync<string?>("localStorage.getItem", HiddenColumnsKey);
+            if (!string.IsNullOrWhiteSpace(savedColumns))
+            {
+                var values = JsonSerializer.Deserialize<List<string>>(savedColumns, PreferenceJson) ?? [];
+                hiddenColumns.Clear();
+                foreach (var value in values.Where(x => ToggleableColumns.Any(c => c.Key.Equals(x, StringComparison.OrdinalIgnoreCase)))) hiddenColumns.Add(value);
+            }
+            var savedVersion = await JS.InvokeAsync<string?>("localStorage.getItem", ColumnVersionKey);
+            if (!int.TryParse(savedVersion, out var version) || version < ColumnVersion)
+            {
+                hiddenColumns.Add("id"); hiddenColumns.Add("last_used_ip");
+                await SaveColumnPreferencesAsync();
+            }
+            await JS.InvokeVoidAsync("localStorage.setItem", ColumnVersionKey, ColumnVersion.ToString(CultureInfo.InvariantCulture));
+            var savedPageSize = await JS.InvokeAsync<string?>("localStorage.getItem", PageSizeKey);
+            if (int.TryParse(savedPageSize, out var storedSize) && PageSizeOptions.Contains(storedSize)) pageSize = storedSize;
+        }
+        catch (JSException) { }
+        if (oldPageSize != pageSize) { page = 1; await LoadKeysAsync(); }
+        else { StateHasChanged(); }
+    }
+
+    private async Task LoadSupportingDataAsync()
+    {
+        try
+        {
+            settings = await Api.GetPublicSettingsAsync();
+            if (settings.TableDefaultPageSize is > 0 and <= 100) pageSize = settings.TableDefaultPageSize;
+        }
+        catch (ApiException) { settings = new PublicSettingsDto(); }
+        try { groups = (await Api.GetMyAvailableGroupsAsync()).OrderBy(x => x.SortOrder).ThenBy(x => x.Name).ToList(); }
+        catch (ApiException) { groups = []; }
+        try { userGroupRates = await Api.GetUserGroupRatesAsync(); }
+        catch (ApiException) { userGroupRates = []; }
+    }
+
+    private async Task LoadKeysAsync()
+    {
+        var sequence = ++loadSequence;
+        loading = true; error = null; showColumnMenu = false;
+        try
+        {
+            var result = await Api.GetMyApiKeysPageAsync(new ApiKeyListQuery
+            {
+                Page = page, PageSize = pageSize, Search = search, Status = statusFilter, GroupId = groupFilter,
+                SortBy = sortBy, SortOrder = sortOrder
+            });
+            if (sequence != loadSequence) return;
+            keys = result.Items; total = result.Total; page = result.Page > 0 ? result.Page : page;
+            usageStats.Clear();
+            var ids = keys.Select(x => long.TryParse(x.Id, out var id) ? id : 0).Where(x => x > 0).ToArray();
+            if (ids.Length > 0)
+            {
+                try
+                {
+                    var usage = await Api.GetMyApiKeyUsageBatchAsync(ids);
+                    if (sequence == loadSequence) foreach (var item in usage.Stats) usageStats[item.Key] = item.Value;
+                }
+                catch (ApiException) { }
+            }
+        }
+        catch (ApiException ex) { if (sequence == loadSequence) error = ex.Message; }
+        finally { if (sequence == loadSequence) loading = false; }
+    }
+
+    private Task RefreshAsync() => LoadKeysAsync();
+    private async Task SearchChangedAsync(ChangeEventArgs e)
+    {
+        search = e.Value?.ToString() ?? string.Empty;
+        searchDebounce?.Cancel(); searchDebounce?.Dispose(); searchDebounce = new CancellationTokenSource();
+        try { await Task.Delay(350, searchDebounce.Token); page = 1; await LoadKeysAsync(); } catch (OperationCanceledException) { }
+    }
+    private async Task GroupFilterChangedAsync(ChangeEventArgs e) { groupFilter = e.Value?.ToString() ?? string.Empty; page = 1; await LoadKeysAsync(); }
+    private async Task StatusFilterChangedAsync(ChangeEventArgs e) { statusFilter = e.Value?.ToString() ?? string.Empty; page = 1; await LoadKeysAsync(); }
+    private async Task ChangeSortAsync(string key) { if (sortBy == key) sortOrder = sortOrder == "asc" ? "desc" : "asc"; else { sortBy = key; sortOrder = "asc"; } page = 1; await LoadKeysAsync(); }
+    private string SortIndicator(string key) => sortBy == key ? (sortOrder == "asc" ? "↑" : "↓") : string.Empty;
+
+    private async Task PageSizeChangedAsync(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var value) || value <= 0) return;
+        pageSize = Math.Min(100, value); page = 1;
+        try { await JS.InvokeVoidAsync("localStorage.setItem", PageSizeKey, pageSize.ToString(CultureInfo.InvariantCulture)); } catch (JSException) { }
+        await LoadKeysAsync();
+    }
+    private Task PreviousPageAsync() => GoToPageAsync(page - 1);
+    private Task NextPageAsync() => GoToPageAsync(page + 1);
+    private async Task GoToPageAsync(int target) { var normalized = Math.Clamp(target, 1, TotalPages); if (normalized == page) return; page = normalized; await LoadKeysAsync(); }
+
+    private void ToggleColumnMenu() => showColumnMenu = !showColumnMenu;
+    private bool IsColumnVisible(string key) => !hiddenColumns.Contains(key);
+    private async Task ToggleColumnAsync(string key) { if (!hiddenColumns.Remove(key)) hiddenColumns.Add(key); await SaveColumnPreferencesAsync(); }
+    private async Task SaveColumnPreferencesAsync() { try { await JS.InvokeVoidAsync("localStorage.setItem", HiddenColumnsKey, JsonSerializer.Serialize(hiddenColumns, PreferenceJson)); } catch (JSException) { } }
+
+    private void OnNameInput(ChangeEventArgs args) => form.Name = args.Value?.ToString() ?? string.Empty;
+    private void OnCustomKeyInput(ChangeEventArgs args) => form.CustomKey = args.Value?.ToString() ?? string.Empty;
+    private void OnIpWhitelistInput(ChangeEventArgs args) => form.IpWhitelistText = args.Value?.ToString() ?? string.Empty;
+    private void OnIpBlacklistInput(ChangeEventArgs args) => form.IpBlacklistText = args.Value?.ToString() ?? string.Empty;
+    private void OnQuotaInput(ChangeEventArgs args) => form.Quota = ReadAmount(args, form.Quota);
+    private void OnRateLimit5hInput(ChangeEventArgs args) => form.RateLimit5h = ReadAmount(args, form.RateLimit5h);
+    private void OnRateLimit1dInput(ChangeEventArgs args) => form.RateLimit1d = ReadAmount(args, form.RateLimit1d);
+    private void OnRateLimit7dInput(ChangeEventArgs args) => form.RateLimit7d = ReadAmount(args, form.RateLimit7d);
+    private static double ReadAmount(ChangeEventArgs args, double fallback)
+    {
+        var value = args.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(value)) return 0;
+        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var invariant)) return invariant;
+        return double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out var localized) ? localized : fallback;
+    }
+
+    private void OpenCreate() { editingId = null; selectedKey = null; form = new SelfApiKeyInput(); expirationPreset = "30"; modalError = null; editorOpen = true; showColumnMenu = false; }
+    private void OpenEdit(ApiKeyDto row)
+    {
+        editingId = row.Id; selectedKey = row; expirationPreset = "custom"; modalError = null;
+        form = new SelfApiKeyInput
+        {
+            IsEditing = true, Name = row.Name, GroupId = row.GroupId,
+            Status = row.Status is "quota_exhausted" or "expired" ? "inactive" : row.Status,
+            EnableIpRestriction = row.IpWhitelist.Count > 0 || row.IpBlacklist.Count > 0,
+            IpWhitelistText = string.Join(Environment.NewLine, row.IpWhitelist), IpBlacklistText = string.Join(Environment.NewLine, row.IpBlacklist),
+            Quota = row.Quota, EnableRateLimit = HasRateLimit(row), RateLimit5h = row.RateLimit5h, RateLimit1d = row.RateLimit1d, RateLimit7d = row.RateLimit7d,
+            EnableExpiration = row.ExpiresAt.HasValue, ExpiresAt = row.ExpiresAt
+        };
+        editorOpen = true; showColumnMenu = false;
+    }
+    private void CloseEditor() { if (!saving) { editorOpen = false; editingId = null; selectedKey = null; modalError = null; } }
+    private void SetExpirationDays(int days) { expirationPreset = days.ToString(CultureInfo.InvariantCulture); form.ExpiresAt = DateTimeOffset.Now.AddDays(days); }
+
+    private async Task SaveAsync()
+    {
+        saving = true; modalError = null;
+        try
+        {
+            if (editingId is null)
+            {
+                await Api.CreateMyApiKeyAsync(form);
+                Toasts.Success("API 密钥创建成功");
+            }
+            else
+            {
+                var includeStatus = selectedKey is null || selectedKey.Status is not ("quota_exhausted" or "expired") || form.Status == "active";
+                await Api.UpdateMyApiKeyAsync(editingId, form, includeStatus);
+                Toasts.Success("API 密钥更新成功");
+            }
+            editorOpen = false; editingId = null; selectedKey = null; await LoadKeysAsync();
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task ChangeGroupAsync(ApiKeyDto row, ChangeEventArgs e)
+    {
+        if (!long.TryParse(e.Value?.ToString(), out var groupId) || groupId <= 0 || row.GroupId == groupId) return;
+        rowBusy.Add(row.Id);
+        try { await Api.ChangeMyApiKeyGroupAsync(row.Id, groupId); Toasts.Success("分组更换成功"); await LoadKeysAsync(); }
+        catch (ApiException ex) { Toasts.Error(ex.Message); }
+        finally { rowBusy.Remove(row.Id); }
+    }
+
+    private async Task ToggleStatusAsync(ApiKeyDto row)
+    {
+        if (!rowBusy.Add(row.Id)) return;
+        var status = row.Status == "active" ? "inactive" : "active";
+        try { await Api.SetMyApiKeyStatusAsync(row.Id, status); Toasts.Success(status == "active" ? "API 密钥已启用" : "API 密钥已停用"); await LoadKeysAsync(); }
+        catch (ApiException ex) { Toasts.Error(ex.Message); }
+        finally { rowBusy.Remove(row.Id); }
+    }
+
+    private void OpenDelete(ApiKeyDto row) { deleteTarget = row; modalError = null; }
+    private void CloseDelete() { if (!saving) { deleteTarget = null; modalError = null; } }
+    private async Task DeleteAsync()
+    {
+        if (deleteTarget is null) return;
+        saving = true; modalError = null;
+        try { await Api.DeleteMyApiKeyAsync(deleteTarget.Id); deleteTarget = null; Toasts.Success("API 密钥删除成功"); await LoadKeysAsync(); }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private void OpenResetQuota() { if (selectedKey is not null) { resetTarget = selectedKey; resetMode = "quota"; modalError = null; } }
+    private void OpenResetRate(ApiKeyDto row) { resetTarget = row; resetMode = "rate"; modalError = null; }
+    private void OpenResetRateFromEditor() { if (selectedKey is not null) OpenResetRate(selectedKey); }
+    private void CloseReset() { if (!saving) { resetTarget = null; resetMode = null; modalError = null; } }
+    private async Task ResetAsync()
+    {
+        if (resetTarget is null || resetMode is null) return;
+        saving = true; modalError = null;
+        try
+        {
+            var targetId = resetTarget.Id;
+            if (resetMode == "quota") { await Api.ResetMyApiKeyQuotaAsync(targetId); Toasts.Success("额度重置成功"); }
+            else { await Api.ResetMyApiKeyRateLimitAsync(targetId); Toasts.Success("速率限制已重置"); }
+            resetTarget = null; resetMode = null; await LoadKeysAsync();
+            if (editorOpen) { selectedKey = keys.FirstOrDefault(x => x.Id == targetId) ?? selectedKey; }
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private void OpenUseModal(ApiKeyDto row) { useKey = row; useModalOpen = true; }
+    private void CloseUseModal() { useModalOpen = false; useKey = null; }
+
+    private async Task ImportToCcsAsync(ApiKeyDto row)
+    {
+        if (row.GroupPlatform == "antigravity") { pendingCcsKey = row; ccsClientOpen = true; return; }
+        await ExecuteCcsImportAsync(row, row.GroupPlatform == "gemini" ? "gemini" : "claude");
+    }
+    private async Task SelectCcsClientAsync(string client) { var row = pendingCcsKey; CloseCcsClient(); if (row is not null) await ExecuteCcsImportAsync(row, client); }
+    private void CloseCcsClient() { ccsClientOpen = false; pendingCcsKey = null; }
+    private async Task ExecuteCcsImportAsync(ApiKeyDto row, string clientType)
+    {
+        try { await JS.InvokeVoidAsync("open", BuildCcSwitchDeepLink(row, clientType), "_self"); Toasts.Info("已发送到 CC-Switch；若未打开，请确认已安装并注册协议。"); }
+        catch (JSException) { Toasts.Error("CC-Switch 未安装或协议处理程序未注册。请先安装 CC-Switch 或手动复制 API 密钥。"); }
+    }
+    private string BuildCcSwitchDeepLink(ApiKeyDto row, string clientType)
+    {
+        var baseUrl = EffectiveBaseUrl;
+        var platform = string.IsNullOrWhiteSpace(row.GroupPlatform) ? "anthropic" : row.GroupPlatform;
+        var app = platform switch { "openai" => "codex", "gemini" => "gemini", "grok" => "grokbuild", "antigravity" when clientType == "gemini" => "gemini", _ => "claude" };
+        var endpoint = platform switch { "grok" => EnsureSuffix(baseUrl, "/v1"), "antigravity" => baseUrl + "/antigravity", _ => baseUrl };
+        var model = platform switch { "openai" => "gpt-5.5", "grok" => "grok-4.5", _ => string.Empty };
+        const string usageScript = "({\n"
+            + "  request: {\n"
+            + "    url: \"{{baseUrl}}/v1/usage\",\n"
+            + "    method: \"GET\",\n"
+            + "    headers: { \"Authorization\": \"Bearer {{apiKey}}\" }\n"
+            + "  },\n"
+            + "  extractor: function(response) {\n"
+            + "    const remaining = response?.remaining ?? response?.quota?.remaining ?? response?.balance;\n"
+            + "    const unit = response?.unit ?? response?.quota?.unit ?? \"USD\";\n"
+            + "    return { isValid: response?.is_active ?? response?.isValid ?? true, remaining, unit };\n"
+            + "  }\n"
+            + "})";
+        var entries = new List<KeyValuePair<string, string>>
+        {
+            new("resource", "provider"), new("app", app), new("name", string.IsNullOrWhiteSpace(settings.SiteName) ? "ParaGateway" : settings.SiteName.Trim()),
+            new("homepage", baseUrl), new("endpoint", endpoint), new("apiKey", row.Key), new("configFormat", "json"), new("usageEnabled", "true"),
+            new("usageScript", Convert.ToBase64String(Encoding.UTF8.GetBytes(usageScript))), new("usageAutoInterval", "30")
+        };
+        if (!string.IsNullOrWhiteSpace(model)) entries.Insert(2, new("model", model));
+        return "ccswitch://v1/import?" + string.Join('&', entries.Select(x => $"{Uri.EscapeDataString(x.Key)}={Uri.EscapeDataString(x.Value)}"));
+    }
+
+    private async Task CopyKeyAsync(ApiKeyDto row)
+    {
+        if (string.IsNullOrWhiteSpace(row.Key)) return;
+        try
+        {
+            var copied = await JS.InvokeAsync<bool>("paraGateway.copyText", row.Key);
+            if (!copied)
+            {
+                Toasts.Error("复制 API 密钥失败，请检查浏览器剪贴板权限后重试。");
+                return;
+            }
+
+            copiedKeyId = row.Id;
+            Toasts.Success("API 密钥已复制");
+            StateHasChanged();
+            await Task.Delay(900);
+            if (copiedKeyId == row.Id)
+            {
+                copiedKeyId = null;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (JSException)
+        {
+            Toasts.Error("复制 API 密钥失败，请检查浏览器剪贴板权限后重试。");
+        }
+    }
+
+    private ApiKeyUsageStatDto UsageFor(ApiKeyDto row) => usageStats.TryGetValue(row.Id, out var value) ? value : new();
+    private string GroupValue(ApiKeyDto row) => row.GroupId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    private string GroupOptionLabel(GoGroup group) { var rate = userGroupRates.TryGetValue(group.Id, out var custom) ? custom : group.RateMultiplier; return $"{group.Name} · {PlatformLabel(group.Platform)} · {rate:0.###}x"; }
+    private static string MaskApiKey(string value) => string.IsNullOrEmpty(value) ? string.Empty : value.Length <= 12 ? value[..Math.Min(4, value.Length)] + "***" : value[..6] + "..." + value[^4..];
+    private static bool HasRateLimit(ApiKeyDto row) => row.RateLimit5h > 0 || row.RateLimit1d > 0 || row.RateLimit7d > 0;
+    private static bool HasRateUsage(ApiKeyDto row) => row.Usage5h > 0 || row.Usage1d > 0 || row.Usage7d > 0;
+    private static string ProgressStyle(double used, double limit) => $"width:{(limit <= 0 ? 0 : Math.Min(100, used / limit * 100)).ToString("0.##", CultureInfo.InvariantCulture)}%";
+    private static string UsageTone(double used, double limit) => limit > 0 && used >= limit ? "danger" : limit > 0 && used >= limit * .8 ? "warning" : "normal";
+    private static string StatusClass(string status) => status switch { "active" => "active", "quota_exhausted" => "warning", "expired" => "danger", _ => "inactive" };
+    private static string StatusLabel(string status) => status switch { "active" => "活跃", "inactive" => "已停用", "quota_exhausted" => "额度耗尽", "expired" => "已过期", _ => status };
+    private static string PlatformLabel(string value) => value switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", _ => value };
+    private static string FormatDateTime(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.CurrentCulture);
+    private static string Money2(double value) => "$" + value.ToString("0.00", CultureInfo.InvariantCulture);
+    private static string Money4(double value) => "$" + value.ToString("0.0000", CultureInfo.InvariantCulture);
+    private static string EnsureSuffix(string root, string suffix) => root.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) ? root : root.TrimEnd('/') + suffix;
+    private static string FormatResetTime(DateTimeOffset? resetAt)
+    {
+        if (!resetAt.HasValue) return string.Empty;
+        var diff = resetAt.Value - DateTimeOffset.Now;
+        if (diff <= TimeSpan.Zero) return "即将重置";
+        if (diff.TotalDays >= 1) return $"{(int)diff.TotalDays}d {diff.Hours}h";
+        if (diff.TotalHours >= 1) return $"{(int)diff.TotalHours}h {diff.Minutes}m";
+        return $"{Math.Max(0, diff.Minutes)}m";
+    }
+    private RenderFragment RateLimitLine(string label, double used, double limit, DateTimeOffset? resetAt) => builder =>
+    {
+        var seq = 0; builder.OpenElement(seq++, "div"); builder.AddAttribute(seq++, "class", "rate-window");
+        builder.OpenElement(seq++, "div"); builder.OpenElement(seq++, "span"); builder.AddContent(seq++, label); builder.CloseElement(); builder.OpenElement(seq++, "strong"); builder.AddAttribute(seq++, "class", UsageTone(used, limit)); builder.AddContent(seq++, $"{Money2(used)}/{Money2(limit)}"); builder.CloseElement(); builder.CloseElement();
+        builder.OpenElement(seq++, "span"); builder.AddAttribute(seq++, "class", "usage-progress compact"); builder.OpenElement(seq++, "i"); builder.AddAttribute(seq++, "class", UsageTone(used, limit)); builder.AddAttribute(seq++, "style", ProgressStyle(used, limit)); builder.CloseElement(); builder.CloseElement();
+        var reset = FormatResetTime(resetAt); if (!string.IsNullOrWhiteSpace(reset)) { builder.OpenElement(seq++, "small"); builder.AddContent(seq++, "⟳ " + reset); builder.CloseElement(); }
+        builder.CloseElement();
+    };
+    private RenderFragment EditorUsage(string label, double used, double limit) => builder =>
+    {
+        var seq = 0; builder.OpenElement(seq++, "div"); builder.AddAttribute(seq++, "class", "editor-rate-usage"); builder.OpenElement(seq++, "span"); builder.AddContent(seq++, $"{label} 已用 {Money4(used)} / {Money2(limit)}"); builder.CloseElement(); builder.OpenElement(seq++, "span"); builder.AddAttribute(seq++, "class", "usage-progress"); builder.OpenElement(seq++, "i"); builder.AddAttribute(seq++, "class", UsageTone(used, limit)); builder.AddAttribute(seq++, "style", ProgressStyle(used, limit)); builder.CloseElement(); builder.CloseElement(); builder.CloseElement();
+    };
+
+    public void Dispose() { searchDebounce?.Cancel(); searchDebounce?.Dispose(); resetTimer?.Dispose(); }
+    private sealed record ColumnOption(string Key, string Label);
+}

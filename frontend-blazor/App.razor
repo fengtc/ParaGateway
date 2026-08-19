@@ -1,0 +1,59 @@
+@implements IDisposable
+@inject AuthSession Auth
+@inject ApiClient Api
+@inject NavigationManager Navigation
+
+@if (!Auth.IsInitialized)
+{
+    <div class="app-boot" role="status">
+        <span class="spinner"></span>
+        <span>正在载入 ParaGateway</span>
+    </div>
+}
+else
+{
+    <Router AppAssembly="@typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+        <Found Context="routeData">
+            <RouteGuard RouteData="routeData" />
+            <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        </Found>
+    </Router>
+}
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        Auth.Changed += OnAuthChanged;
+        await Auth.InitializeAsync();
+        await RedirectToSetupIfNeededAsync();
+    }
+
+    private async Task RedirectToSetupIfNeededAsync()
+    {
+        var path = Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].Trim('/');
+        if (path.Equals("setup", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            var status = await Api.GetSetupStatusAsync();
+            if (status.ValueKind == JsonValueKind.Object
+                && status.TryGetProperty("needs_setup", out var needsSetup)
+                && needsSetup.ValueKind == JsonValueKind.True)
+            {
+                Navigation.NavigateTo("/setup", replace: true);
+            }
+        }
+        catch (ApiException)
+        {
+            // The normal server may briefly be unavailable during startup; the
+            // existing page-level error state will report that condition.
+        }
+    }
+
+    private void OnAuthChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Auth.Changed -= OnAuthChanged;
+}
