@@ -35,17 +35,17 @@ type CopilotOAuthPollRequest struct {
 }
 
 type CopilotOAuthFlowResponse struct {
-	FlowID            string         `json:"flow_id"`
-	Profile           string         `json:"profile"`
-	Status            string         `json:"status"`
-	UserCode          string         `json:"user_code,omitempty"`
-	VerificationURI   string         `json:"verification_uri,omitempty"`
-	ExpiresAt         time.Time      `json:"expires_at"`
-	IntervalSeconds   int            `json:"interval_seconds"`
-	NextPollAt        time.Time      `json:"next_poll_at"`
-	ProviderAccountID *int64         `json:"provider_account_id,omitempty"`
-	CompletedAt       *time.Time     `json:"completed_at,omitempty"`
-	Provider          *dto.Account   `json:"provider,omitempty"`
+	FlowID            string       `json:"flow_id"`
+	Profile           string       `json:"profile"`
+	Status            string       `json:"status"`
+	UserCode          string       `json:"user_code,omitempty"`
+	VerificationURI   string       `json:"verification_uri,omitempty"`
+	ExpiresAt         time.Time    `json:"expires_at"`
+	IntervalSeconds   int          `json:"interval_seconds"`
+	NextPollAt        time.Time    `json:"next_poll_at"`
+	ProviderAccountID *int64       `json:"provider_account_id,omitempty"`
+	CompletedAt       *time.Time   `json:"completed_at,omitempty"`
+	Provider          *dto.Account `json:"provider,omitempty"`
 }
 
 type openAIQuotaService interface {

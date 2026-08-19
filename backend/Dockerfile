@@ -1,9 +1,10 @@
-FROM golang:1.26.5-alpine
+FROM golang:1.26.6-alpine
 
 WORKDIR /app
 
-# 安装必要的工具
-RUN apk add --no-cache git
+# Git is used by version/build helpers; tzdata is required when the configured
+# application timezone is Asia/Shanghai (the Alpine Go image does not ship it).
+RUN apk add --no-cache git tzdata
 
 # 复制go.mod和go.sum
 COPY go.mod go.sum ./

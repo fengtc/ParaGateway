@@ -150,9 +150,8 @@ func (s *OpenAIGatewayService) openAIChatCompletionsTargetURL(account *Account) 
 	return buildOpenAIChatCompletionsURL(validatedURL), nil
 }
 
-// resolveCCFallbackTarget 解析两条 CC 回退路径共用的账号凭证与上游端点
-// （回退路径仅面向 APIKey 账号，凭证恒为 openai api_key）。
-
+// resolveCCFallbackTarget 解析两条 CC 回退路径共用的账号凭证与上游端点。
+// APIKey/WIF 使用统一协议凭据，GitHub Copilot 使用短期运行令牌。
 func (s *OpenAIGatewayService) resolveCCFallbackTarget(ctx context.Context, c *gin.Context, account *Account) (apiKey string, targetURL string, err error) {
 	if account.IsGitHubCopilot() {
 		apiKey, _, err = s.getRequestCredential(ctx, c, account)

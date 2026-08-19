@@ -56,7 +56,9 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("account %d missing upstream credential", account.ID)
 	}
-	baseURL := account.GetOpenAIBaseURL()
+	// 协议感知：Anthropic 协议账号的凭证 base_url 指向 /anthropic 端点，
+	// embeddings 需使用 OpenAI 格式 base。
+	baseURL := account.GetOpenAIFormatBaseURL()
 	if baseURL == "" {
 		baseURL = "https://api.openai.com"
 	}

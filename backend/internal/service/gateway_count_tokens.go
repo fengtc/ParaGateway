@@ -378,6 +378,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthroughWithTo
 	token string,
 	tokenType string,
 ) (*http.Request, error) {
+	body = stripDeferredToolCacheControl(body)
 	targetURL := claudeAPICountTokensURL
 	baseURL := account.GetBaseURL()
 	if baseURL != "" {
@@ -445,6 +446,7 @@ func (s *GatewayService) buildCountTokensRequestAnthropicAPIKeyPassthroughWithTo
 
 // buildCountTokensRequest 构建 count_tokens 上游请求
 func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token, tokenType, modelID string, mimicClaudeCode bool) (*http.Request, []byte, error) {
+	body = stripDeferredToolCacheControl(body)
 	// 确定目标 URL
 	targetURL := claudeAPICountTokensURL
 	if account.Type == AccountTypeAPIKey {

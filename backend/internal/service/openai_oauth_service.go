@@ -22,11 +22,11 @@ type OpenAIOAuthService struct {
 	// Copilot runtime fields are also used by small embedded/test callers that
 	// construct OpenAIOAuthService with a struct literal. Keep their zero value
 	// usable instead of requiring every caller to go through the constructor.
-	copilotRuntimeMu     sync.Mutex
-	copilotFlowsMu       sync.RWMutex
-	copilotFlows         map[string]*copilotOAuthFlow
-	copilotHTTPClient    *http.Client
-	copilotEndpoints     copilotOAuthEndpoints
+	copilotRuntimeMu  sync.Mutex
+	copilotFlowsMu    sync.RWMutex
+	copilotFlows      map[string]*copilotOAuthFlow
+	copilotHTTPClient *http.Client
+	copilotEndpoints  copilotOAuthEndpoints
 }
 
 // NewOpenAIOAuthService creates a new OpenAI OAuth service
@@ -392,7 +392,7 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 			GitHubAccessToken: githubToken,
 			GitHubLogin:       account.GetCredential("github_login"),
 			GitHubUserID:      account.GetCredential("github_user_id"),
-			BaseURL:            account.GetOpenAIBaseURL(),
+			BaseURL:           account.GetOpenAIBaseURL(),
 			ExpiresAt:         copilotToken.ExpiresAt.Unix(),
 			RefreshAt:         copilotToken.RefreshAt.Unix(),
 		}, nil
