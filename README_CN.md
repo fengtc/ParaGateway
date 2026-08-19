@@ -21,7 +21,7 @@ Blazor Server 仍适合必须把密钥和业务逻辑留在服务器端的内部
 - `reference_sub2api`：上游源码参考副本，包含官方 Vue 前端。
 - `frontend-blazor`：Blazor WASM 管理端和契约测试。
 - `deploy/standalone`：PostgreSQL、Redis、Go、Nginx、Caddy 的独立部署编排。
-- `deploy/standalone/data/frontend`：最新 Release 发布的静态前端。
+- `deploy/standalone/data/frontend`：最新 Release 的完整发布目录；Nginx 挂载其中的 `wwwroot`。
 
 `backend` 以 `reference_sub2api/backend` 的官方 Go 实现为基础；ParaGateway 仅增加了可选的 `PARAGATEWAY_DISABLE_ADMIN_COMPLIANCE` 部署开关，用于在独立主机部署中关闭首次进入后台的强制确认拦截，其他 API、数据库和网关协议保持兼容。
 
@@ -49,7 +49,8 @@ dotnet test frontend-blazor\Tests\ParaGateway.Frontend.Tests.csproj --no-restore
 dotnet publish frontend-blazor\ParaGateway.Frontend.csproj -c Release -o .tmp\frontend-publish-final --no-restore -p:UseAppHost=false --nologo
 ```
 
-将发布目录的 `wwwroot` 同步到 `deploy/standalone/data/frontend` 后，在服务器执行：
+将完整发布目录同步到 `deploy/standalone/data/frontend`，确认静态入口位于
+`data/frontend/wwwroot/index.html` 后，在服务器执行：
 
 ```bash
 cd deploy/standalone

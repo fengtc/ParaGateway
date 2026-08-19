@@ -70,6 +70,7 @@ public sealed class AdminSettingsDto
     [JsonPropertyName("channel_monitor_mode")] public string ChannelMonitorMode { get; set; } = "v1";
     [JsonPropertyName("channel_monitor_default_interval_seconds")] public int ChannelMonitorDefaultIntervalSeconds { get; set; } = 300;
     [JsonPropertyName("channel_monitor_hide_throughput")] public bool ChannelMonitorHideThroughput { get; set; }
+    [JsonPropertyName("channel_monitor_show_quota")] public bool ChannelMonitorShowQuota { get; set; }
     [JsonPropertyName("available_channels_enabled")] public bool AvailableChannelsEnabled { get; set; }
     [JsonPropertyName("model_plaza_enabled")] public bool ModelPlazaEnabled { get; set; }
     [JsonPropertyName("model_plaza_require_auth")] public bool ModelPlazaRequireAuth { get; set; }
@@ -1312,6 +1313,39 @@ public sealed class ChannelMonitorDto
     [JsonPropertyName("extra_headers")] public Dictionary<string, string> ExtraHeaders { get; set; } = [];
     [JsonPropertyName("body_override_mode")] public string BodyOverrideMode { get; set; } = "off";
     [JsonPropertyName("body_override")] public JsonElement BodyOverride { get; set; }
+    [JsonPropertyName("check_mode")] public string CheckMode { get; set; } = "probe";
+    [JsonPropertyName("account_id")] public long? AccountId { get; set; }
+    [JsonPropertyName("latest_quota")] public MonitorQuotaSnapshotDto? LatestQuota { get; set; }
+}
+
+public sealed class MonitorQuotaTierDto
+{
+    public string Window { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    [JsonPropertyName("used_percent")] public double UsedPercent { get; set; }
+    public double? Used { get; set; }
+    public double? Limit { get; set; }
+    [JsonPropertyName("reset_at")] public string? ResetAt { get; set; }
+}
+
+public sealed class MonitorBalanceDto
+{
+    public string Currency { get; set; } = string.Empty;
+    public double Balance { get; set; }
+}
+
+public sealed class MonitorQuotaSnapshotDto
+{
+    public string Source { get; set; } = string.Empty;
+    public bool Success { get; set; }
+    public List<MonitorQuotaTierDto> Tiers { get; set; } = [];
+    public double? Balance { get; set; }
+    public List<MonitorBalanceDto> Balances { get; set; } = [];
+    public string Currency { get; set; } = string.Empty;
+    [JsonPropertyName("plan_level")] public string PlanLevel { get; set; } = string.Empty;
+    [JsonPropertyName("credential_invalid")] public bool CredentialInvalid { get; set; }
+    public string Error { get; set; } = string.Empty;
+    [JsonPropertyName("fetched_at")] public DateTimeOffset? FetchedAt { get; set; }
 }
 public sealed class ChannelMonitorExtraModelStatusDto
 {
@@ -1331,6 +1365,7 @@ public sealed class ChannelMonitorCheckResultDto
     [JsonPropertyName("ping_latency_ms")] public int? PingLatencyMs { get; set; }
     public string Message { get; set; } = string.Empty;
     [JsonPropertyName("checked_at")] public DateTimeOffset? CheckedAt { get; set; }
+    public MonitorQuotaSnapshotDto? Quota { get; set; }
 }
 public sealed class ChannelMonitorHistoryDto
 {
@@ -1345,6 +1380,7 @@ public sealed class ChannelMonitorHistoryItemDto
     [JsonPropertyName("ping_latency_ms")] public int? PingLatencyMs { get; set; }
     public string Message { get; set; } = string.Empty;
     [JsonPropertyName("checked_at")] public DateTimeOffset? CheckedAt { get; set; }
+    public MonitorQuotaSnapshotDto? Quota { get; set; }
 }
 public sealed class ChannelMonitorTemplateDto
 {

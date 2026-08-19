@@ -113,6 +113,32 @@ public sealed class AccountApiClientTests
     }
 
     [Fact]
+    public async Task CNProviderCreatePersistsModeProtocolAndPresetEndpointInCredentials()
+    {
+        var handler = new AccountHandler("data: {\"type\":\"test_complete\",\"success\":true}\n\n");
+        var api = CreateApi(handler);
+
+        await api.CreateAccountAsync(new AccountInput
+        {
+            Name = "kimi-coding",
+            Platform = "kimi",
+            Type = "apikey",
+            ApiKey = "sk-kimi-test",
+            BaseUrl = "https://api.kimi.com/coding",
+            AccountMode = "coding",
+            ApiProtocol = "anthropic"
+        });
+
+        Assert.Equal("/api/v1/admin/accounts", handler.LastRequestPath);
+        using var request = JsonDocument.Parse(handler.LastRequestBody);
+        var credentials = request.RootElement.GetProperty("credentials");
+        Assert.Equal("sk-kimi-test", credentials.GetProperty("api_key").GetString());
+        Assert.Equal("https://api.kimi.com/coding", credentials.GetProperty("base_url").GetString());
+        Assert.Equal("coding", credentials.GetProperty("account_mode").GetString());
+        Assert.Equal("anthropic", credentials.GetProperty("api_protocol").GetString());
+    }
+
+    [Fact]
     public async Task IndependentUpstreamCreateUsesDedicatedRouteAndPolicyContract()
     {
         var handler = new AccountHandler("data: {\"type\":\"test_complete\",\"success\":true}\n\n");

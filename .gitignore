@@ -1,11 +1,6 @@
 .env
 **/.env
-deploy/standalone/data/postgres/
-deploy/standalone/data/redis/
-deploy/standalone/data/backend/
-deploy/standalone/data/caddy/
-deploy/standalone/data/caddy-config/
-deploy/standalone/data/frontend/
+deploy/standalone/data/
 **/bin/
 **/obj/
 .tmp/

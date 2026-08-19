@@ -31,7 +31,9 @@ public sealed class AdminSettingsParityTests
           "balance_low_notify_threshold":5.5,
           "subscription_expiry_notify_enabled":true,
           "account_quota_notify_enabled":true,
-          "account_quota_notify_emails":[{"email":"admin@example.com","disabled":false,"verified":true}]
+          "account_quota_notify_emails":[{"email":"admin@example.com","disabled":false,"verified":true}],
+          "channel_monitor_show_quota":true,
+          "account_scheduling_thresholds":{"openai":90,"anthropic":80,"grok":70,"kimi":60,"zhipu":50}
         }
         """;
 
@@ -48,6 +50,26 @@ public sealed class AdminSettingsParityTests
         Assert.True(settings.ForceEmailOnThirdPartySignup);
         Assert.Equal(5.5m, settings.BalanceLowNotifyThreshold);
         Assert.True(settings.AccountQuotaNotifyEmails[0].Verified);
+        Assert.True(settings.ChannelMonitorShowQuota);
+        Assert.Equal(60, settings.AccountSchedulingThresholds["kimi"]);
+        Assert.Equal(50, settings.AccountSchedulingThresholds["zhipu"]);
+    }
+
+    [Fact]
+    public void V0178ChannelQuotaAndSchedulingThresholdControlsMatchOfficialContract()
+    {
+        var page = ReadSource("Pages", "AdminSettings.razor");
+        var gateway = ReadSource("Components", "GatewayAdvancedSettings.razor");
+
+        Assert.Contains("settings.ChannelMonitorMode == \"v1\"", page, StringComparison.Ordinal);
+        Assert.Contains("用户端展示配额快照", page, StringComparison.Ordinal);
+        Assert.Contains("[\"channel_monitor_show_quota\"] = settings.ChannelMonitorShowQuota", page, StringComparison.Ordinal);
+        Assert.Contains("NormalizeSchedulingThresholds(settings.AccountSchedulingThresholds)", page, StringComparison.Ordinal);
+        foreach (var platform in new[] { "openai", "anthropic", "grok", "kimi", "zhipu" })
+        {
+            Assert.Contains($"\"{platform}\"", gateway, StringComparison.Ordinal);
+        }
+        Assert.DoesNotContain("\"deepseek\"", gateway, StringComparison.Ordinal);
     }
 
     [Fact]

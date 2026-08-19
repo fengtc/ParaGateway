@@ -21,6 +21,9 @@
                 <option value="gemini">Gemini</option>
                 <option value="antigravity">Antigravity</option>
                 <option value="grok">Grok</option>
+                <option value="kimi">Kimi</option>
+                <option value="zhipu">智谱 GLM</option>
+                <option value="deepseek">DeepSeek</option>
             </select>
             <select value="@typeFilter" @onchange="TypeChangedAsync" aria-label="认证类型筛选">
                 <option value="">全部类型</option>
@@ -117,6 +120,7 @@
             <button type="button" class="button secondary small" disabled="@busy" @onclick="() => BulkSchedulableAsync(false)">暂停调度</button>
             <button type="button" class="button secondary small" disabled="@busy" @onclick="BulkClearErrorsAsync">重置状态</button>
             <button type="button" class="button secondary small" disabled="@(busy || !CanBulkRefresh)" title="仅当当前页所选账号全部为 OAuth/Setup Token 主账号时可用" @onclick="BulkRefreshAsync">刷新 OAuth 令牌</button>
+            <button type="button" class="button secondary small" disabled="@(busy || !CanBulkOpenAISettings)" title="仅支持所选 OpenAI 账号" @onclick="OpenBulkOpenAISettings"><Icon Name="settings" Size="15" /> OpenAI 设置</button>
             <button type="button" class="button danger small" disabled="@busy" @onclick="BulkDeleteAsync">删除</button>
             <button type="button" class="icon-button" title="清除选择" aria-label="清除选择" @onclick="ClearSelection"><Icon Name="x" Size="16" /></button>
         </section>
@@ -184,7 +188,7 @@
                                     @if (IsColumnVisible("schedulable")) { <td><button type="button" class="schedule-switch @(row.Schedulable ? "on" : null)" role="switch" aria-checked="@row.Schedulable.ToString().ToLowerInvariant()" aria-label="切换 @row.Name 调度" title="@(row.Schedulable ? "暂停调度" : "恢复调度")" disabled="@busy" @onclick="() => ToggleSchedulingAsync(row)"><span></span></button></td> }
                                     @if (IsColumnVisible("today")) { <td>@if (todayStats.TryGetValue(row.Id, out var stats)) { <div class="today-stats"><strong>$@stats.StandardCost.ToString("0.####")</strong><small>@stats.Requests 次 · @stats.Tokens token</small></div> } else { <span class="muted-cell">-</span> }</td> }
                                     @if (IsColumnVisible("groups")) { <td><div class="group-badges">@if (row.Groups.Count == 0) { <span class="muted-cell">未分组</span> } else { @foreach (var group in row.Groups.Take(4)) { <span>@group.Name</span> } @if (row.Groups.Count > 4) { <small>+@(row.Groups.Count - 4)</small> } }</div></td> }
-                                    @if (IsColumnVisible("usage")) { <td><div class="usage-windows">@if (!HasQuota(row)) { <span class="muted-cell">-</span> } else { @UsageWindow("日", row.QuotaDailyUsed, row.QuotaDailyLimit) @UsageWindow("周", row.QuotaWeeklyUsed, row.QuotaWeeklyLimit) @UsageWindow("总", row.QuotaUsed, row.QuotaLimit) }</div></td> }
+                                    @if (IsColumnVisible("usage")) { <td><AccountQuotaUsageCell Account="row" /></td> }
                                     @if (IsColumnVisible("proxy")) { <td>@if (row.Proxy is null) { <span class="muted-cell">-</span> } else { <div class="proxy-cell"><strong>@row.Proxy.Name</strong><small>@row.Proxy.Protocol://@row.Proxy.Host:@row.Proxy.Port</small></div> }</td> }
                                     @if (IsColumnVisible("priority")) { <td>@row.Priority</td> }
                                     @if (IsColumnVisible("score")) { <td><code>@SchedulerScore(row)</code></td> }
@@ -228,7 +232,7 @@
             @if (editorTestMessage is not null && editorTestFingerprint == EditorConnectionFingerprint()) { <div class="inline-alert success" role="status"><Icon Name="check" Size="18" /><span>@editorTestMessage</span></div> }
             <div class="form-grid account-editor-grid">
                 <div class="form-field full"><label for="account-name">账号名称</label><InputText id="account-name" @bind-Value="form.Name" /><ValidationMessage For="() => form.Name" /></div>
-                <div class="form-field"><label for="account-platform">平台</label><select id="account-platform" value="@form.Platform" @onchange="PlatformEditorChanged" disabled="@(editingId is not null)"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option></select></div>
+                <div class="form-field"><label for="account-platform">平台</label><select id="account-platform" value="@form.Platform" @onchange="PlatformEditorChanged" disabled="@(editingId is not null)"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option><option value="kimi">Kimi</option><option value="zhipu">智谱 GLM</option><option value="deepseek">DeepSeek</option></select></div>
                 <div class="form-field"><label for="account-type">认证类型</label><select id="account-type" value="@form.Type" @onchange="AuthenticationTypeEditorChanged" disabled="@(editingId is not null)"><option value="apikey">API Key / 自定义 Base URL</option><option value="oauth">OAuth</option>@if (form.Platform == "anthropic") { <option value="setup-token">Setup Token</option><option value="bedrock">AWS Bedrock</option> }@if (form.Platform is "anthropic" or "gemini") { <option value="service_account">Vertex Service Account</option> }@if (editingId is not null && form.Type == "upstream") { <option value="upstream">旧版 Upstream（仅兼容）</option> }</select><small class="form-hint">编辑已有账号时不可更改平台或认证类型；如需迁移，请新建账号。</small></div>
                 @if (form.Type is "oauth" or "setup-token")
                 {
@@ -244,6 +248,11 @@
                     }
                     <div class="form-field full"><label for="account-api-key">API Key（编辑时留空表示不修改）</label><InputText id="account-api-key" @bind-Value="form.ApiKey" type="password" autocomplete="new-password" /><ValidationMessage For="() => form.ApiKey" /></div>
                     <div class="form-field full"><label for="account-base-url">Base URL（可选）</label><InputText id="account-base-url" @bind-Value="form.BaseUrl" type="url" placeholder="https://api.openai.com" /><ValidationMessage For="() => form.BaseUrl" /></div>
+                    @if (IsCNPlatform(form.Platform))
+                    {
+                        <div class="form-field"><label for="account-cn-mode">账号模式</label><select id="account-cn-mode" value="@form.AccountMode" @onchange="CNAccountModeEditorChanged"><option value="payg">按量付费（PAYG）</option>@if (form.Platform != "deepseek") { <option value="coding">Coding Plan</option> }</select></div>
+                        <div class="form-field"><label for="account-cn-protocol">API 协议</label><select id="account-cn-protocol" value="@form.ApiProtocol" @onchange="CNApiProtocolEditorChanged"><option value="chat_completions">Chat Completions</option><option value="anthropic">Anthropic Messages</option>@if (form.Platform == "deepseek") { <option value="responses">Responses</option> }</select></div>
+                    }
                 }
                 else if (form.Type == "bedrock")
                 {
@@ -294,6 +303,34 @@
         </EditForm>
     </ChildContent>
     <Footer><button type="button" class="button secondary" @onclick="CloseEditor">取消</button>@if (CanTestEditor) { <button type="button" class="button secondary" disabled="@(saving || editorTesting)" @onclick="TestEditorAsync">@(editorTesting ? "测试中…" : EditorTestLabel)</button> }<button type="button" class="button primary" disabled="@(saving || editorTesting)" @onclick="SubmitEditorAsync">@(saving ? "保存中…" : "保存账号")</button></Footer>
+</AppModal>
+
+<AppModal Open="bulkOpenAISettingsOpen" Title="OpenAI 批量设置" MaxWidth="640px" OnClose="CloseBulkOpenAISettings">
+    <ChildContent>
+        <div class="bulk-openai-settings">
+            @if (bulkOpenAIError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@bulkOpenAIError</span></div> }
+            <p class="muted-text">将设置应用到选中的 @selectedIds.Count 个 OpenAI 账号；未勾选的项目保持原值。</p>
+            <label class="toggle-row"><InputCheckbox @bind-Value="applyOpenAILongContext" /><span><strong>修改长上下文计费</strong><small>启用后按官方长上下文价格规则计费。</small></span></label>
+            @if (applyOpenAILongContext)
+            {
+                <label class="toggle-row nested-setting"><InputCheckbox @bind-Value="openAILongContextEnabled" /><span><strong>启用长上下文计费</strong></span></label>
+            }
+            <label class="toggle-row"><InputCheckbox @bind-Value="applyOpenAICapabilities" /><span><strong>修改端点能力</strong><small>限制账号可接收的 OpenAI 接口类型。</small></span></label>
+            @if (applyOpenAICapabilities)
+            {
+                <div class="bulk-capability-options">
+                    <label><input type="checkbox" @bind="openAIChatCapability" /> Chat Completions</label>
+                    <label><input type="checkbox" @bind="openAIEmbeddingsCapability" /> Embeddings</label>
+                </div>
+            }
+            <label class="toggle-row"><InputCheckbox @bind-Value="applyOpenAIResponsesMode" /><span><strong>修改 Responses 路由模式</strong><small>控制文本生成请求使用 Responses 或 Chat Completions。</small></span></label>
+            @if (applyOpenAIResponsesMode)
+            {
+                <div class="form-field"><label for="bulk-openai-responses-mode">Responses 模式</label><select id="bulk-openai-responses-mode" @bind="openAIResponsesMode"><option value="auto">自动</option><option value="force_responses">强制 Responses</option><option value="force_chat_completions">强制 Chat Completions</option></select></div>
+            }
+        </div>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseBulkOpenAISettings">取消</button><button type="button" class="button primary" disabled="@bulkOpenAISaving" @onclick="SaveBulkOpenAISettingsAsync">@(bulkOpenAISaving ? "保存中…" : "应用设置")</button></Footer>
 </AppModal>
 
 <AppModal Open="deleteOpen" Title="删除账号" MaxWidth="520px" OnClose="CloseDelete">
@@ -349,17 +386,21 @@
     private Task? autoRefreshTask;
     private string search = string.Empty, platformFilter = string.Empty, typeFilter = string.Empty, statusFilter = string.Empty, privacyFilter = string.Empty, groupFilter = string.Empty;
     private string sortBy = "name", sortOrder = "asc", formExpiryLocal = string.Empty;
-    private string? editingId, rowMenuId, error, modalError, editorTestMessage, editorTestFingerprint, statsJson, crsResultJson;
+    private string? editingId, rowMenuId, error, modalError, editorTestMessage, editorTestFingerprint, statsJson, crsResultJson, bulkOpenAIError;
     private AccountDto? deletingAccount, statsAccount;
     private int page = 1, pageSize = 20, total, totalPages = 1;
     private bool loading = true, busy, saving, editorTesting, editorOpen, createOpen, deleteOpen, statsOpen, statsLoading, toolsMenuOpen, autoRefreshMenuOpen;
     private bool autoRefreshEnabled, selectingAll, exporting, includeProxiesOnExport, crsOpen, crsBusy, crsPreviewReady;
+    private bool bulkOpenAISettingsOpen, bulkOpenAISaving, applyOpenAILongContext, openAILongContextEnabled;
+    private bool applyOpenAICapabilities, openAIChatCapability = true, openAIEmbeddingsCapability = true, applyOpenAIResponsesMode;
+    private string openAIResponsesMode = "auto";
     private int autoRefreshIntervalSeconds = 30, autoRefreshCountdown = 30;
 
     private int StartRow => total == 0 ? 0 : ((page - 1) * pageSize) + 1;
     private int EndRow => Math.Min(total, page * pageSize);
     private bool AllCurrentPageSelected => accounts.Count > 0 && accounts.All(x => selectedIds.Contains(x.Id));
     private bool CanBulkRefresh => selectedIds.Count > 0 && selectedIds.All(id => accounts.FirstOrDefault(row => row.Id == id) is { } row && CanRefreshToken(row));
+    private bool CanBulkOpenAISettings => selectedIds.Count > 0 && selectedIds.All(id => accounts.FirstOrDefault(row => row.Id == id) is { Platform: "openai" });
     private int VisibleColumnCount => 3 + ToggleableColumns.Count(x => IsColumnVisible(x.Key));
     private bool CanTestEditor => editingId is not null || form.Type == "apikey";
     private string EditorTestLabel => form.Type == "apikey" && (editingId is null || !string.IsNullOrWhiteSpace(form.ApiKey)) ? "读取平台模型" : "测试已保存连接";
@@ -521,11 +562,15 @@
     private void OpenEdit(AccountDto account)
     {
         editingId = account.Id;
+        var accountMode = ReadCredential(account, "account_mode");
+        var apiProtocol = ReadCredential(account, "api_protocol");
         form = new AccountInput
         {
             IsEditing = true, Name = account.Name, Notes = account.Notes ?? string.Empty,
             Platform = account.Platform, Type = account.Type,
             BaseUrl = ReadCredential(account, "base_url"), Concurrency = account.Concurrency,
+            AccountMode = string.IsNullOrWhiteSpace(accountMode) ? "payg" : accountMode,
+            ApiProtocol = string.IsNullOrWhiteSpace(apiProtocol) ? "chat_completions" : apiProtocol,
             LoadFactor = account.LoadFactor, Priority = account.Priority,
             RateMultiplier = account.RateMultiplier, ProxyId = account.ProxyId, ExpiresAt = account.ExpiresAt,
             AutoPauseOnExpired = account.AutoPauseOnExpired, Schedulable = account.Schedulable,
@@ -545,6 +590,28 @@
     {
         form.Platform = e.Value?.ToString()?.Trim().ToLowerInvariant() ?? "openai";
         if (!IsAuthenticationTypeSupported(form.Platform, form.Type)) form.Type = "apikey";
+        if (IsCNPlatform(form.Platform))
+        {
+            form.Type = "apikey";
+            form.AccountMode = "payg";
+            form.ApiProtocol = "chat_completions";
+            form.BaseUrl = DefaultCNBaseUrl(form.Platform, form.AccountMode, form.ApiProtocol);
+        }
+        InvalidateEditorTest();
+    }
+
+    private void CNAccountModeEditorChanged(ChangeEventArgs e)
+    {
+        form.AccountMode = form.Platform == "deepseek" ? "payg" : e.Value?.ToString() == "coding" ? "coding" : "payg";
+        form.BaseUrl = DefaultCNBaseUrl(form.Platform, form.AccountMode, form.ApiProtocol);
+        InvalidateEditorTest();
+    }
+
+    private void CNApiProtocolEditorChanged(ChangeEventArgs e)
+    {
+        var requested = e.Value?.ToString() ?? "chat_completions";
+        form.ApiProtocol = requested == "responses" && form.Platform != "deepseek" ? "chat_completions" : requested;
+        form.BaseUrl = DefaultCNBaseUrl(form.Platform, form.AccountMode, form.ApiProtocol);
         InvalidateEditorTest();
     }
     private void AuthenticationTypeEditorChanged(ChangeEventArgs e)
@@ -661,6 +728,74 @@
     private async Task RunBulkAsync(Func<Task<AccountBatchResultDto>> action, string message) { busy = true; try { var result = await action(); Toasts.Success(result.FailedCount > 0 ? $"{message}：成功 {result.SuccessCount}，失败 {result.FailedCount}" : message); ClearSelection(); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
     private async Task BulkSchedulableAsync(bool value) { if (selectedIds.Count == 0) return; busy = true; try { await Api.BulkSetAccountsSchedulableAsync(selectedIds, value); Toasts.Success(value ? "已批量开启调度" : "已批量暂停调度"); ClearSelection(); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
 
+    private void OpenBulkOpenAISettings()
+    {
+        if (!CanBulkOpenAISettings) return;
+        bulkOpenAIError = null;
+        applyOpenAILongContext = false;
+        openAILongContextEnabled = false;
+        applyOpenAICapabilities = false;
+        openAIChatCapability = true;
+        openAIEmbeddingsCapability = true;
+        applyOpenAIResponsesMode = false;
+        openAIResponsesMode = "auto";
+        bulkOpenAISettingsOpen = true;
+    }
+
+    private void CloseBulkOpenAISettings()
+    {
+        if (bulkOpenAISaving) return;
+        bulkOpenAISettingsOpen = false;
+        bulkOpenAIError = null;
+    }
+
+    private async Task SaveBulkOpenAISettingsAsync()
+    {
+        bulkOpenAIError = null;
+        if (!applyOpenAILongContext && !applyOpenAICapabilities && !applyOpenAIResponsesMode)
+        {
+            bulkOpenAIError = "请至少选择一项需要修改的设置。";
+            return;
+        }
+        if (applyOpenAICapabilities && !openAIChatCapability && !openAIEmbeddingsCapability)
+        {
+            bulkOpenAIError = "端点能力至少保留一项。";
+            return;
+        }
+
+        var credentials = new Dictionary<string, object?>();
+        var extra = new Dictionary<string, object?>();
+        if (applyOpenAILongContext) extra["openai_long_context_billing_enabled"] = openAILongContextEnabled;
+        if (applyOpenAICapabilities)
+        {
+            var capabilities = new List<string>();
+            if (openAIChatCapability) capabilities.Add("chat_completions");
+            if (openAIEmbeddingsCapability) capabilities.Add("embeddings");
+            credentials["openai_capabilities"] = capabilities.Count == 2 ? null : capabilities;
+            if (!openAIChatCapability) extra["openai_responses_mode"] = null;
+        }
+        if (applyOpenAIResponsesMode)
+            extra["openai_responses_mode"] = openAIResponsesMode == "auto" ? null : openAIResponsesMode;
+
+        var updates = new Dictionary<string, object?>();
+        if (credentials.Count > 0) updates["credentials"] = credentials;
+        if (extra.Count > 0) updates["extra"] = extra;
+
+        bulkOpenAISaving = true;
+        try
+        {
+            var result = await Api.BulkUpdateAccountsAsync(selectedIds, updates);
+            var inherited = result.LongContextInheritedCount > 0
+                ? $"；{result.LongContextInheritedCount} 个影子账号继承母账号设置"
+                : string.Empty;
+            Toasts.Success($"OpenAI 设置已更新：成功 {result.SuccessCount}，失败 {result.FailedCount}{inherited}");
+            bulkOpenAISettingsOpen = false;
+            await LoadAsync(true);
+        }
+        catch (ApiException ex) { bulkOpenAIError = ex.Message; }
+        finally { bulkOpenAISaving = false; }
+    }
+
     private async Task ExportAccountsAsync()
     {
         toolsMenuOpen = false; if (!await JS.InvokeAsync<bool>("confirm", "导出数据包含账号与代理敏感信息，请确认在安全环境中保存。")) return; exporting = true;
@@ -700,7 +835,7 @@
     private async Task SyncCrsAsync() { crsBusy = true; try { var result = await Api.SyncAccountsFromCrsAsync(crsForm); crsResultJson = JsonSerializer.Serialize(result, PrettyJson); Toasts.Success("CRS 同步完成"); await LoadAsync(); } catch (ApiException ex) { crsResultJson = JsonSerializer.Serialize(new { error = ex.Message }, PrettyJson); } finally { crsBusy = false; } }
 
     private static readonly HashSet<string> AllowedSortKeys = new(StringComparer.OrdinalIgnoreCase) { "id", "name", "status", "schedulable", "priority", "rate_multiplier", "upstream_billing_rate", "last_used_at", "created_at", "expires_at" };
-    private static string PlatformLabel(string value) => value.ToLowerInvariant() switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", _ => value };
+    private static string PlatformLabel(string value) => value.ToLowerInvariant() switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", "kimi" => "Kimi", "zhipu" => "智谱 GLM", "deepseek" => "DeepSeek", _ => value };
     private static string AccountPlatformLabel(AccountDto row) => IsCopilot(row) ? "GitHub Copilot" : PlatformLabel(row.Platform);
     private static string OAuthProfile(AccountDto row) => ReadJsonString(row.Credentials, "oauth_profile") ?? ReadJsonString(row.Extra, "oauth_profile") ?? string.Empty;
     private static bool IsCopilot(AccountDto row) => string.Equals(OAuthProfile(row), "github_copilot", StringComparison.OrdinalIgnoreCase);
@@ -718,6 +853,9 @@
             "anthropic" => "https://api.anthropic.com",
             "gemini" => "https://generativelanguage.googleapis.com",
             "grok" => "https://api.x.ai",
+            "kimi" => "https://api.moonshot.cn/v1",
+            "zhipu" => "https://open.bigmodel.cn/api/paas/v4",
+            "deepseek" => "https://api.deepseek.com",
             _ => "官方端点"
         };
     }
@@ -748,6 +886,24 @@
     private static bool ReadExtraBool(AccountDto row, string key) => row.Extra is not null && row.Extra.TryGetValue(key, out var value) && value.ValueKind is JsonValueKind.True;
     private static string ReadExtraString(AccountDto row, string key) => ReadJsonString(row.Extra, key) ?? string.Empty;
     private static string? ReadJsonString(Dictionary<string, JsonElement>? source, string key) => source is not null && source.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    private static bool IsCNPlatform(string value) => value is "kimi" or "zhipu" or "deepseek";
+    private static string DefaultCNBaseUrl(string provider, string mode, string protocol)
+    {
+        if (protocol == "anthropic") return provider switch
+        {
+            "kimi" => mode == "coding" ? "https://api.kimi.com/coding" : "https://api.moonshot.cn/anthropic",
+            "zhipu" => "https://open.bigmodel.cn/api/anthropic",
+            "deepseek" => "https://api.deepseek.com/anthropic",
+            _ => string.Empty
+        };
+        return provider switch
+        {
+            "kimi" => mode == "coding" ? "https://api.kimi.com/coding/v1" : "https://api.moonshot.cn/v1",
+            "zhipu" => mode == "coding" ? "https://open.bigmodel.cn/api/coding/paas/v4" : "https://open.bigmodel.cn/api/paas/v4",
+            "deepseek" => "https://api.deepseek.com",
+            _ => string.Empty
+        };
+    }
     private static bool HasQuota(AccountDto row) => row.QuotaLimit is > 0 || row.QuotaDailyLimit is > 0 || row.QuotaWeeklyLimit is > 0;
     private static MarkupString UsageWindow(string label, double? used, double? limit) { if (limit is not > 0) return new MarkupString(string.Empty); var percent = Math.Clamp((used ?? 0) / limit.Value * 100, 0, 100); return new MarkupString($"<span><small>{label}</small><b>{used.GetValueOrDefault():0.##}/{limit.Value:0.##}</b><i><em style='width:{percent:0.#}%'></em></i></span>"); }
     private static string SchedulerScore(AccountDto row) { var score = row.SchedulerScores.FirstOrDefault() ?? row.SchedulerScore; if (score is null) return "-"; return score.StickyScoreInfinity ? $"{score.BaseScore:0.######} / +∞" : $"{score.BaseScore:0.######} / {score.StickyScore:0.######}"; }

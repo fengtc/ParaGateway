@@ -119,6 +119,34 @@ public sealed class AccountPageParityTests
         Assert.Contains("localhost:1455", markup, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AccountPageContainsV0178ProviderQuotaAndOpenAIBulkSettingsSurface()
+    {
+        var page = Read("Pages", "Providers.razor");
+        var createModal = Read("Components", "NativeAccountCreateModal.razor");
+        var quotaCell = Read("Components", "AccountQuotaUsageCell.razor");
+
+        foreach (var platform in new[] { "kimi", "zhipu", "deepseek" })
+        {
+            Assert.Contains($"value=\"{platform}\"", page, StringComparison.Ordinal);
+            Assert.Contains($"new(\"{platform}\"", createModal, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("账号模式", createModal, StringComparison.Ordinal);
+        Assert.Contains("API 协议", createModal, StringComparison.Ordinal);
+        Assert.Contains("https://api.kimi.com/coding/v1", createModal, StringComparison.Ordinal);
+        Assert.Contains("https://open.bigmodel.cn/api/coding/paas/v4", createModal, StringComparison.Ordinal);
+        Assert.Contains("https://api.deepseek.com/anthropic", createModal, StringComparison.Ordinal);
+        Assert.Contains("<AccountQuotaUsageCell Account=\"row\" />", page, StringComparison.Ordinal);
+        Assert.Contains("GetCNProviderQuotaAsync", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("GetCNProviderBalanceAsync", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("RefreshOllamaCloudUsageAsync", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("openai_long_context_billing_enabled", page, StringComparison.Ordinal);
+        Assert.Contains("openai_capabilities", page, StringComparison.Ordinal);
+        Assert.Contains("openai_responses_mode", page, StringComparison.Ordinal);
+        Assert.Contains("LongContextInheritedCount", page, StringComparison.Ordinal);
+    }
+
     private static string Read(params string[] segments)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));

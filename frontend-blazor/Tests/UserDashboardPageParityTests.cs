@@ -53,6 +53,10 @@ public sealed class UserDashboardPageParityTests
         Assert.Contains("Auth.User?.IsSimpleMode", component, StringComparison.Ordinal);
         Assert.Contains("diffTotal > 0.0001", component, StringComparison.Ordinal);
         Assert.Contains("window.Limit.Value == 0", component, StringComparison.Ordinal);
+        Assert.Contains("stats.TodayCacheCreationTokens + stats.TodayCacheReadTokens", component, StringComparison.Ordinal);
+        Assert.Contains("stats.TotalCacheCreationTokens + stats.TotalCacheReadTokens", component, StringComparison.Ordinal);
+        Assert.Contains("缓存创建", component, StringComparison.Ordinal);
+        Assert.Contains("缓存读取", component, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -109,6 +113,10 @@ public sealed class UserDashboardPageParityTests
         Assert.Equal(4, stats.TotalApiKeys);
         Assert.Equal(250, stats.TotalTokens);
         Assert.Equal(50, stats.TodayTokens);
+        Assert.Equal(25, stats.TotalCacheCreationTokens);
+        Assert.Equal(75, stats.TotalCacheReadTokens);
+        Assert.Equal(5, stats.TodayCacheCreationTokens);
+        Assert.Equal(15, stats.TodayCacheReadTokens);
         Assert.Equal(9, stats.Rpm);
         Assert.Equal("openai", Assert.Single(stats.ByPlatform).Platform);
         Assert.NotNull(quotas);

@@ -128,6 +128,34 @@
                             </div>
                         }
 
+                        @if (IsCNPlatform && accountCategory == "apikey")
+                        {
+                            <div class="native-provider-options">
+                                <div class="native-field">
+                                    <label for="native-cn-account-mode">账号模式</label>
+                                    <select id="native-cn-account-mode" value="@form.AccountMode" @onchange="SetCNAccountMode">
+                                        <option value="payg">按量付费（PAYG）</option>
+                                        @if (platform != "deepseek")
+                                        {
+                                            <option value="coding">Coding Plan</option>
+                                        }
+                                    </select>
+                                    <small>@(platform == "deepseek" ? "DeepSeek 当前仅支持按量付费账号。" : "Coding Plan 支持主动查询 5 小时和每周额度。")</small>
+                                </div>
+                                <div class="native-field">
+                                    <label for="native-cn-api-protocol">API 协议</label>
+                                    <select id="native-cn-api-protocol" value="@form.ApiProtocol" @onchange="SetCNApiProtocol">
+                                        <option value="chat_completions">Chat Completions</option>
+                                        <option value="anthropic">Anthropic Messages</option>
+                                        @if (platform == "deepseek")
+                                        {
+                                            <option value="responses">Responses</option>
+                                        }
+                                    </select>
+                                </div>
+                            </div>
+                        }
+
                         @if (platform == "anthropic" && accountCategory == "oauth-based")
                         {
                             <div class="native-field native-radio-field">
@@ -145,7 +173,7 @@
                             {
                                 <div class="native-credentials-grid">
                                     <div class="native-field">
-                                        <label for="native-base-url">@(platform == "antigravity" ? "Base URL" : "Base URL（可选）")</label>
+                                        <label for="native-base-url">@(platform == "antigravity" || IsCNPlatform ? "Base URL" : "Base URL（可选）")</label>
                                         <input id="native-base-url" value="@form.BaseUrl" @oninput="SetBaseUrl" placeholder="@PlatformBaseUrl" autocomplete="url" required="@(platform == "antigravity")" />
                                     </div>
                                     <div class="native-field">
@@ -436,10 +464,14 @@
         new("gemini", "Gemini", "star"),
         new("antigravity", "Antigravity", "cloud"),
         new("copilot", "Copilot", "zap"),
-        new("grok", "Grok", "eye-off")
+        new("grok", "Grok", "eye-off"),
+        new("kimi", "Kimi", "server"),
+        new("zhipu", "智谱", "server"),
+        new("deepseek", "DeepSeek", "server")
     ];
 
     private bool IsOAuthFlow => accountCategory == "oauth-based";
+    private bool IsCNPlatform => platform is "kimi" or "zhipu" or "deepseek";
     private bool ShouldShowOptions => true;
     private string ProxyValue => form.ProxyId?.ToString() ?? string.Empty;
     private string LoadFactorValue => form.LoadFactor?.ToString() ?? string.Empty;
@@ -451,6 +483,9 @@
         "antigravity" => "Antigravity",
         "copilot" => "GitHub Copilot",
         "grok" => "Grok",
+        "kimi" => "Kimi",
+        "zhipu" => "智谱 GLM",
+        "deepseek" => "DeepSeek",
         _ => platform
     };
     private string OAuthStepTitle => platform switch
@@ -501,6 +536,10 @@
         [
             new("oauth-based", "OAuth", "Grok OAuth", "eye-off"),
             new("apikey", "API Key", "Responses API", "key")
+        ],
+        "kimi" or "zhipu" or "deepseek" =>
+        [
+            new("apikey", "API Key", "按量付费或 Coding Plan", "key")
         ],
         _ => [new("oauth-based", "GitHub Copilot", "Device OAuth", "shield")]
     };
@@ -580,6 +619,12 @@
         authState = string.Empty;
         if (value != "gemini") { geminiOAuthType = "code_assist"; geminiProjectId = string.Empty; geminiTier = "gcp_standard"; }
         if (value != "antigravity") antigravityProjectId = string.Empty;
+        if (IsCNPlatform)
+        {
+            form.AccountMode = "payg";
+            form.ApiProtocol = "chat_completions";
+            form.BaseUrl = DefaultCNBaseUrl(platform, form.AccountMode, form.ApiProtocol);
+        }
         error = null;
         StopCopilotPolling();
     }
@@ -636,7 +681,7 @@
 
     private async Task CreateDirectAsync()
     {
-        if (platform == "antigravity" && accountCategory == "apikey" && string.IsNullOrWhiteSpace(form.BaseUrl))
+        if ((platform == "antigravity" || IsCNPlatform) && accountCategory == "apikey" && string.IsNullOrWhiteSpace(form.BaseUrl))
         {
             error = "请输入 Base URL";
             return;
@@ -768,6 +813,8 @@
             AccessToken = form.AccessToken.Trim(),
             RefreshToken = form.RefreshToken.Trim(),
             BaseUrl = form.BaseUrl.Trim(),
+            AccountMode = form.AccountMode,
+            ApiProtocol = form.ApiProtocol,
             CredentialsJson = credentialsJson ?? form.CredentialsJson,
             ExtraJson = string.IsNullOrWhiteSpace(form.ExtraJson) ? "{}" : form.ExtraJson,
             ProxyId = form.ProxyId,
@@ -1005,6 +1052,7 @@
         "antigravity" => "https://cloudcode-pa.googleapis.com",
         "grok" => "https://api.x.ai/v1",
         "anthropic" => "https://api.anthropic.com",
+        "kimi" or "zhipu" or "deepseek" => DefaultCNBaseUrl(platform, form.AccountMode, form.ApiProtocol),
         _ => "https://api.openai.com"
     };
     private string PlatformApiKeyPlaceholder => platform switch
@@ -1013,8 +1061,45 @@
         "antigravity" => "sk-...",
         "grok" => "xai-...",
         "anthropic" => "sk-ant-...",
+        "kimi" => "sk-...",
+        "zhipu" => "填写智谱 API Key",
+        "deepseek" => "sk-...",
         _ => "sk-proj-..."
     };
+
+    private void SetCNAccountMode(ChangeEventArgs e)
+    {
+        form.AccountMode = platform == "deepseek" ? "payg" : e.Value?.ToString() == "coding" ? "coding" : "payg";
+        form.BaseUrl = DefaultCNBaseUrl(platform, form.AccountMode, form.ApiProtocol);
+    }
+
+    private void SetCNApiProtocol(ChangeEventArgs e)
+    {
+        var requested = e.Value?.ToString() ?? "chat_completions";
+        form.ApiProtocol = requested == "responses" && platform != "deepseek" ? "chat_completions" : requested;
+        form.BaseUrl = DefaultCNBaseUrl(platform, form.AccountMode, form.ApiProtocol);
+    }
+
+    internal static string DefaultCNBaseUrl(string provider, string mode, string protocol)
+    {
+        if (protocol == "anthropic")
+        {
+            return provider switch
+            {
+                "kimi" => mode == "coding" ? "https://api.kimi.com/coding" : "https://api.moonshot.cn/anthropic",
+                "zhipu" => "https://open.bigmodel.cn/api/anthropic",
+                "deepseek" => "https://api.deepseek.com/anthropic",
+                _ => string.Empty
+            };
+        }
+        return provider switch
+        {
+            "kimi" => mode == "coding" ? "https://api.kimi.com/coding/v1" : "https://api.moonshot.cn/v1",
+            "zhipu" => mode == "coding" ? "https://open.bigmodel.cn/api/coding/paas/v4" : "https://open.bigmodel.cn/api/paas/v4",
+            "deepseek" => "https://api.deepseek.com",
+            _ => string.Empty
+        };
+    }
 
     private void SetBaseUrl(ChangeEventArgs e) => form.BaseUrl = e.Value?.ToString() ?? string.Empty;
     private void SetApiKey(ChangeEventArgs e) => form.ApiKey = e.Value?.ToString() ?? string.Empty;

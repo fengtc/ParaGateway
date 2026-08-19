@@ -84,7 +84,7 @@
 
                 <div class="ops-metric-grid">
                     <article class="ops-metric-card"><header><span>请求</span><button type="button" @onclick='() => OpenRequestsAsync("all")'>详情</button></header><dl><div><dt>请求数</dt><dd>@FormatNumber(overview.RequestCountTotal)</dd></div><div><dt>Tokens</dt><dd>@FormatNumber(overview.TokenConsumed)</dd></div><div><dt>平均 QPS</dt><dd>@overview.Qps.Avg.ToString("0.0")</dd></div><div><dt>平均 TPS</dt><dd>@overview.Tps.Avg.ToString("0.0")</dd></div></dl></article>
-                    <article class="ops-metric-card"><header><span>SLA</span><button type="button" @onclick='() => OpenRequestsAsync("error")'>详情</button></header><strong class="metric-main @SlaTone">@Percent(overview.Sla, 3)</strong><div class="meter"><i class="@SlaTone" style="width:@SlaProgress%"></i></div><p>异常 <b>@FormatNumber(Math.Max(0, overview.RequestCountSla - overview.SuccessCount))</b></p></article>
+                    <article class="ops-metric-card"><header><span>SLA</span><button type="button" @onclick='() => OpenRequestsAsync("error")'>详情</button></header><strong class="metric-main @SlaTone">@SlaValueLabel</strong><div class="meter"><i class="@SlaTone" style="width:@SlaProgress%"></i></div><p>异常 <b>@FormatNumber(Math.Max(0, overview.RequestCountSla - overview.SuccessCount))</b></p></article>
                     <article class="ops-metric-card"><header><span>请求错误</span><button type="button" @onclick='() => OpenErrorsAsync("request")'>详情</button></header><strong class="metric-main @RequestErrorTone">@Percent(overview.ErrorRate, 2)</strong><p>错误数 <b>@FormatNumber(overview.ErrorCountSla)</b></p><p>业务限制 <b>@FormatNumber(overview.BusinessLimitedCount)</b></p></article>
                     <article class="ops-metric-card"><header><span>请求时长</span><button type="button" @onclick='() => OpenRequestsAsync("all", "duration_desc")'>详情</button></header><strong class="metric-main">@(overview.Duration.P99Ms?.ToString() ?? "-") <small>ms (P99)</small></strong><div class="percentile-grid"><span>P95 <b>@MsValue(overview.Duration.P95Ms)</b></span><span>P90 <b>@MsValue(overview.Duration.P90Ms)</b></span><span>P50 <b>@MsValue(overview.Duration.P50Ms)</b></span><span>Avg <b>@MsValue(overview.Duration.AvgMs)</b></span></div></article>
                     <article class="ops-metric-card"><header><span>TTFT</span><button type="button" @onclick='() => OpenRequestsAsync("all", "duration_desc")'>详情</button></header><strong class="metric-main @TtftTone">@(overview.Ttft.P99Ms?.ToString() ?? "-") <small>ms (P99)</small></strong><div class="percentile-grid"><span>P95 <b>@MsValue(overview.Ttft.P95Ms)</b></span><span>P90 <b>@MsValue(overview.Ttft.P90Ms)</b></span><span>P50 <b>@MsValue(overview.Ttft.P50Ms)</b></span><span>Avg <b>@MsValue(overview.Ttft.AvgMs)</b></span></div></article>
@@ -146,7 +146,7 @@
 
         <div class="ops-chart-grid">
             <section class="ops-card"><header class="card-header"><div><h3>请求时长分布</h3><p>成功请求的耗时区间（毫秒）</p></div></header>@if (latency.Buckets.Count == 0) { <EmptyState Title="该时间窗口内暂无请求" Description="暂无延迟分布。" /> } else { <div class="bar-list">@foreach (var bucket in latency.Buckets) { <div><span>@bucket.Range</span><i><em style="width:@BarWidth(bucket.Count, latency.Buckets.Max(x => x.Count))%"></em></i><b>@bucket.Count</b></div> }</div> }</section>
-            <section class="ops-card"><header class="card-header"><div><h3>错误分布</h3><p>按状态码统计，排除业务限制</p></div><button type="button" class="text-button" @onclick='() => OpenErrorsAsync("request")'>查看明细</button></header>@if (errorDistribution.Items.Count == 0) { <EmptyState Title="该时间窗口内暂无错误" Description="暂无错误状态码分布。" /> } else { <div class="bar-list error-bars">@foreach (var item in errorDistribution.Items.OrderByDescending(x => x.Sla)) { <div><span>@item.StatusCode</span><i><em style="width:@BarWidth(item.Sla, errorDistribution.Items.Max(x => x.Sla))%"></em></i><b>@item.Sla</b></div> }</div> }</section>
+            <section class="ops-card"><header class="card-header"><div><h3>错误分布</h3><p>按错误来源归类，排除业务限制</p></div><button type="button" class="text-button" @onclick='() => OpenErrorsAsync("request")'>查看明细</button></header>@if (ErrorDistributionRows.Count == 0) { <EmptyState Title="该时间窗口内暂无错误" Description="暂无错误分类分布。" /> } else { <div class="bar-list error-bars">@foreach (var item in ErrorDistributionRows) { <div><span>@item.Label</span><i><em class="@item.Tone" style="width:@BarWidth(item.Count, ErrorDistributionRows.Max(x => x.Count))%"></em></i><b>@item.Count</b></div> }</div> }</section>
             <section class="ops-card"><header class="card-header"><div><h3>错误趋势</h3><p>请求错误与上游错误趋势</p></div><button type="button" class="text-button" @onclick='() => OpenErrorsAsync("upstream")'>查看明细</button></header>@if (ErrorTrendRows.Count == 0) { <EmptyState Title="该时间窗口内暂无错误" Description="暂无错误趋势。" /> } else { <DxChart Data="@ErrorTrendRows" Width="100%" Height="250px"><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="请求错误" ArgumentField="p => p.Time" ValueField="p => p.Primary" /><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="上游错误" ArgumentField="p => p.Time" ValueField="p => p.Secondary" /><DxChartTooltip Enabled="true" /></DxChart> }</section>
         </div>
 
@@ -477,16 +477,19 @@
     private IReadOnlyList<OpsTrendRow> ThroughputRows => snapshot.ThroughputTrend.Points.Select(x => new OpsTrendRow(FormatBucket(x.BucketStart), x.Qps, x.Tps / 1000d)).ToList();
     private IReadOnlyList<OpsTrendRow> SwitchTrendRows => switchTrend.Points.Select(x => new OpsTrendRow(FormatBucket(x.BucketStart), x.RequestCount <= 0 ? 0 : x.SwitchCount * 100d / x.RequestCount, x.SwitchCount)).ToList();
     private IReadOnlyList<OpsTrendRow> ErrorTrendRows => snapshot.ErrorTrend.Points.Select(x => new OpsTrendRow(FormatBucket(x.BucketStart), x.ErrorCountSla, x.UpstreamErrorCountExcl429529)).ToList();
+    private IReadOnlyList<ErrorDistributionRow> ErrorDistributionRows => BuildErrorDistributionRows(errorDistribution.Items);
     private IReadOnlyList<ConcurrencyRow> ConcurrencyRows => BuildConcurrencyRows();
     private string ConcurrencyDimensionLabel => showUserConcurrency ? "按用户" : groupId.HasValue ? "按账号" : string.IsNullOrWhiteSpace(platform) ? "按平台" : "按分组";
     private string HealthScoreLabel => overview.RequestCountTotal == 0 ? "空闲" : overview.HealthScore.ToString();
     private string HealthStatus => overview.RequestCountTotal == 0 ? "空闲" : overview.HealthScore >= 90 ? "健康" : overview.HealthScore >= 60 ? "需关注" : "高风险";
     private string HealthTone => overview.RequestCountTotal == 0 ? "muted" : overview.HealthScore >= 90 ? "success" : overview.HealthScore >= 60 ? "warning" : "danger";
-    private string SlaTone => ThresholdTone(overview.Sla * 100, thresholds.SlaPercentMin, lowerIsBad: true);
+    private bool HasSlaSample => overview.RequestCountSla > 0;
+    private string SlaValueLabel => HasSlaSample ? Percent(overview.Sla, 3) : "-";
+    private string SlaTone => HasSlaSample ? ThresholdTone(overview.Sla * 100, thresholds.SlaPercentMin, lowerIsBad: true) : "muted";
     private string TtftTone => ThresholdTone(overview.Ttft.P99Ms, thresholds.TtftP99MsMax, false);
     private string RequestErrorTone => ThresholdTone(overview.ErrorRate * 100, thresholds.RequestErrorRatePercentMax, false);
     private string UpstreamErrorTone => ThresholdTone(overview.UpstreamErrorRate * 100, thresholds.UpstreamErrorRatePercentMax, false);
-    private double SlaProgress => Math.Clamp((overview.Sla * 100 - 90) * 10, 0, 100);
+    private double SlaProgress => HasSlaSample ? Math.Clamp((overview.Sla * 100 - 90) * 10, 0, 100) : 0;
     private string GoroutineTone => (system?.GoroutineCount ?? 0) >= 8000 ? "danger" : (system?.GoroutineCount ?? 0) >= 2000 ? "warning" : "success";
     private int JobWarningCount => overview.JobHeartbeats.Count(x => !string.IsNullOrWhiteSpace(x.LastError));
     private string MemorySummary => system?.MemoryUsedMb is null || system.MemoryTotalMb is null ? "-" : $"{FormatMemory(system.MemoryUsedMb.Value)} / {FormatMemory(system.MemoryTotalMb.Value)}";
@@ -769,6 +772,27 @@
         if (groupId.HasValue) return concurrency.Account.Values.OrderByDescending(x => x.LoadPercentage).Select(x => new ConcurrencyRow(string.IsNullOrWhiteSpace(x.AccountName) ? $"账号 {x.AccountId}" : x.AccountName, x.GroupName, x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
         if (!string.IsNullOrWhiteSpace(platform)) return concurrency.Group.Values.Where(x => string.Equals(x.Platform, platform, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.LoadPercentage).Select(x => new ConcurrencyRow(x.GroupName, x.Platform, x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
         return concurrency.Platform.Values.OrderByDescending(x => x.LoadPercentage).Select(x => new ConcurrencyRow(x.Platform.ToUpperInvariant(), $"可用账号 {availability.Platform.GetValueOrDefault(x.Platform)?.AvailableCount ?? 0}", x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
+    }
+
+    private static IReadOnlyList<ErrorDistributionRow> BuildErrorDistributionRows(IEnumerable<OpsErrorDistributionItemDto> items)
+    {
+        long upstream = 0, client = 0, system = 0, other = 0;
+        foreach (var item in items)
+        {
+            if (item.Sla <= 0) continue;
+            if (item.StatusCode is 502 or 503 or 504) upstream += item.Sla;
+            else if (item.StatusCode is >= 400 and < 500) client += item.Sla;
+            else if (item.StatusCode == 500) system += item.Sla;
+            else other += item.Sla;
+        }
+
+        return new[]
+        {
+            new ErrorDistributionRow("上游", upstream, "upstream"),
+            new ErrorDistributionRow("客户端", client, "client"),
+            new ErrorDistributionRow("系统", system, "system"),
+            new ErrorDistributionRow("其他", other, "other")
+        }.Where(row => row.Count > 0).ToList();
     }
 
     private IReadOnlyList<DiagnosisRow> BuildDiagnosis()
@@ -1435,6 +1459,7 @@
     }
 
     private sealed record OpsTrendRow(string Time, double Primary, double Secondary);
+    private sealed record ErrorDistributionRow(string Label, long Count, string Tone);
     private sealed record ConcurrencyRow(string Name, string Subtitle, int Used, int Capacity, int Queued, double Load);
     private sealed record DiagnosisRow(string Tone, string Title, string Description);
 }

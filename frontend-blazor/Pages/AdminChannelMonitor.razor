@@ -48,14 +48,15 @@ else if (!v2View)
             <DxGrid Data="@monitors" KeyFieldName="Id" ShowFilterRow="true" ShowSearchPanel="false" PageSize="20" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer">
                 <Columns>
                     <DxGridDataColumn FieldName="Name" Caption="名称" MinWidth="180" />
-                    <DxGridDataColumn FieldName="Provider" Caption="平台" Width="100" />
-                    <DxGridDataColumn FieldName="PrimaryModel" Caption="主模型" MinWidth="160" />
+                    <DxGridDataColumn Caption="平台" Width="115"><CellDisplayTemplate Context="context">@{ var row = (ChannelMonitorDto)context.DataItem; }<span class="provider-badge @row.Provider">@ProviderLabel(row.Provider)</span></CellDisplayTemplate></DxGridDataColumn>
+                    <DxGridDataColumn Caption="检测模式" Width="120"><CellDisplayTemplate Context="context">@{ var row = (ChannelMonitorDto)context.DataItem; }<span class="mode-badge @row.CheckMode">@CheckModeLabel(row.CheckMode)</span></CellDisplayTemplate></DxGridDataColumn>
+                    <DxGridDataColumn Caption="主模型 / 配额" MinWidth="235"><CellDisplayTemplate Context="context">@{ var row = (ChannelMonitorDto)context.DataItem; }<div class="monitor-primary"><strong>@(row.CheckMode == "quota" ? "配额快照" : row.PrimaryModel)</strong><MonitorQuotaView Snapshot="@row.LatestQuota" /></div></CellDisplayTemplate></DxGridDataColumn>
                     <DxGridDataColumn FieldName="GroupName" Caption="分组" MinWidth="120" />
                     <DxGridDataColumn Caption="状态" Width="100"><CellDisplayTemplate Context="context">@{ var row = (ChannelMonitorDto)context.DataItem; }<span class="status-badge @(row.Enabled ? "success" : "neutral")">@(row.Enabled ? "启用" : "停用")</span></CellDisplayTemplate></DxGridDataColumn>
                     <DxGridDataColumn FieldName="PrimaryStatus" Caption="最近检查" Width="115" />
                     <DxGridDataColumn Caption="延迟" Width="95"><CellDisplayTemplate Context="context">@{ var row = (ChannelMonitorDto)context.DataItem; }@(row.PrimaryLatencyMs.HasValue ? $"{row.PrimaryLatencyMs} ms" : "-")</CellDisplayTemplate></DxGridDataColumn>
-                    <DxGridDataColumn Caption="可用率（7d）" Width="120"><CellDisplayTemplate Context="context">@{ var row = (ChannelMonitorDto)context.DataItem; }@(row.Availability7d > 0 ? $"{row.Availability7d:P1}" : "-")</CellDisplayTemplate></DxGridDataColumn>
-                    <DxGridDataColumn Caption="操作" Width="195"><CellDisplayTemplate Context="context">@{ var row = (ChannelMonitorDto)context.DataItem; }<button type="button" class="icon-button" title="立即检查" aria-label="立即检查" @onclick="() => RunMonitorAsync(row)"><Icon Name="play" Size="16" /></button><button type="button" class="icon-button" title="历史" aria-label="历史" @onclick="() => OpenHistoryAsync(row)"><Icon Name="clock" Size="16" /></button><button type="button" class="icon-button" title="复制" aria-label="复制" @onclick="() => DuplicateMonitorAsync(row)"><Icon Name="copy" Size="16" /></button><button type="button" class="icon-button" title="编辑" aria-label="编辑" @onclick="() => OpenEditMonitor(row)"><Icon Name="pencil" Size="16" /></button><button type="button" class="icon-button danger" title="删除" aria-label="删除" @onclick="() => DeleteMonitorAsync(row)"><Icon Name="trash" Size="16" /></button></CellDisplayTemplate></DxGridDataColumn>
+                    <DxGridDataColumn Caption="可用率（7d）" Width="120"><CellDisplayTemplate Context="context">@{ var row = (ChannelMonitorDto)context.DataItem; }@(row.Availability7d > 0 ? $"{row.Availability7d:0.0}%" : "-")</CellDisplayTemplate></DxGridDataColumn>
+                    <DxGridDataColumn Caption="操作" Width="195"><CellDisplayTemplate Context="context">@{ var row = (ChannelMonitorDto)context.DataItem; }<button type="button" class="icon-button" title="立即检查" aria-label="立即检查" @onclick="() => RunMonitorAsync(row)"><Icon Name="play" Size="16" /></button><button type="button" class="icon-button" title="历史" aria-label="历史" @onclick="() => OpenHistoryAsync(row)"><Icon Name="clock" Size="16" /></button><button type="button" class="icon-button" title="复制" aria-label="复制" @onclick="() => DuplicateMonitorAsync(row)"><Icon Name="copy" Size="16" /></button><button type="button" class="icon-button" title="编辑" aria-label="编辑" @onclick="() => OpenEditMonitorAsync(row)"><Icon Name="pencil" Size="16" /></button><button type="button" class="icon-button danger" title="删除" aria-label="删除" @onclick="() => DeleteMonitorAsync(row)"><Icon Name="trash" Size="16" /></button></CellDisplayTemplate></DxGridDataColumn>
                 </Columns>
             </DxGrid>
         }
@@ -79,12 +80,86 @@ else
     <section class="content-section"><div class="section-header"><div><h2>用户排行</h2><p>管理员可查看用户维度的用量和错误指标。</p></div></div><DxGrid Data="@usersV2" ShowFilterRow="true" PageSize="20"><Columns><DxGridDataColumn FieldName="Rank" Caption="排名" Width="75" /><DxGridDataColumn FieldName="DisplayLabel" Caption="用户" MinWidth="220" /><DxGridDataColumn Caption="请求数"><CellDisplayTemplate Context="context">@(((ChannelMonitorV2UserRowDto)context.DataItem).Metrics.RequestCount)</CellDisplayTemplate></DxGridDataColumn><DxGridDataColumn Caption="Token"><CellDisplayTemplate Context="context">@(((ChannelMonitorV2UserRowDto)context.DataItem).Metrics.TokenCount)</CellDisplayTemplate></DxGridDataColumn><DxGridDataColumn Caption="错误率"><CellDisplayTemplate Context="context">@Percent(((ChannelMonitorV2UserRowDto)context.DataItem).Metrics.ErrorRate)</CellDisplayTemplate></DxGridDataColumn></Columns></DxGrid></section>
 }
 
-<AppModal Open="monitorEditorOpen" Title="@(editingMonitor is null ? "新建渠道监控计划" : "编辑渠道监控计划")" MaxWidth="820px" OnClose="CloseMonitorEditor">
-    <ChildContent><EditForm id="monitor-editor" Model="monitorForm" OnValidSubmit="SaveMonitorAsync" FormName="monitor-editor"><div class="form-grid"><div class="form-field"><label for="monitor-name">名称</label><InputText id="monitor-name" @bind-Value="monitorForm.Name" /></div><div class="form-field"><label for="monitor-provider">平台</label><InputSelect id="monitor-provider" @bind-Value="monitorForm.Provider"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="grok">Grok</option></InputSelect></div><div class="form-field"><label for="monitor-api-mode">API 模式</label><InputSelect id="monitor-api-mode" @bind-Value="monitorForm.ApiMode"><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></InputSelect></div><div class="form-field full"><label for="monitor-endpoint">Endpoint</label><InputText id="monitor-endpoint" @bind-Value="monitorForm.Endpoint" /></div><div class="form-field full"><label for="monitor-api-key">API Key（新建必填，编辑留空保持原值）</label><InputText id="monitor-api-key" type="password" autocomplete="new-password" @bind-Value="monitorForm.ApiKey" />@if (!string.IsNullOrWhiteSpace(monitorForm.ApiKeyMasked)) { <span class="field-hint">当前已配置：@monitorForm.ApiKeyMasked@(monitorForm.ApiKeyDecryptFailed ? "（无法解密，请重新填写）" : string.Empty)</span> }</div><div class="form-field"><label for="monitor-primary">主模型</label><InputText id="monitor-primary" @bind-Value="monitorForm.PrimaryModel" /></div><div class="form-field"><label for="monitor-extra">附加模型（逗号分隔）</label><InputText id="monitor-extra" @bind-Value="monitorForm.ExtraModels" /></div><div class="form-field"><label for="monitor-group">分组名称</label><InputText id="monitor-group" @bind-Value="monitorForm.GroupName" /></div><div class="form-field"><label for="monitor-interval">间隔（秒）</label><InputNumber id="monitor-interval" @bind-Value="monitorForm.IntervalSeconds" /></div><div class="form-field"><label for="monitor-jitter">抖动（秒）</label><InputNumber id="monitor-jitter" @bind-Value="monitorForm.JitterSeconds" /></div><div class="form-field"><label for="monitor-template">请求模板</label><InputSelect id="monitor-template" @bind-Value="monitorForm.TemplateIdText"><option value="">不关联模板</option>@foreach (var template in templates.Where(x => string.Equals(x.Provider, monitorForm.Provider, StringComparison.OrdinalIgnoreCase))) { <option value="@template.Id">@template.Name</option>}</InputSelect></div><div class="form-field full"><label for="monitor-headers">附加 Headers（每行 Name: Value）</label><InputTextArea id="monitor-headers" @bind-Value="monitorForm.HeadersText" rows="4" placeholder="User-Agent: ParaGateway-Monitor" /></div><div class="form-field"><label for="monitor-body-mode">Body 覆盖模式</label><InputSelect id="monitor-body-mode" @bind-Value="monitorForm.BodyOverrideMode"><option value="off">关闭</option><option value="merge">合并</option><option value="replace">替换</option></InputSelect></div><div class="form-field full"><label for="monitor-body">Body JSON</label><InputTextArea id="monitor-body" @bind-Value="monitorForm.BodyJson" rows="5" placeholder='{"temperature":0}' /></div><label class="toggle-row"><InputCheckbox @bind-Value="monitorForm.Enabled" /> 启用计划</label></div>@if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }</EditForm></ChildContent>
+<AppModal Open="monitorEditorOpen" Title="@(editingMonitor is null ? "新建渠道监控计划" : "编辑渠道监控计划")" MaxWidth="860px" OnClose="CloseMonitorEditor">
+    <ChildContent>
+        <EditForm id="monitor-editor" Model="monitorForm" OnValidSubmit="SaveMonitorAsync" FormName="monitor-editor">
+            <div class="monitor-editor">
+                <div class="form-field"><label for="monitor-name">名称 <span class="required">*</span></label><InputText id="monitor-name" @bind-Value="monitorForm.Name" /></div>
+
+                <div class="form-field">
+                    <label>检测模式</label>
+                    <div class="monitor-mode-options" role="group" aria-label="检测模式">
+                        <button type="button" class="@(monitorForm.CheckMode == "probe" ? "active" : null)" aria-pressed="@(monitorForm.CheckMode == "probe")" disabled="@(monitorForm.Provider == "antigravity")" @onclick='() => SetMonitorCheckModeAsync("probe")'><strong>探活</strong><small>模型可用性与延迟</small></button>
+                        <button type="button" class="@(monitorForm.CheckMode == "quota" ? "active" : null)" aria-pressed="@(monitorForm.CheckMode == "quota")" @onclick='() => SetMonitorCheckModeAsync("quota")'><strong>配额</strong><small>账号额度或余额</small></button>
+                        <button type="button" class="@(monitorForm.CheckMode == "quota_probe" ? "active" : null)" aria-pressed="@(monitorForm.CheckMode == "quota_probe")" disabled="@(monitorForm.Provider == "antigravity")" @onclick='() => SetMonitorCheckModeAsync("quota_probe")'><strong>探活 + 配额</strong><small>同时保存两类结果</small></button>
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <div class="form-field"><label for="monitor-provider">平台 <span class="required">*</span></label><select id="monitor-provider" value="@monitorForm.Provider" @onchange="MonitorProviderChangedAsync"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="grok">Grok</option><option value="antigravity">Antigravity</option><option value="kimi">Kimi</option><option value="zhipu">智谱 GLM</option><option value="deepseek">DeepSeek</option></select></div>
+                    @if (monitorForm.Provider == "openai" && MonitorUsesProbe)
+                    {
+                        <div class="form-field"><label for="monitor-api-mode">API 模式</label><InputSelect id="monitor-api-mode" @bind-Value="monitorForm.ApiMode"><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></InputSelect></div>
+                    }
+                </div>
+
+                @if (MonitorUsesQuota)
+                {
+                    <div class="form-field linked-account-field">
+                        <label for="monitor-account">关联账号 <span class="required">*</span></label>
+                        <InputSelect id="monitor-account" TValue="long?" @bind-Value="monitorForm.AccountId" disabled="@linkedAccountsLoading">
+                            <option value="">@(linkedAccountsLoading ? "正在加载账号..." : "选择同平台账号")</option>
+                            @foreach (var account in linkedAccounts)
+                            {
+                                <option value="@account.NumericId">@account.Name (#@account.Id)</option>
+                            }
+                        </InputSelect>
+                        @if (monitorForm.Provider == "openai") { <small>OpenAI 配额查询会复用该账号的 Codex 用量探针。</small> }
+                        @if (!string.IsNullOrWhiteSpace(linkedAccountError)) { <small class="validation-text">@linkedAccountError</small> }
+                        else if (!linkedAccountsLoading && linkedAccounts.Count == 0) { <small class="validation-text">当前平台没有可关联账号。</small> }
+                    </div>
+                }
+
+                @if (MonitorUsesProbe)
+                {
+                    <div class="form-grid">
+                        <div class="form-field full"><label for="monitor-endpoint">Endpoint <span class="required">*</span></label><InputText id="monitor-endpoint" @bind-Value="monitorForm.Endpoint" /></div>
+                        <div class="form-field full"><label for="monitor-api-key">API Key@(editingMonitor is null ? " *" : "（留空保持原值）")</label><InputText id="monitor-api-key" type="password" autocomplete="new-password" @bind-Value="monitorForm.ApiKey" />@if (!string.IsNullOrWhiteSpace(monitorForm.ApiKeyMasked)) { <span class="field-hint">当前已配置：@monitorForm.ApiKeyMasked@(monitorForm.ApiKeyDecryptFailed ? "（无法解密，请重新填写）" : string.Empty)</span> }</div>
+                        <div class="form-field"><label for="monitor-primary">主模型 <span class="required">*</span></label><InputText id="monitor-primary" @bind-Value="monitorForm.PrimaryModel" /></div>
+                        <div class="form-field"><label for="monitor-extra">附加模型（逗号分隔）</label><InputText id="monitor-extra" @bind-Value="monitorForm.ExtraModels" /></div>
+                    </div>
+                }
+
+                <div class="form-grid">
+                    <div class="form-field"><label for="monitor-group">分组名称</label><InputText id="monitor-group" @bind-Value="monitorForm.GroupName" /></div>
+                    <div class="form-field"><label for="monitor-interval">间隔（秒）</label><InputNumber id="monitor-interval" @bind-Value="monitorForm.IntervalSeconds" min="15" max="3600" /></div>
+                    <div class="form-field"><label for="monitor-jitter">抖动（秒）</label><InputNumber id="monitor-jitter" @bind-Value="monitorForm.JitterSeconds" min="0" /></div>
+                </div>
+
+                @if (MonitorUsesProbe)
+                {
+                    <details class="monitor-advanced">
+                        <summary>高级请求设置</summary>
+                        <div class="form-grid">
+                            <div class="form-field"><label for="monitor-template">请求模板</label><InputSelect id="monitor-template" @bind-Value="monitorForm.TemplateIdText"><option value="">不关联模板</option>@foreach (var template in MatchingMonitorTemplates) { <option value="@template.Id">@template.Name</option> }</InputSelect></div>
+                            <div class="form-field"><label for="monitor-body-mode">Body 覆盖模式</label><InputSelect id="monitor-body-mode" @bind-Value="monitorForm.BodyOverrideMode"><option value="off">关闭</option><option value="merge">合并</option><option value="replace">替换</option></InputSelect></div>
+                            <div class="form-field full"><label for="monitor-headers">附加 Headers（每行 Name: Value）</label><InputTextArea id="monitor-headers" @bind-Value="monitorForm.HeadersText" rows="4" placeholder="User-Agent: ParaGateway-Monitor" /></div>
+                            <div class="form-field full"><label for="monitor-body">Body JSON</label><InputTextArea id="monitor-body" @bind-Value="monitorForm.BodyJson" rows="5" placeholder='{"temperature":0}' /></div>
+                        </div>
+                    </details>
+                }
+
+                <label class="toggle-row"><InputCheckbox @bind-Value="monitorForm.Enabled" /> 启用计划</label>
+            </div>
+            @if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }
+        </EditForm>
+    </ChildContent>
     <Footer><button type="button" class="button secondary" @onclick="CloseMonitorEditor">取消</button><button type="submit" form="monitor-editor" class="button primary" disabled="@saving">保存</button></Footer>
 </AppModal>
 
-<AppModal Open="historyOpen" Title="渠道检查历史" MaxWidth="860px" OnClose="CloseHistory"><ChildContent>@if (history.Count == 0) { <EmptyState Title="暂无历史结果" Description="该计划尚未产生检查记录。" /> } else { <DxGrid Data="@history" ShowFilterRow="true" PageSize="20"><Columns><DxGridDataColumn FieldName="Model" Caption="模型" /><DxGridDataColumn FieldName="Status" Caption="状态" /><DxGridDataColumn FieldName="LatencyMs" Caption="延迟（毫秒）" /><DxGridDataColumn FieldName="PingLatencyMs" Caption="Ping（毫秒）" /><DxGridDataColumn FieldName="Message" Caption="消息" MinWidth="240" /><DxGridDataColumn FieldName="CheckedAt" Caption="检查时间" DisplayFormat="yyyy-MM-dd HH:mm:ss" /></Columns></DxGrid> }</ChildContent><Footer><button type="button" class="button secondary" @onclick="CloseHistory">关闭</button></Footer></AppModal>
+<AppModal Open="runResultOpen" Title="本次检查结果" MaxWidth="760px" OnClose="CloseRunResult"><ChildContent>@if (runResults.Count == 0) { <EmptyState Title="暂无检查结果" Description="服务端未返回检查记录。" /> } else { <div class="monitor-run-results">@foreach (var result in runResults) { <article><div><strong>@result.Model</strong>@if (!string.IsNullOrWhiteSpace(result.Message)) { <small>@result.Message</small> }<MonitorQuotaView Snapshot="@result.Quota" /></div><div class="run-result-state"><span class="status-badge @StatusTone(result.Status)">@StatusLabel(result.Status)</span><small>@(result.LatencyMs.HasValue ? $"{result.LatencyMs} ms" : "-")</small></div></article> }</div> }</ChildContent><Footer><button type="button" class="button primary" @onclick="CloseRunResult">关闭</button></Footer></AppModal>
+
+<AppModal Open="historyOpen" Title="渠道检查历史" MaxWidth="1040px" OnClose="CloseHistory"><ChildContent>@if (history.Count == 0) { <EmptyState Title="暂无历史结果" Description="该计划尚未产生检查记录。" /> } else { <DxGrid Data="@history" ShowFilterRow="true" PageSize="20"><Columns><DxGridDataColumn FieldName="Model" Caption="模型" /><DxGridDataColumn FieldName="Status" Caption="状态" /><DxGridDataColumn FieldName="LatencyMs" Caption="延迟（毫秒）" /><DxGridDataColumn FieldName="PingLatencyMs" Caption="Ping（毫秒）" /><DxGridDataColumn Caption="配额快照" MinWidth="230"><CellDisplayTemplate Context="context">@{ var row = (ChannelMonitorHistoryItemDto)context.DataItem; }<MonitorQuotaView Snapshot="@row.Quota" /></CellDisplayTemplate></DxGridDataColumn><DxGridDataColumn FieldName="Message" Caption="消息" MinWidth="240" /><DxGridDataColumn FieldName="CheckedAt" Caption="检查时间" DisplayFormat="yyyy-MM-dd HH:mm:ss" /></Columns></DxGrid> }</ChildContent><Footer><button type="button" class="button secondary" @onclick="CloseHistory">关闭</button></Footer></AppModal>
 
 <AppModal Open="templateEditorOpen" Title="@(editingTemplate is null ? "新建请求模板" : "编辑请求模板")" MaxWidth="760px" OnClose="CloseTemplateEditor"><ChildContent><EditForm id="template-editor" Model="templateForm" OnValidSubmit="SaveTemplateAsync" FormName="template-editor"><div class="form-grid"><div class="form-field"><label for="template-name">名称</label><InputText id="template-name" @bind-Value="templateForm.Name" /></div><div class="form-field"><label for="template-provider">平台</label><InputSelect id="template-provider" @bind-Value="templateForm.Provider"><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="grok">Grok</option></InputSelect></div><div class="form-field"><label for="template-api-mode">API 模式</label><InputSelect id="template-api-mode" @bind-Value="templateForm.ApiMode"><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option></InputSelect></div><div class="form-field full"><label for="template-description">说明</label><InputTextArea id="template-description" @bind-Value="templateForm.Description" rows="2" /></div><div class="form-field full"><label for="template-headers">附加 Headers（每行 Name: Value）</label><InputTextArea id="template-headers" @bind-Value="templateForm.HeadersText" rows="4" placeholder="User-Agent: ParaGateway-Monitor" /></div><div class="form-field"><label for="template-body-mode">Body 覆盖模式</label><InputSelect id="template-body-mode" @bind-Value="templateForm.BodyOverrideMode"><option value="off">关闭</option><option value="merge">合并</option><option value="replace">替换</option></InputSelect></div><div class="form-field full"><label for="template-body">Body JSON（可选）</label><InputTextArea id="template-body" @bind-Value="templateForm.BodyJson" rows="5" /></div></div>@if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }</EditForm></ChildContent><Footer><button type="button" class="button secondary" @onclick="CloseTemplateEditor">取消</button><button type="submit" form="template-editor" class="button primary" disabled="@saving">保存</button></Footer></AppModal>
 
@@ -94,7 +169,7 @@ else
 
 @code {
     private bool v2View;
-    private bool loading = true, saving, monitorEditorOpen, historyOpen, templateEditorOpen, v2ConfigOpen, associatedOpen, associatedLoading, applySaving;
+    private bool loading = true, saving, monitorEditorOpen, historyOpen, runResultOpen, templateEditorOpen, v2ConfigOpen, associatedOpen, associatedLoading, applySaving, linkedAccountsLoading;
     private string? error, modalError, v2ConfigError;
     private string v1Search = string.Empty;
     private int v1Total;
@@ -103,6 +178,9 @@ else
     private ChannelMonitorDto? editingMonitor;
     private MonitorForm monitorForm = new();
     private List<ChannelMonitorHistoryItemDto> history = [];
+    private List<ChannelMonitorCheckResultDto> runResults = [];
+    private List<LinkedAccountOption> linkedAccounts = [];
+    private string? linkedAccountError;
     private List<ChannelMonitorV2ModelRowDto> models = [];
     private List<ChannelMonitorV2ErrorRowDto> errors = [];
     private List<ChannelMonitorV2UserRowDto> usersV2 = [];
@@ -154,22 +232,172 @@ else
     private async Task ApplyFilterAsync() { if (!v2View) return; v2Filter = BuildV2Filter(); await LoadAsync(); }
     private ChannelMonitorV2FilterDto BuildV2Filter() => new() { Range = v2Filter.Range, Platforms = Split(platformText), Models = Split(modelText), GroupIds = ParseLongs(groupText) };
 
-    private void OpenCreateMonitor() { editingMonitor = null; monitorForm = new(); modalError = null; monitorEditorOpen = true; }
-    private void OpenEditMonitor(ChannelMonitorDto row) { editingMonitor = row; monitorForm = MonitorForm.From(row); modalError = null; monitorEditorOpen = true; }
-    private void CloseMonitorEditor() => monitorEditorOpen = false;
+    private bool MonitorUsesQuota => monitorForm.CheckMode is "quota" or "quota_probe";
+    private bool MonitorUsesProbe => monitorForm.CheckMode is "probe" or "quota_probe";
+    private IEnumerable<ChannelMonitorTemplateDto> MatchingMonitorTemplates => templates.Where(x =>
+        string.Equals(x.Provider, monitorForm.Provider, StringComparison.OrdinalIgnoreCase)
+        && (monitorForm.Provider != "openai" || string.Equals(x.ApiMode, monitorForm.ApiMode, StringComparison.OrdinalIgnoreCase)));
+
+    private void OpenCreateMonitor()
+    {
+        editingMonitor = null;
+        monitorForm = new();
+        linkedAccounts = [];
+        linkedAccountError = null;
+        modalError = null;
+        monitorEditorOpen = true;
+    }
+
+    private async Task OpenEditMonitorAsync(ChannelMonitorDto row)
+    {
+        editingMonitor = row;
+        monitorForm = MonitorForm.From(row);
+        linkedAccounts = [];
+        linkedAccountError = null;
+        modalError = null;
+        monitorEditorOpen = true;
+        if (MonitorUsesQuota) await LoadLinkedAccountsAsync();
+    }
+
+    private void CloseMonitorEditor()
+    {
+        monitorEditorOpen = false;
+        linkedAccounts = [];
+        linkedAccountError = null;
+    }
+
+    private async Task SetMonitorCheckModeAsync(string mode)
+    {
+        if (monitorForm.Provider == "antigravity" && mode != "quota") return;
+        monitorForm.CheckMode = mode;
+        modalError = null;
+        if (!MonitorUsesQuota)
+        {
+            monitorForm.AccountId = null;
+            linkedAccounts = [];
+            linkedAccountError = null;
+            return;
+        }
+        await LoadLinkedAccountsAsync();
+    }
+
+    private async Task MonitorProviderChangedAsync(ChangeEventArgs args)
+    {
+        var next = args.Value?.ToString()?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (!SupportedMonitorProviders.Contains(next) || next == monitorForm.Provider) return;
+
+        var previous = monitorForm.Provider;
+        var previousDefault = DefaultMonitorEndpoint(previous);
+        if (!string.IsNullOrWhiteSpace(previousDefault) && string.Equals(monitorForm.Endpoint, previousDefault, StringComparison.OrdinalIgnoreCase))
+            monitorForm.Endpoint = string.Empty;
+        if (previous == "grok" && string.Equals(monitorForm.PrimaryModel, "grok-4.5", StringComparison.OrdinalIgnoreCase))
+            monitorForm.PrimaryModel = string.Empty;
+
+        monitorForm.Provider = next;
+        monitorForm.AccountId = null;
+        monitorForm.ApiKey = string.Empty;
+        monitorForm.TemplateIdText = string.Empty;
+        linkedAccounts = [];
+        linkedAccountError = null;
+        if (next != "openai") monitorForm.ApiMode = "chat_completions";
+        if (next == "antigravity") monitorForm.CheckMode = "quota";
+        if (next == "grok")
+        {
+            if (string.IsNullOrWhiteSpace(monitorForm.Endpoint)) monitorForm.Endpoint = "https://api.x.ai";
+            if (string.IsNullOrWhiteSpace(monitorForm.PrimaryModel)) monitorForm.PrimaryModel = "grok-4.5";
+        }
+        else
+        {
+            var nextDefault = DefaultMonitorEndpoint(next);
+            if (!string.IsNullOrWhiteSpace(nextDefault) && string.IsNullOrWhiteSpace(monitorForm.Endpoint)) monitorForm.Endpoint = nextDefault;
+        }
+        if (MonitorUsesQuota) await LoadLinkedAccountsAsync();
+    }
+
+    private async Task LoadLinkedAccountsAsync()
+    {
+        if (!MonitorUsesQuota || !monitorEditorOpen) return;
+        linkedAccountsLoading = true;
+        linkedAccountError = null;
+        try
+        {
+            var page = await Api.GetAccountsPageAsync(new AccountListQuery
+            {
+                Page = 1,
+                PageSize = 1000,
+                Platform = monitorForm.Provider,
+                SortBy = "name",
+                SortOrder = "asc"
+            });
+            linkedAccounts = page.Items
+                .Select(LinkedAccountOption.From)
+                .Where(x => x is not null)
+                .Cast<LinkedAccountOption>()
+                .ToList();
+
+            if (monitorForm.AccountId is { } selectedId && linkedAccounts.All(x => x.NumericId != selectedId))
+            {
+                try
+                {
+                    var selected = await Api.GetAccountAsync(selectedId.ToString(CultureInfo.InvariantCulture));
+                    if (!string.Equals(selected.Platform, monitorForm.Provider, StringComparison.OrdinalIgnoreCase))
+                    {
+                        monitorForm.AccountId = null;
+                        linkedAccountError = "原关联账号的平台与当前监控平台不一致，请重新选择。";
+                    }
+                    else if (LinkedAccountOption.From(selected) is { } option)
+                    {
+                        linkedAccounts.Insert(0, option);
+                    }
+                }
+                catch (ApiException)
+                {
+                    monitorForm.AccountId = null;
+                    linkedAccountError = "原关联账号已无法加载，请重新选择。";
+                }
+            }
+        }
+        catch (ApiException ex)
+        {
+            linkedAccounts = [];
+            linkedAccountError = $"账号列表加载失败：{ex.Message}";
+        }
+        finally
+        {
+            linkedAccountsLoading = false;
+        }
+    }
     private async Task SaveMonitorAsync()
     {
         saving = true; modalError = null;
         try
         {
+            ValidateMonitorForm();
             object? body = null;
-            if (!string.IsNullOrWhiteSpace(monitorForm.BodyJson)) { using var document = JsonDocument.Parse(monitorForm.BodyJson); body = document.RootElement.Clone(); }
-            var headers = ParseHeaders(monitorForm.HeadersText);
-            var payload = new Dictionary<string, object?> { ["name"] = monitorForm.Name.Trim(), ["provider"] = monitorForm.Provider, ["api_mode"] = monitorForm.ApiMode, ["endpoint"] = monitorForm.Endpoint.Trim(), ["primary_model"] = monitorForm.PrimaryModel.Trim(), ["extra_models"] = Split(monitorForm.ExtraModels), ["group_name"] = monitorForm.GroupName.Trim(), ["enabled"] = monitorForm.Enabled, ["interval_seconds"] = monitorForm.IntervalSeconds, ["jitter_seconds"] = monitorForm.JitterSeconds, ["extra_headers"] = headers, ["body_override_mode"] = monitorForm.BodyOverrideMode, ["body_override"] = body };
-            if (long.TryParse(monitorForm.TemplateIdText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var templateId) && templateId > 0) payload["template_id"] = templateId;
+            if (MonitorUsesProbe && !string.IsNullOrWhiteSpace(monitorForm.BodyJson)) { using var document = JsonDocument.Parse(monitorForm.BodyJson); body = document.RootElement.Clone(); }
+            var headers = MonitorUsesProbe ? ParseHeaders(monitorForm.HeadersText) : new Dictionary<string, string>();
+            var payload = new Dictionary<string, object?>
+            {
+                ["name"] = monitorForm.Name.Trim(),
+                ["provider"] = monitorForm.Provider,
+                ["api_mode"] = monitorForm.Provider == "openai" && MonitorUsesProbe ? monitorForm.ApiMode : "chat_completions",
+                ["check_mode"] = monitorForm.CheckMode,
+                ["account_id"] = MonitorUsesQuota ? monitorForm.AccountId : editingMonitor is null ? null : (long?)0,
+                ["endpoint"] = MonitorUsesProbe ? monitorForm.Endpoint.Trim() : string.Empty,
+                ["primary_model"] = MonitorUsesProbe ? monitorForm.PrimaryModel.Trim() : "quota",
+                ["extra_models"] = MonitorUsesProbe ? Split(monitorForm.ExtraModels) : new List<string>(),
+                ["group_name"] = monitorForm.GroupName.Trim(),
+                ["enabled"] = monitorForm.Enabled,
+                ["interval_seconds"] = monitorForm.IntervalSeconds,
+                ["jitter_seconds"] = monitorForm.JitterSeconds,
+                ["extra_headers"] = headers,
+                ["body_override_mode"] = MonitorUsesProbe ? monitorForm.BodyOverrideMode : "off",
+                ["body_override"] = MonitorUsesProbe ? body : null
+            };
+            if (MonitorUsesProbe && long.TryParse(monitorForm.TemplateIdText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var templateId) && templateId > 0) payload["template_id"] = templateId;
             else if (editingMonitor is not null && editingMonitor.TemplateId.HasValue) payload["clear_template"] = true;
-            if (!string.IsNullOrWhiteSpace(monitorForm.ApiKey)) payload["api_key"] = monitorForm.ApiKey.Trim();
-            if (editingMonitor is null) { if (!payload.ContainsKey("api_key")) throw new ApiException("新建计划必须填写 API Key。"); await Api.CreateAdminChannelMonitorAsync(payload); }
+            if (MonitorUsesProbe && !string.IsNullOrWhiteSpace(monitorForm.ApiKey)) payload["api_key"] = monitorForm.ApiKey.Trim();
+            if (editingMonitor is null) await Api.CreateAdminChannelMonitorAsync(payload);
             else await Api.UpdateAdminChannelMonitorAsync(editingMonitor.Id, payload);
             monitorEditorOpen = false; Toasts.Success("渠道监控计划已保存"); await LoadAsync();
         }
@@ -178,7 +406,19 @@ else
         catch (ApiException ex) { modalError = ex.Message; }
         finally { saving = false; }
     }
-    private async Task RunMonitorAsync(ChannelMonitorDto row) { try { var result = await Api.RunAdminChannelMonitorTypedAsync(row.Id); Toasts.Success($"已检查 {result.Results.Count} 个模型"); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } }
+    private async Task RunMonitorAsync(ChannelMonitorDto row)
+    {
+        try
+        {
+            var result = await Api.RunAdminChannelMonitorTypedAsync(row.Id);
+            runResults = result.Results;
+            runResultOpen = true;
+            Toasts.Success($"已检查 {result.Results.Count} 个结果");
+            await LoadAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+    private void CloseRunResult() { runResultOpen = false; runResults = []; }
     private async Task DuplicateMonitorAsync(ChannelMonitorDto row) { try { await Api.DuplicateAdminChannelMonitorAsync(row.Id); Toasts.Success("监控计划已复制"); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } }
     private async Task DeleteMonitorAsync(ChannelMonitorDto row) { if (!await JS.InvokeAsync<bool>("confirm", $"确认删除监控计划“{row.Name}”？")) return; try { await Api.DeleteAdminChannelMonitorAsync(row.Id); Toasts.Success("监控计划已删除"); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } }
     private async Task OpenHistoryAsync(ChannelMonitorDto row) { try { history = (await Api.GetAdminChannelMonitorHistoryAsync(row.Id)).Items; historyOpen = true; } catch (ApiException ex) { error = ex.Message; } }
@@ -252,6 +492,72 @@ else
     private static ChannelMonitorV2PlatformDto? ParsePlatformConfig(string line) { var parts = line.Split(':', 2); if (string.IsNullOrWhiteSpace(parts[0])) return null; return new() { Platform = parts[0].Trim(), Enabled = true, Models = parts.Length == 1 ? [] : Split(parts[1]) }; }
     private static List<string> Split(string? value) => (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     private static List<long> ParseLongs(string? value) => Split(value).Select(x => long.TryParse(x, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : 0).Where(x => x > 0).Distinct().ToList();
+    private static readonly HashSet<string> SupportedMonitorProviders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "openai", "anthropic", "gemini", "grok", "antigravity", "kimi", "zhipu", "deepseek"
+    };
+
+    private void ValidateMonitorForm()
+    {
+        if (string.IsNullOrWhiteSpace(monitorForm.Name)) throw new FormatException("请填写监控计划名称。");
+        if (!SupportedMonitorProviders.Contains(monitorForm.Provider)) throw new FormatException("请选择有效的平台。");
+        if (monitorForm.CheckMode is not ("probe" or "quota" or "quota_probe")) throw new FormatException("请选择有效的检测模式。");
+        if (monitorForm.Provider == "antigravity" && monitorForm.CheckMode != "quota") throw new FormatException("Antigravity 仅支持配额检测模式。");
+        if (MonitorUsesQuota && monitorForm.AccountId is null or <= 0) throw new FormatException("配额检测必须选择同平台关联账号。");
+        if (MonitorUsesProbe && string.IsNullOrWhiteSpace(monitorForm.Endpoint)) throw new FormatException("探活检测必须填写 Endpoint。");
+        if (MonitorUsesProbe && string.IsNullOrWhiteSpace(monitorForm.PrimaryModel)) throw new FormatException("探活检测必须填写主模型。");
+        if (MonitorUsesProbe && editingMonitor is null && string.IsNullOrWhiteSpace(monitorForm.ApiKey)) throw new FormatException("新建探活计划必须填写 API Key。");
+        if (MonitorUsesProbe && editingMonitor is not null && string.IsNullOrWhiteSpace(monitorForm.ApiKey) && string.IsNullOrWhiteSpace(monitorForm.ApiKeyMasked)) throw new FormatException("当前计划没有可复用的 API Key，请重新填写。");
+        if (monitorForm.IntervalSeconds is < 15 or > 3600) throw new FormatException("检测间隔必须在 15 到 3600 秒之间。");
+        if (monitorForm.JitterSeconds < 0 || monitorForm.JitterSeconds > monitorForm.IntervalSeconds - 15) throw new FormatException("抖动秒数必须大于等于 0，且间隔减去抖动不能低于 15 秒。");
+    }
+
+    private static string DefaultMonitorEndpoint(string provider) => provider switch
+    {
+        "grok" => "https://api.x.ai",
+        "kimi" => "https://api.moonshot.cn",
+        "zhipu" => "https://open.bigmodel.cn",
+        "deepseek" => "https://api.deepseek.com",
+        _ => string.Empty
+    };
+
+    private static string ProviderLabel(string provider) => provider switch
+    {
+        "openai" => "OpenAI",
+        "anthropic" => "Anthropic",
+        "gemini" => "Gemini",
+        "grok" => "Grok",
+        "antigravity" => "Antigravity",
+        "kimi" => "Kimi",
+        "zhipu" => "智谱 GLM",
+        "deepseek" => "DeepSeek",
+        _ => provider
+    };
+
+    private static string CheckModeLabel(string mode) => mode switch
+    {
+        "quota" => "配额",
+        "quota_probe" => "探活 + 配额",
+        _ => "探活"
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "operational" => "正常",
+        "degraded" => "降级",
+        "failed" => "失败",
+        "error" => "错误",
+        _ => string.IsNullOrWhiteSpace(status) ? "未检查" : status
+    };
+
+    private static string StatusTone(string status) => status switch
+    {
+        "operational" => "success",
+        "degraded" => "warning",
+        "failed" or "error" => "danger",
+        _ => "neutral"
+    };
+
     private static Dictionary<string, string> ParseHeaders(string? value)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -271,8 +577,15 @@ else
 
     private sealed class MonitorForm
     {
-        public string Name { get; set; } = string.Empty; public string Provider { get; set; } = "openai"; public string ApiMode { get; set; } = "chat_completions"; public string Endpoint { get; set; } = string.Empty; public string ApiKey { get; set; } = string.Empty; public string ApiKeyMasked { get; set; } = string.Empty; public bool ApiKeyDecryptFailed { get; set; } public string PrimaryModel { get; set; } = string.Empty; public string ExtraModels { get; set; } = string.Empty; public string GroupName { get; set; } = string.Empty; public bool Enabled { get; set; } = true; public int IntervalSeconds { get; set; } = 300; public int JitterSeconds { get; set; } public string TemplateIdText { get; set; } = string.Empty; public string HeadersText { get; set; } = string.Empty; public string BodyOverrideMode { get; set; } = "off"; public string BodyJson { get; set; } = string.Empty;
-        public static MonitorForm From(ChannelMonitorDto x) => new() { Name = x.Name, Provider = x.Provider, ApiMode = x.ApiMode, Endpoint = x.Endpoint, ApiKeyMasked = x.ApiKeyMasked, ApiKeyDecryptFailed = x.ApiKeyDecryptFailed, PrimaryModel = x.PrimaryModel, ExtraModels = string.Join(", ", x.ExtraModels), GroupName = x.GroupName, Enabled = x.Enabled, IntervalSeconds = x.IntervalSeconds, JitterSeconds = x.JitterSeconds, TemplateIdText = x.TemplateId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty, HeadersText = string.Join(Environment.NewLine, x.ExtraHeaders.Select(pair => $"{pair.Key}: {pair.Value}")), BodyOverrideMode = x.BodyOverrideMode, BodyJson = x.BodyOverride.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null ? string.Empty : JsonSerializer.Serialize(x.BodyOverride, new JsonSerializerOptions { WriteIndented = true }) };
+        public string Name { get; set; } = string.Empty; public string Provider { get; set; } = "openai"; public string ApiMode { get; set; } = "chat_completions"; public string CheckMode { get; set; } = "probe"; public long? AccountId { get; set; } public string Endpoint { get; set; } = string.Empty; public string ApiKey { get; set; } = string.Empty; public string ApiKeyMasked { get; set; } = string.Empty; public bool ApiKeyDecryptFailed { get; set; } public string PrimaryModel { get; set; } = string.Empty; public string ExtraModels { get; set; } = string.Empty; public string GroupName { get; set; } = string.Empty; public bool Enabled { get; set; } = true; public int IntervalSeconds { get; set; } = 60; public int JitterSeconds { get; set; } public string TemplateIdText { get; set; } = string.Empty; public string HeadersText { get; set; } = string.Empty; public string BodyOverrideMode { get; set; } = "off"; public string BodyJson { get; set; } = string.Empty;
+        public static MonitorForm From(ChannelMonitorDto x) => new() { Name = x.Name, Provider = x.Provider, ApiMode = x.ApiMode, CheckMode = string.IsNullOrWhiteSpace(x.CheckMode) ? "probe" : x.CheckMode, AccountId = x.AccountId, Endpoint = x.Endpoint, ApiKeyMasked = x.ApiKeyMasked, ApiKeyDecryptFailed = x.ApiKeyDecryptFailed, PrimaryModel = x.PrimaryModel, ExtraModels = string.Join(", ", x.ExtraModels), GroupName = x.GroupName, Enabled = x.Enabled, IntervalSeconds = x.IntervalSeconds > 0 ? x.IntervalSeconds : 60, JitterSeconds = x.JitterSeconds, TemplateIdText = x.TemplateId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty, HeadersText = string.Join(Environment.NewLine, x.ExtraHeaders.Select(pair => $"{pair.Key}: {pair.Value}")), BodyOverrideMode = x.BodyOverrideMode, BodyJson = x.BodyOverride.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null ? string.Empty : JsonSerializer.Serialize(x.BodyOverride, new JsonSerializerOptions { WriteIndented = true }) };
+    }
+
+    private sealed record LinkedAccountOption(long NumericId, string Id, string Name)
+    {
+        public static LinkedAccountOption? From(AccountDto account) => long.TryParse(account.Id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) && id > 0
+            ? new LinkedAccountOption(id, account.Id, account.Name)
+            : null;
     }
     private sealed class TemplateForm
     {

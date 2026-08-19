@@ -13,7 +13,7 @@
         <div class="groups-toolbar-left">
             <div class="search-box groups-search"><Icon Name="search" Size="17" /><input value="@search" @oninput="SearchChangedAsync" placeholder="搜索分组..." aria-label="搜索分组" /></div>
             <select class="compact-select" value="@platformFilter" @onchange="PlatformFilterChangedAsync" aria-label="平台筛选">
-                <option value="">全部平台</option><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option><option value="composite">Composite</option>
+                <option value="">全部平台</option><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option><option value="kimi">Kimi</option><option value="zhipu">智谱 GLM</option><option value="deepseek">DeepSeek</option><option value="composite">Composite</option>
             </select>
             <select class="compact-select" value="@statusFilter" @onchange="StatusFilterChangedAsync" aria-label="状态筛选"><option value="">全部状态</option><option value="active">正常</option><option value="inactive">停用</option></select>
             <select class="compact-select" value="@exclusiveFilter" @onchange="ExclusiveFilterChangedAsync" aria-label="分组类型筛选"><option value="">全部分组</option><option value="false">公开分组</option><option value="true">专属分组</option></select>
@@ -96,7 +96,7 @@
                                     <td><div class="account-counts"><span>可用:<strong class="available">@group.ActiveAccountCount</strong> 个账号</span>@if (group.RateLimitedAccountCount > 0) { <span>限流:<strong class="limited">@group.RateLimitedAccountCount</strong> 个账号</span> }<span>总量:<strong>@group.AccountCount</strong> 个账号</span></div></td>
                                 }
                                 @if (IsColumnVisible("capacity")) { <td>@CapacityCell(group)</td> }
-                                @if (IsColumnVisible("usage")) { <td><div class="usage-cell"><span>今日<strong>@Money(GetUsage(group).TodayCost)</strong></span><span>累计<strong>@Money(GetUsage(group).TotalCost)</strong></span></div></td> }
+                                @if (IsColumnVisible("usage")) { <td><div class="usage-cell"><span>今日<strong>@Money(GetUsage(group).TodayCost)</strong></span><span>昨日<strong>@Money(GetUsage(group).YesterdayCost)</strong></span><span>累计<strong>@Money(GetUsage(group).TotalCost)</strong></span></div></td> }
                                 @if (IsColumnVisible("status")) { <td><span class="status-badge @(group.Status == "active" ? "success" : "danger")">@(group.Status == "active" ? "正常" : "停用")</span></td> }
                                 <td class="actions-column">
                                     <div class="row-actions">
@@ -135,7 +135,7 @@
             <div class="editor-section"><h3>基本配置</h3><div class="form-grid">
                 <div class="form-field full"><label for="group-name">名称</label><InputText id="group-name" @bind-Value="form.Name" placeholder="请输入分组名称" /><ValidationMessage For="() => form.Name" /></div>
                 <div class="form-field full"><label for="group-description">说明</label><InputTextArea id="group-description" @bind-Value="form.Description" rows="3" placeholder="可选说明" /></div>
-                <div class="form-field"><label for="group-platform">平台</label><InputSelect id="group-platform" @bind-Value="form.Platform" disabled="@(editingId is not null)"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option><option value="composite">Composite</option></InputSelect>@if (editingId is not null) { <small>平台创建后不可修改。</small> }</div>
+                <div class="form-field"><label for="group-platform">平台</label><InputSelect id="group-platform" @bind-Value="form.Platform" disabled="@(editingId is not null)"><option value="anthropic">Anthropic</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="antigravity">Antigravity</option><option value="grok">Grok</option><option value="kimi">Kimi</option><option value="zhipu">智谱 GLM</option><option value="deepseek">DeepSeek</option><option value="composite">Composite</option></InputSelect>@if (editingId is not null) { <small>平台创建后不可修改。</small> }</div>
                 <div class="form-field"><label for="group-status">状态</label><select id="group-status" value="@(formActive ? "active" : "inactive")" @onchange="StatusFormChanged" disabled="@(editingId is null)"><option value="active">正常</option><option value="inactive">停用</option></select>@if (editingId is null) { <small>新分组默认启用。</small> }</div>
                 <div class="form-field"><label for="group-rate">费率倍数</label><InputNumber id="group-rate" @bind-Value="form.RateMultiplier" min="0" step="0.001" /></div>
                 <div class="form-field"><label for="group-rpm">RPM 限制</label><InputNumber id="group-rpm" @bind-Value="form.RpmLimit" min="0" step="1" /><small>0 表示不限制。</small></div>
@@ -254,7 +254,7 @@
 
     private async Task LoadSummariesAsync()
     {
-        try { var usage = await Api.GetAdminGroupUsageSummaryAsync("Asia/Shanghai"); usageMap.Clear(); foreach (var item in usage) usageMap[item.GroupId] = item; } catch (ApiException) { usageMap.Clear(); }
+        try { var usage = await Api.GetAdminGroupUsageSummaryAsync(); usageMap.Clear(); foreach (var item in usage) usageMap[item.GroupId] = item; } catch (ApiException) { usageMap.Clear(); }
         try { var capacities = await Api.GetAdminGroupCapacitySummaryAsync(); capacityMap.Clear(); foreach (var item in capacities) capacityMap[item.GroupId] = item; } catch (ApiException) { capacityMap.Clear(); }
     }
 
@@ -305,7 +305,7 @@
     private static void AddCapacityLine(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder builder, int sequence, string label, int used, int max) { builder.OpenElement(sequence, "span"); builder.AddAttribute(sequence + 1, "title", label); builder.AddAttribute(sequence + 2, "class", "capacity-badge"); builder.OpenElement(sequence + 3, "strong"); builder.AddContent(sequence + 4, used); builder.CloseElement(); builder.AddContent(sequence + 5, " / "); builder.OpenElement(sequence + 6, "strong"); builder.AddContent(sequence + 7, max); builder.CloseElement(); builder.CloseElement(); }
     private static bool HasAnyLimit(GroupDto group) => group.DailyLimitUsd is > 0 || group.WeeklyLimitUsd is > 0 || group.MonthlyLimitUsd is > 0;
     private string LimitSummary(GroupDto group) { var values = new List<string>(); if (group.DailyLimitUsd is > 0) values.Add($"{Money(group.DailyLimitUsd.Value)}/日"); if (group.WeeklyLimitUsd is > 0) values.Add($"{Money(group.WeeklyLimitUsd.Value)}/周"); if (group.MonthlyLimitUsd is > 0) values.Add($"{Money(group.MonthlyLimitUsd.Value)}/月"); return string.Join(" · ", values); }
-    private static string PlatformLabel(string value) => value switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", "composite" => "Composite", _ => value };
+    private static string PlatformLabel(string value) => value switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", "kimi" => "Kimi", "zhipu" => "智谱 GLM", "deepseek" => "DeepSeek", "composite" => "Composite", _ => value };
     private static string FormatRate(double value) => value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
     private static string Money(double value) => "$" + value.ToString(value is >= 0.01 or <= -0.01 ? "0.00" : "0.######", System.Globalization.CultureInfo.InvariantCulture);
 

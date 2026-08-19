@@ -1598,6 +1598,7 @@ public sealed class PublicSettingsDto
     [JsonPropertyName("channel_monitor_mode")] public string ChannelMonitorMode { get; set; } = "v1";
     [JsonPropertyName("channel_monitor_default_interval_seconds")] public int ChannelMonitorDefaultIntervalSeconds { get; set; } = 60;
     [JsonPropertyName("channel_monitor_hide_throughput")] public bool ChannelMonitorHideThroughput { get; set; }
+    [JsonPropertyName("channel_monitor_show_quota")] public bool ChannelMonitorShowQuota { get; set; }
     [JsonPropertyName("available_channels_enabled")] public bool AvailableChannelsEnabled { get; set; }
     [JsonPropertyName("allow_user_view_error_requests")] public bool AllowUserViewErrorRequests { get; set; }
 }
@@ -1764,6 +1765,7 @@ public sealed class GoAccount
     public Dictionary<string, JsonElement>? Credentials { get; set; }
     [JsonPropertyName("credentials_status")] public Dictionary<string, bool>? CredentialsStatus { get; set; }
     public Dictionary<string, JsonElement>? Extra { get; set; }
+    [JsonPropertyName("ollama_cloud_usage")] public OllamaCloudUsageStateDto? OllamaCloudUsage { get; set; }
     [JsonPropertyName("proxy_id")] public long? ProxyId { get; set; }
     public int Concurrency { get; set; }
     [JsonPropertyName("load_factor")] public int? LoadFactor { get; set; }
@@ -1842,6 +1844,7 @@ public sealed class AccountDto
     public Dictionary<string, JsonElement>? Credentials { get; set; }
     public Dictionary<string, bool>? CredentialsStatus { get; set; }
     public Dictionary<string, JsonElement>? Extra { get; set; }
+    public OllamaCloudUsageStateDto? OllamaCloudUsage { get; set; }
     public List<long> GroupIds { get; set; } = [];
     public List<GoGroup> Groups { get; set; } = [];
     public ProxyDto? Proxy { get; set; }
@@ -1880,6 +1883,7 @@ public sealed class AccountDto
             LastUsedAt = account.LastUsedAt, CreatedAt = account.CreatedAt, ExpiresAt = account.ExpiresAt,
             AutoPauseOnExpired = account.AutoPauseOnExpired, ProxyId = account.ProxyId,
             Credentials = account.Credentials, CredentialsStatus = account.CredentialsStatus, Extra = account.Extra,
+            OllamaCloudUsage = account.OllamaCloudUsage,
             GroupIds = account.GroupIds is { Count: > 0 } ? account.GroupIds : (account.Groups ?? []).Select(x => x.Id).ToList(),
             Groups = account.Groups ?? [], Proxy = account.Proxy,
             RateLimitedAt = account.RateLimitedAt, RateLimitResetAt = account.RateLimitResetAt,
@@ -1913,11 +1917,107 @@ public sealed class AccountListQuery
 
 public sealed class AccountBatchResultDto
 {
-    [JsonPropertyName("success_count")] public int SuccessCount { get; set; }
-    [JsonPropertyName("failed_count")] public int FailedCount { get; set; }
+    public int Total { get; set; }
+    [JsonPropertyName("success")] public int SuccessCount { get; set; }
+    [JsonPropertyName("failed")] public int FailedCount { get; set; }
     [JsonPropertyName("success_ids")] public List<long> SuccessIds { get; set; } = [];
     [JsonPropertyName("failed_ids")] public List<long> FailedIds { get; set; } = [];
     public List<JsonElement> Errors { get; set; } = [];
+    public List<AccountBatchItemResultDto> Results { get; set; } = [];
+    [JsonPropertyName("long_context_inherited_count")] public int LongContextInheritedCount { get; set; }
+}
+
+public sealed class AccountBatchItemResultDto
+{
+    [JsonPropertyName("account_id")] public long AccountId { get; set; }
+    public bool Success { get; set; }
+    public string Error { get; set; } = string.Empty;
+}
+
+public sealed class CNQuotaTierDto
+{
+    public string Window { get; set; } = string.Empty;
+    [JsonPropertyName("used_percent")] public double UsedPercent { get; set; }
+    [JsonPropertyName("reset_at")] public string? ResetAt { get; set; }
+}
+
+public sealed class CNProviderQuotaProbeResultDto
+{
+    public string Provider { get; set; } = string.Empty;
+    public string Source { get; set; } = string.Empty;
+    public bool Success { get; set; }
+    [JsonPropertyName("credential_valid")] public bool CredentialValid { get; set; }
+    public List<CNQuotaTierDto> Tiers { get; set; } = [];
+    [JsonPropertyName("plan_level")] public string PlanLevel { get; set; } = string.Empty;
+    [JsonPropertyName("status_code")] public int? StatusCode { get; set; }
+    [JsonPropertyName("fetched_at")] public long FetchedAt { get; set; }
+    public bool Persisted { get; set; }
+    public string Error { get; set; } = string.Empty;
+}
+
+public sealed class CNProviderBalanceEntryDto
+{
+    public string Currency { get; set; } = string.Empty;
+    public double Balance { get; set; }
+}
+
+public sealed class CNProviderBalanceResultDto
+{
+    public string Provider { get; set; } = string.Empty;
+    public bool Success { get; set; }
+    public double Balance { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public List<CNProviderBalanceEntryDto> Balances { get; set; } = [];
+    public bool Available { get; set; }
+    [JsonPropertyName("status_code")] public int? StatusCode { get; set; }
+    [JsonPropertyName("fetched_at")] public long FetchedAt { get; set; }
+    public bool Persisted { get; set; }
+    public string Error { get; set; } = string.Empty;
+}
+
+public sealed class OllamaCloudUsageWindowDto
+{
+    [JsonPropertyName("used_percent")] public double UsedPercent { get; set; }
+    [JsonPropertyName("reset_at")] public DateTimeOffset? ResetAt { get; set; }
+    [JsonPropertyName("reset_text")] public string ResetText { get; set; } = string.Empty;
+}
+
+public sealed class OllamaCloudUsageModelDto
+{
+    public string Model { get; set; } = string.Empty;
+    public string Window { get; set; } = string.Empty;
+    public long Requests { get; set; }
+}
+
+public sealed class OllamaCloudUsageDataDto
+{
+    public string Plan { get; set; } = string.Empty;
+    [JsonPropertyName("five_hour")] public OllamaCloudUsageWindowDto? FiveHour { get; set; }
+    [JsonPropertyName("seven_day")] public OllamaCloudUsageWindowDto? SevenDay { get; set; }
+    public string Balance { get; set; } = string.Empty;
+    public List<OllamaCloudUsageModelDto> Models { get; set; } = [];
+}
+
+public sealed class OllamaCloudUsageSnapshotDto
+{
+    public string Status { get; set; } = string.Empty;
+    public OllamaCloudUsageDataDto? Data { get; set; }
+    [JsonPropertyName("fetched_at")] public DateTimeOffset? FetchedAt { get; set; }
+    [JsonPropertyName("last_attempt_at")] public DateTimeOffset LastAttemptAt { get; set; }
+    [JsonPropertyName("next_refresh_at")] public DateTimeOffset NextRefreshAt { get; set; }
+    [JsonPropertyName("failure_count")] public int FailureCount { get; set; }
+    [JsonPropertyName("http_status")] public int? HttpStatus { get; set; }
+    [JsonPropertyName("last_error")] public string LastError { get; set; } = string.Empty;
+}
+
+public sealed class OllamaCloudUsageStateDto
+{
+    [JsonPropertyName("account_id")] public long AccountId { get; set; }
+    public bool Eligible { get; set; }
+    public bool Configured { get; set; }
+    [JsonPropertyName("auto_refresh_enabled")] public bool AutoRefreshEnabled { get; set; }
+    [JsonPropertyName("encryption_key_configured")] public bool EncryptionKeyConfigured { get; set; }
+    public OllamaCloudUsageSnapshotDto? Snapshot { get; set; }
 }
 
 public sealed class AccountTodayStatsDto
@@ -2113,6 +2213,8 @@ public sealed class AccountInput : IValidatableObject
     public string CredentialsJson { get; set; } = string.Empty;
     public string ExtraJson { get; set; } = string.Empty;
     public string BaseUrl { get; set; } = string.Empty;
+    public string AccountMode { get; set; } = "payg";
+    public string ApiProtocol { get; set; } = "chat_completions";
     [Range(1, 10_000, ErrorMessage = "并发上限必须在 1 到 10000 之间")] public int Concurrency { get; set; } = 8;
     [Range(0, 1_000_000, ErrorMessage = "优先级必须在 0 到 1000000 之间")] public int Priority { get; set; } = 100;
     [Range(0, 100)] public double RateMultiplier { get; set; } = 1;
@@ -2251,6 +2353,7 @@ public sealed class GroupUsageSummaryDto
 {
     [JsonPropertyName("group_id")] public long GroupId { get; set; }
     [JsonPropertyName("today_cost")] public double TodayCost { get; set; }
+    [JsonPropertyName("yesterday_cost")] public double YesterdayCost { get; set; }
     [JsonPropertyName("total_cost")] public double TotalCost { get; set; }
 }
 
@@ -2507,6 +2610,7 @@ public sealed class UserMonitorViewDto
     [JsonPropertyName("availability_7d")] public double Availability7d { get; set; }
     [JsonPropertyName("extra_models")] public List<UserMonitorExtraModelDto> ExtraModels { get; set; } = [];
     public List<UserMonitorTimelinePointDto> Timeline { get; set; } = [];
+    [JsonPropertyName("latest_quota")] public MonitorQuotaSnapshotDto? LatestQuota { get; set; }
 }
 
 public sealed class UserMonitorExtraModelDto

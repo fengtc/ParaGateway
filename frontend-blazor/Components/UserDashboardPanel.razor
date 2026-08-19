@@ -68,7 +68,7 @@
                 <div class="dashboard-stat-copy">
                     <span>今日 Token</span>
                     <strong>@FormatTokens(stats.TodayTokens)</strong>
-                    <small>输入: @FormatTokens(stats.TodayInputTokens) / 输出: @FormatTokens(stats.TodayOutputTokens)</small>
+                    <small title="缓存创建：@FormatNumber(stats.TodayCacheCreationTokens)；缓存读取：@FormatNumber(stats.TodayCacheReadTokens)">输入: @FormatTokens(stats.TodayInputTokens) / 输出: @FormatTokens(stats.TodayOutputTokens) / 缓存: @FormatTokens(stats.TodayCacheCreationTokens + stats.TodayCacheReadTokens)</small>
                 </div>
             </article>
 
@@ -77,7 +77,7 @@
                 <div class="dashboard-stat-copy">
                     <span>总 Token</span>
                     <strong>@FormatTokens(stats.TotalTokens)</strong>
-                    <small>输入: @FormatTokens(stats.TotalInputTokens) / 输出: @FormatTokens(stats.TotalOutputTokens)</small>
+                    <small title="缓存创建：@FormatNumber(stats.TotalCacheCreationTokens)；缓存读取：@FormatNumber(stats.TotalCacheReadTokens)">输入: @FormatTokens(stats.TotalInputTokens) / 输出: @FormatTokens(stats.TotalOutputTokens) / 缓存: @FormatTokens(stats.TotalCacheCreationTokens + stats.TotalCacheReadTokens)</small>
                 </div>
             </article>
 

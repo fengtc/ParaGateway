@@ -5,10 +5,175 @@
 @inject ToastService Toasts
 
 <PageTitle>渠道 · ParaGateway</PageTitle>
-<div class="page-header"><div><h1>渠道</h1><p>管理官方 Go 网关的渠道、分组绑定和模型限制。</p></div><button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 新建渠道</button></div>
-<div class="toolbar"><span class="result-count">@channels.Count 个渠道</span><button type="button" class="icon-button" title="刷新渠道" aria-label="刷新渠道" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button></div>
-@if (loading) { <LoadingState Text="正在载入渠道" /> } else if (error is not null) { <ErrorState Message="@error" OnRetry="LoadAsync" /> } else {
-    <DxGrid Data="@channels" KeyFieldName="Id" ShowFilterRow="true" ShowSearchPanel="true" PageSize="25" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer"><Columns><DxGridDataColumn FieldName="Name" Caption="名称" MinWidth="180" /><DxGridDataColumn FieldName="Status" Caption="状态" Width="110" /><DxGridDataColumn FieldName="BillingModelSource" Caption="计费来源" Width="150" /><DxGridDataColumn FieldName="RestrictModels" Caption="限制模型" Width="110" /><DxGridDataColumn FieldName="GroupCount" Caption="绑定分组" Width="110" /><DxGridDataColumn FieldName="CreatedAt" Caption="创建时间" /><DxGridDataColumn Caption="操作" Width="170"><CellDisplayTemplate Context="context">@{ var channel = (ChannelDto)context.DataItem; }<button type="button" class="icon-button" title="编辑 @channel.Name" aria-label="编辑 @channel.Name" @onclick="() => OpenEdit(channel)"><Icon Name="pencil" Size="16" /></button><button type="button" class="icon-button danger" title="删除 @channel.Name" aria-label="删除 @channel.Name" @onclick="() => DeleteAsync(channel)"><Icon Name="trash" Size="16" /></button></CellDisplayTemplate></DxGridDataColumn></Columns></DxGrid>
+
+<div class="page-header">
+    <div><h1>渠道</h1><p>管理官方 Go 网关的渠道、分组绑定和模型限制。</p></div>
+    <button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 新建渠道</button>
+</div>
+
+<div class="toolbar">
+    <span class="result-count">@channels.Count 个渠道</span>
+    <button type="button" class="icon-button" title="刷新渠道" aria-label="刷新渠道" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button>
+</div>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入渠道" />
 }
-<AppModal Open="editorOpen" Title="@(editingId is null ? "新建渠道" : "编辑渠道")" OnClose="CloseEditor"><ChildContent><EditForm id="channel-editor" Model="form" OnValidSubmit="SaveAsync" FormName="channel-editor"><DataAnnotationsValidator />@if (modalError is not null) { <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }<div class="form-grid"><div class="form-field full"><label for="channel-name">名称</label><InputText id="channel-name" @bind-Value="form.Name" /><ValidationMessage For="() => form.Name" /></div><div class="form-field full"><label for="channel-description">说明</label><InputTextArea id="channel-description" @bind-Value="form.Description" rows="3" /></div><div class="form-field"><label for="channel-billing">计费模型来源</label><InputSelect id="channel-billing" @bind-Value="form.BillingModelSource"><option value="requested">请求</option><option value="upstream">上游</option><option value="channel_mapped">渠道映射</option><option value="response_model">响应模型</option></InputSelect></div><label class="toggle-row"><InputCheckbox @bind-Value="form.RestrictModels" /><span><strong>限制模型</strong><small>仅允许渠道配置的模型。</small></span></label><div class="form-field full"><label for="channel-features">Features</label><InputText id="channel-features" @bind-Value="form.Features" /></div><div class="form-field full"><label for="channel-features-config">Features 配置 JSON</label><InputTextArea id="channel-features-config" @bind-Value="form.FeaturesConfigJson" rows="4" placeholder='{"responses":true}' /></div><div class="form-field full"><label for="channel-model-pricing">模型定价 JSON</label><InputTextArea id="channel-model-pricing" @bind-Value="form.ModelPricingJson" rows="5" placeholder='[{"platform":"openai","models":["gpt-5"],"input_price":1}]' /></div><div class="form-field full"><label for="channel-model-mapping">模型映射 JSON</label><InputTextArea id="channel-model-mapping" @bind-Value="form.ModelMappingJson" rows="4" placeholder='{"public-model":{"upstream":"real-model"}}' /></div><label class="toggle-row"><InputCheckbox @bind-Value="form.ApplyPricingToAccountStats" /><span><strong>将渠道定价应用于账号统计</strong><small>按官方渠道规则计算账号统计成本。</small></span></label><div class="form-field full"><label for="channel-stats-rules">账号统计定价规则 JSON</label><InputTextArea id="channel-stats-rules" @bind-Value="form.AccountStatsPricingRulesJson" rows="4" placeholder='[]' /></div><div class="form-field full"><label for="channel-advanced">高级配置 JSON（保留未编辑官方字段）</label><InputTextArea id="channel-advanced" @bind-Value="form.AdvancedJson" rows="8" placeholder='{"model_pricing":[],"model_mapping":{}}' /></div></div></EditForm></ChildContent><Footer><button type="button" class="button secondary" @onclick="CloseEditor">取消</button><button type="submit" form="channel-editor" class="button primary" disabled="@saving">保存</button></Footer></AppModal>
-@code { private List<ChannelDto> channels = []; private ChannelInput form = new(); private string? editingId; private string? error; private string? modalError; private bool loading = true; private bool saving; private bool editorOpen; protected override Task OnInitializedAsync() => LoadAsync(); private async Task LoadAsync() { loading = true; error = null; try { channels = await Api.GetChannelsAsync(); } catch (ApiException ex) { error = ex.Message; } finally { loading = false; } } private void OpenCreate() { editingId = null; form = new ChannelInput(); modalError = null; editorOpen = true; } private void OpenEdit(ChannelDto channel) { editingId = channel.Id; form = new ChannelInput { Name = channel.Name, Description = channel.Description, GroupIds = [.. channel.GroupIds], RestrictModels = channel.RestrictModels, BillingModelSource = channel.BillingModelSource, Features = channel.Features, FeaturesConfigJson = channel.FeaturesConfigJson, ModelPricingJson = channel.ModelPricingJson, ModelMappingJson = channel.ModelMappingJson, ApplyPricingToAccountStats = channel.ApplyPricingToAccountStats, AccountStatsPricingRulesJson = channel.AccountStatsPricingRulesJson, AdvancedJson = channel.AdvancedJson }; modalError = null; editorOpen = true; } private void CloseEditor() => editorOpen = false; private async Task SaveAsync() { saving = true; modalError = null; try { if (editingId is null) await Api.CreateChannelAsync(form); else await Api.UpdateChannelAsync(editingId, form, true); editorOpen = false; Toasts.Success("渠道已保存"); await LoadAsync(); } catch (ApiException ex) { modalError = ex.Message; } finally { saving = false; } } private async Task DeleteAsync(ChannelDto channel) { try { await Api.DeleteChannelAsync(channel.Id); Toasts.Success("渠道已删除"); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } } }
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else
+{
+    <DxGrid Data="@channels" KeyFieldName="Id" ShowFilterRow="true" ShowSearchPanel="true" PageSize="25" ColumnResizeMode="GridColumnResizeMode.ColumnsContainer">
+        <Columns>
+            <DxGridDataColumn FieldName="Name" Caption="名称" MinWidth="180" />
+            <DxGridDataColumn FieldName="Status" Caption="状态" Width="110" />
+            <DxGridDataColumn FieldName="BillingModelSource" Caption="计费来源" Width="150" />
+            <DxGridDataColumn FieldName="RestrictModels" Caption="限制模型" Width="110" />
+            <DxGridDataColumn FieldName="GroupCount" Caption="绑定分组" Width="110" />
+            <DxGridDataColumn FieldName="CreatedAt" Caption="创建时间" />
+            <DxGridDataColumn Caption="操作" Width="170">
+                <CellDisplayTemplate Context="context">
+                    @{ var channel = (ChannelDto)context.DataItem; }
+                    <button type="button" class="icon-button" title="编辑 @channel.Name" aria-label="编辑 @channel.Name" @onclick="() => OpenEdit(channel)"><Icon Name="pencil" Size="16" /></button>
+                    <button type="button" class="icon-button danger" title="删除 @channel.Name" aria-label="删除 @channel.Name" @onclick="() => DeleteAsync(channel)"><Icon Name="trash" Size="16" /></button>
+                </CellDisplayTemplate>
+            </DxGridDataColumn>
+        </Columns>
+    </DxGrid>
+}
+
+<AppModal Open="editorOpen" Title="@(editingId is null ? "新建渠道" : "编辑渠道")" MaxWidth="1120px" OnClose="CloseEditor">
+    <ChildContent>
+        <EditForm id="channel-editor" Model="form" OnValidSubmit="SaveAsync" FormName="channel-editor">
+            <DataAnnotationsValidator />
+            @if (modalError is not null)
+            {
+                <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="18" /><span>@modalError</span></div>
+            }
+            <div class="form-grid channel-editor-grid">
+                <div class="form-field full"><label for="channel-name">名称</label><InputText id="channel-name" @bind-Value="form.Name" /><ValidationMessage For="() => form.Name" /></div>
+                <div class="form-field full"><label for="channel-description">说明</label><InputTextArea id="channel-description" @bind-Value="form.Description" rows="3" /></div>
+                <div class="form-field"><label for="channel-billing">计费模型来源</label><InputSelect id="channel-billing" @bind-Value="form.BillingModelSource"><option value="requested">请求</option><option value="upstream">上游</option><option value="channel_mapped">渠道映射</option><option value="response_model">响应模型</option></InputSelect></div>
+                <label class="toggle-row"><InputCheckbox @bind-Value="form.RestrictModels" /><span><strong>限制模型</strong><small>仅允许渠道配置的模型。</small></span></label>
+                <div class="form-field full"><label for="channel-features">Features</label><InputText id="channel-features" @bind-Value="form.Features" /></div>
+                <div class="form-field full"><label for="channel-features-config">Features 配置 JSON</label><InputTextArea id="channel-features-config" @bind-Value="form.FeaturesConfigJson" rows="4" placeholder='{"responses":true}' /></div>
+                <div class="form-field full"><label for="channel-model-pricing">模型定价 JSON</label><InputTextArea id="channel-model-pricing" @bind-Value="form.ModelPricingJson" rows="7" placeholder='[{"platform":"openai","models":["gpt-5"],"billing_mode":"token","input_price":1}]' /></div>
+                <div class="full"><ChannelTimePricingEditor @ref="timePricingEditor" @bind-ModelPricingJson="form.ModelPricingJson" /></div>
+                <div class="form-field full"><label for="channel-model-mapping">模型映射 JSON</label><InputTextArea id="channel-model-mapping" @bind-Value="form.ModelMappingJson" rows="4" placeholder='{"public-model":{"upstream":"real-model"}}' /></div>
+                <label class="toggle-row full"><InputCheckbox @bind-Value="form.ApplyPricingToAccountStats" /><span><strong>将渠道定价应用于账号统计</strong><small>按官方渠道规则计算账号统计成本。</small></span></label>
+                <div class="form-field full"><label for="channel-stats-rules">账号统计定价规则 JSON</label><InputTextArea id="channel-stats-rules" @bind-Value="form.AccountStatsPricingRulesJson" rows="4" placeholder='[]' /></div>
+                <div class="form-field full"><label for="channel-advanced">高级配置 JSON（保留未编辑官方字段）</label><InputTextArea id="channel-advanced" @bind-Value="form.AdvancedJson" rows="8" placeholder='{"model_pricing":[],"model_mapping":{}}' /></div>
+            </div>
+        </EditForm>
+    </ChildContent>
+    <Footer>
+        <button type="button" class="button secondary" disabled="@saving" @onclick="CloseEditor">取消</button>
+        <button type="submit" form="channel-editor" class="button primary" disabled="@saving"><Icon Name="save" Size="16" /> @(saving ? "保存中…" : "保存")</button>
+    </Footer>
+</AppModal>
+
+@code {
+    private readonly List<ChannelDto> channels = [];
+    private ChannelInput form = new();
+    private ChannelTimePricingEditor? timePricingEditor;
+    private string? editingId;
+    private string? error;
+    private string? modalError;
+    private bool loading = true;
+    private bool saving;
+    private bool editorOpen;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            channels.Clear();
+            channels.AddRange(await Api.GetChannelsAsync());
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private void OpenCreate()
+    {
+        editingId = null;
+        form = new ChannelInput();
+        modalError = null;
+        editorOpen = true;
+    }
+
+    private void OpenEdit(ChannelDto channel)
+    {
+        editingId = channel.Id;
+        form = new ChannelInput
+        {
+            Name = channel.Name,
+            Description = channel.Description,
+            GroupIds = [.. channel.GroupIds],
+            RestrictModels = channel.RestrictModels,
+            BillingModelSource = channel.BillingModelSource,
+            Features = channel.Features,
+            FeaturesConfigJson = channel.FeaturesConfigJson,
+            ModelPricingJson = channel.ModelPricingJson,
+            ModelMappingJson = channel.ModelMappingJson,
+            ApplyPricingToAccountStats = channel.ApplyPricingToAccountStats,
+            AccountStatsPricingRulesJson = channel.AccountStatsPricingRulesJson,
+            AdvancedJson = channel.AdvancedJson
+        };
+        modalError = null;
+        editorOpen = true;
+    }
+
+    private void CloseEditor()
+    {
+        if (!saving) editorOpen = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        saving = true;
+        modalError = null;
+        try
+        {
+            var editorValidation = timePricingEditor is null ? null : await timePricingEditor.ValidateAndSyncAsync();
+            if (editorValidation is not null)
+            {
+                modalError = editorValidation;
+                return;
+            }
+
+            var rawValidation = ChannelTimePricingRules.ValidateModelPricingJson(form.ModelPricingJson);
+            if (rawValidation is not null)
+            {
+                modalError = rawValidation;
+                return;
+            }
+
+            if (editingId is null) await Api.CreateChannelAsync(form);
+            else await Api.UpdateChannelAsync(editingId, form, true);
+            editorOpen = false;
+            Toasts.Success("渠道已保存");
+            await LoadAsync();
+        }
+        catch (ApiException ex) { modalError = ex.Message; }
+        finally { saving = false; }
+    }
+
+    private async Task DeleteAsync(ChannelDto channel)
+    {
+        try
+        {
+            await Api.DeleteChannelAsync(channel.Id);
+            Toasts.Success("渠道已删除");
+            await LoadAsync();
+        }
+        catch (ApiException ex) { error = ex.Message; }
+    }
+}

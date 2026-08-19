@@ -31,14 +31,16 @@ dotnet publish frontend-blazor\ParaGateway.Frontend.csproj `
   --nologo
 ```
 
-将发布目录中的 `wwwroot` 内容复制到服务器的 `deploy/standalone/data/frontend`：
+将完整发布目录同步到服务器的 `deploy/standalone/data/frontend`。不要只把
+`wwwroot` 内的文件平铺到 `data/frontend`，Compose 会明确挂载
+`data/frontend/wwwroot`，从而避免误用旧的根目录静态文件：
 
 ```bash
 mkdir -p deploy/standalone/data/frontend
-cp -a /path/to/wwwroot/. deploy/standalone/data/frontend/
+cp -a /path/to/frontend-publish/. deploy/standalone/data/frontend/
 ```
 
-`index.html` 必须位于 `data/frontend/index.html`。Compose 为前端配置了健康检查；未复制发行版时，前端不会被误认为已就绪。
+`index.html` 必须位于 `data/frontend/wwwroot/index.html`。Compose 为前端配置了健康检查；未复制完整发行版时，前端不会被误认为已就绪。
 
 ## 启动
 
@@ -63,7 +65,7 @@ docker compose up -d
 
 本目录的 `nginx.conf` 已为上述验证码 SDK 配置 CSP 域名，且没有加入 Stripe 或 Airwallex 等支付域名。如果在 Nginx/Caddy 之前另设 CDN、WAF 或反向代理并覆盖安全响应头，必须同步保留这些 CSP 来源，否则验证码会被浏览器拦截。真实上线前应使用实际站点密钥逐项验证登录、注册、找回密码、OAuth 创建账号和 Passkey 登录流程。
 
-更新前端时，只需在构建机重新发布并同步 `data/frontend`，然后执行 `docker compose restart frontend gateway`。不需要重新构建 Go 镜像。
+更新前端时，只需在构建机重新发布并原子替换完整的 `data/frontend` 发布目录，然后执行 `docker compose restart frontend gateway`。不需要重新构建 Go 镜像。
 
 ## 数据目录
 

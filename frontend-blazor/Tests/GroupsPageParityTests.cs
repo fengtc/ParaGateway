@@ -34,6 +34,12 @@ public sealed class GroupsPageParityTests
         Assert.Contains("GetAdminGroupUsageSummaryAsync", markup, StringComparison.Ordinal);
         Assert.Contains("GetAdminGroupCapacitySummaryAsync", markup, StringComparison.Ordinal);
         Assert.Contains("UpdateAdminGroupSortOrderAsync", markup, StringComparison.Ordinal);
+        foreach (var platform in new[] { "kimi", "zhipu", "deepseek" })
+        {
+            Assert.Contains($"value=\"{platform}\"", markup, StringComparison.Ordinal);
+        }
+        Assert.Contains("GetUsage(group).YesterdayCost", markup, StringComparison.Ordinal);
+        Assert.Contains("昨日", markup, StringComparison.Ordinal);
         Assert.Contains("GroupOverridesModal", markup, StringComparison.Ordinal);
         Assert.Contains("CompositeRoutesModal", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("支付", markup, StringComparison.Ordinal);

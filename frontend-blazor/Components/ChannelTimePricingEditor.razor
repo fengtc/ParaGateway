@@ -1,0 +1,307 @@
+@using System.Globalization
+@using System.Text.Json.Nodes
+
+<section class="time-pricing-editor" aria-label="时间段定价编辑器">
+    <header>
+        <div>
+            <strong>时间段定价</strong>
+            <small>仅作用于 Token 计费项；未覆盖时段使用基础价格。</small>
+        </div>
+        <button type="button" class="button secondary small" @onclick="ReloadFromJson" disabled="@string.IsNullOrWhiteSpace(ModelPricingJson)">
+            <Icon Name="refresh" Size="14" /> 从 JSON 重新载入
+        </button>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(editorError))
+    {
+        <div class="inline-alert danger compact" role="alert"><Icon Name="alert" Size="16" /><span>@editorError</span></div>
+    }
+
+    @if (entries.Count == 0 && string.IsNullOrWhiteSpace(parseError))
+    {
+        <div class="time-pricing-empty">模型定价 JSON 中暂无定价项。</div>
+    }
+    else
+    {
+        @foreach (var entry in entries)
+        {
+            <article class="time-pricing-entry" @key="entry.Index">
+                <div class="time-pricing-entry-heading">
+                    <div><strong>#@(entry.Index + 1) @entry.ModelsLabel</strong><small>@BillingModeLabel(entry.BillingMode)</small></div>
+                    @if (!entry.IsToken && entry.Periods.Count > 0)
+                    {
+                        <button type="button" class="button danger small" @onclick="() => ClearPeriodsAsync(entry)">清除无效配置</button>
+                    }
+                </div>
+
+                @if (entry.IsToken)
+                {
+                    <div class="time-pricing-toolbar">
+                        <div class="form-field">
+                            <label for="time-pricing-timezone-@entry.Index">IANA 时区</label>
+                            <input id="time-pricing-timezone-@entry.Index" list="channel-timezones" value="@entry.Timezone" @onchange="e => ChangeTimezoneAsync(entry, e)" autocomplete="off" />
+                        </div>
+                        <button type="button" class="button secondary small" @onclick="() => AddPeriod(entry)"><Icon Name="plus" Size="14" /> 添加时段</button>
+                    </div>
+
+                    @if (entry.Periods.Count == 0)
+                    {
+                        <div class="time-pricing-empty compact">未启用分时倍率。</div>
+                    }
+                    else
+                    {
+                        <div class="time-period-list">
+                            @for (var index = 0; index < entry.Periods.Count; index++)
+                            {
+                                var period = entry.Periods[index];
+                                var periodIndex = index;
+                                <div class="time-period-row" @key="period.Key">
+                                    <div class="form-field">
+                                        <label for="time-pricing-start-@entry.Index-@periodIndex">开始时间</label>
+                                        <input id="time-pricing-start-@entry.Index-@periodIndex" type="text" inputmode="numeric" maxlength="8" placeholder="HH:mm:ss" value="@period.StartTime" @onchange="e => ChangePeriodAsync(entry, periodIndex, nameof(PeriodState.StartTime), e)" />
+                                    </div>
+                                    <div class="form-field">
+                                        <label for="time-pricing-end-@entry.Index-@periodIndex">结束时间</label>
+                                        <input id="time-pricing-end-@entry.Index-@periodIndex" type="text" inputmode="numeric" maxlength="8" placeholder="HH:mm:ss" value="@period.EndTime" @onchange="e => ChangePeriodAsync(entry, periodIndex, nameof(PeriodState.EndTime), e)" />
+                                    </div>
+                                    <div class="form-field">
+                                        <label for="time-pricing-multiplier-@entry.Index-@periodIndex">倍率</label>
+                                        <input id="time-pricing-multiplier-@entry.Index-@periodIndex" type="number" min="0.01" step="0.01" value="@period.Multiplier" @onchange="e => ChangePeriodAsync(entry, periodIndex, nameof(PeriodState.Multiplier), e)" />
+                                    </div>
+                                    <button type="button" class="icon-button danger" title="删除时段" aria-label="删除时段" @onclick="() => RemovePeriodAsync(entry, periodIndex)"><Icon Name="trash" Size="15" /></button>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="time-pricing-empty compact">@(entry.Periods.Count > 0 ? "当前计费模式不支持分时倍率，请清除该配置。" : "该计费模式不支持分时倍率。")</div>
+                }
+            </article>
+        }
+    }
+
+    <datalist id="channel-timezones">
+        @foreach (var timezone in CommonTimezones) { <option value="@timezone"></option> }
+    </datalist>
+</section>
+
+@code {
+    [Parameter] public string ModelPricingJson { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ModelPricingJsonChanged { get; set; }
+
+    private static readonly JsonSerializerOptions PrettyJson = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private static readonly string[] CommonTimezones =
+    [
+        "UTC", "Asia/Shanghai", "Asia/Tokyo", "Asia/Seoul", "Asia/Singapore", "Asia/Kolkata",
+        "Australia/Sydney", "Europe/London", "Europe/Paris", "Europe/Berlin", "America/New_York",
+        "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto",
+        "America/Sao_Paulo", "Pacific/Auckland", "Pacific/Honolulu"
+    ];
+
+    private readonly List<PricingEntryState> entries = [];
+    private JsonArray root = [];
+    private string loadedJson = string.Empty;
+    private string lastEmittedJson = string.Empty;
+    private string? parseError;
+    private string? editorError;
+
+    protected override void OnParametersSet()
+    {
+        if (string.Equals(ModelPricingJson, lastEmittedJson, StringComparison.Ordinal)) return;
+        if (!string.Equals(ModelPricingJson, loadedJson, StringComparison.Ordinal)) LoadFromJson();
+    }
+
+    public async Task<string?> ValidateAndSyncAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(parseError)) return parseError;
+        return await ApplyChangesAsync(validateIncomplete: true);
+    }
+
+    private void ReloadFromJson() => LoadFromJson();
+
+    private void LoadFromJson()
+    {
+        entries.Clear();
+        parseError = null;
+        editorError = null;
+        loadedJson = ModelPricingJson;
+        lastEmittedJson = string.Empty;
+        if (string.IsNullOrWhiteSpace(ModelPricingJson))
+        {
+            root = [];
+            return;
+        }
+
+        try
+        {
+            root = JsonNode.Parse(ModelPricingJson) as JsonArray
+                ?? throw new JsonException("模型定价不是数组");
+            for (var index = 0; index < root.Count; index++)
+            {
+                if (root[index] is not JsonObject item) throw new JsonException($"第 {index + 1} 项不是对象");
+                var state = new PricingEntryState
+                {
+                    Index = index,
+                    BillingMode = ReadString(item, "billing_mode", "token"),
+                    ModelsLabel = ReadModelsLabel(item),
+                    Timezone = ChannelTimePricingRules.DefaultTimezone
+                };
+                if (item["time_pricing"] is JsonObject timePricing)
+                {
+                    state.Timezone = ReadString(timePricing, "timezone", ChannelTimePricingRules.DefaultTimezone);
+                    if (timePricing["periods"] is JsonArray periods)
+                    {
+                        foreach (var periodNode in periods)
+                        {
+                            if (periodNode is not JsonObject period) continue;
+                            state.Periods.Add(new PeriodState
+                            {
+                                StartTime = ChannelTimePricingRules.NormalizeClockTime(ReadString(period, "start_time", string.Empty)),
+                                EndTime = ChannelTimePricingRules.NormalizeClockTime(ReadString(period, "end_time", string.Empty)),
+                                Multiplier = ReadMultiplier(period)
+                            });
+                        }
+                    }
+                }
+                entries.Add(state);
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            root = [];
+            entries.Clear();
+            parseError = editorError = $"模型定价 JSON 无法载入：{ex.Message}";
+        }
+    }
+
+    private async Task ChangeTimezoneAsync(PricingEntryState entry, ChangeEventArgs args)
+    {
+        entry.Timezone = args.Value?.ToString()?.Trim() ?? string.Empty;
+        await ApplyChangesAsync(validateIncomplete: false);
+    }
+
+    private void AddPeriod(PricingEntryState entry)
+    {
+        entry.Periods.Add(new PeriodState());
+        editorError = null;
+    }
+
+    private async Task RemovePeriodAsync(PricingEntryState entry, int index)
+    {
+        if (index >= 0 && index < entry.Periods.Count) entry.Periods.RemoveAt(index);
+        await ApplyChangesAsync(validateIncomplete: false);
+    }
+
+    private async Task ClearPeriodsAsync(PricingEntryState entry)
+    {
+        entry.Periods.Clear();
+        await ApplyChangesAsync(validateIncomplete: false);
+    }
+
+    private async Task ChangePeriodAsync(PricingEntryState entry, int index, string field, ChangeEventArgs args)
+    {
+        if (index < 0 || index >= entry.Periods.Count) return;
+        var value = args.Value?.ToString() ?? string.Empty;
+        var period = entry.Periods[index];
+        if (field == nameof(PeriodState.StartTime)) period.StartTime = ChannelTimePricingRules.NormalizeClockTime(value);
+        else if (field == nameof(PeriodState.EndTime)) period.EndTime = ChannelTimePricingRules.NormalizeClockTime(value);
+        else period.Multiplier = value.Trim();
+        await ApplyChangesAsync(validateIncomplete: false);
+    }
+
+    private async Task<string?> ApplyChangesAsync(bool validateIncomplete)
+    {
+        editorError = null;
+        var nextRoot = root.DeepClone() as JsonArray ?? [];
+        foreach (var entry in entries)
+        {
+            if (nextRoot[entry.Index] is not JsonObject item) continue;
+            if (entry.Periods.Count == 0)
+            {
+                item.Remove("time_pricing");
+                continue;
+            }
+
+            var periods = new JsonArray();
+            for (var index = 0; index < entry.Periods.Count; index++)
+            {
+                var period = entry.Periods[index];
+                if (ChannelTimePricingRules.IsDraftPeriodIncomplete(period.StartTime, period.EndTime, period.Multiplier))
+                {
+                    if (!validateIncomplete) return null;
+                    editorError = $"第 {entry.Index + 1} 个定价项的第 {index + 1} 个时段请完整填写开始时间、结束时间和倍率。";
+                    return editorError;
+                }
+                if (!decimal.TryParse(period.Multiplier, NumberStyles.Number, CultureInfo.InvariantCulture, out var multiplier))
+                {
+                    editorError = $"第 {entry.Index + 1} 个定价项的第 {index + 1} 个时段倍率无效。";
+                    return editorError;
+                }
+                periods.Add(new JsonObject
+                {
+                    ["start_time"] = period.StartTime,
+                    ["end_time"] = period.EndTime,
+                    ["multiplier"] = multiplier
+                });
+            }
+            item["time_pricing"] = new JsonObject { ["timezone"] = entry.Timezone.Trim(), ["periods"] = periods };
+        }
+
+        var json = nextRoot.ToJsonString(PrettyJson);
+        editorError = ChannelTimePricingRules.ValidateModelPricingJson(json);
+        if (editorError is not null) return editorError;
+        root = nextRoot;
+        loadedJson = lastEmittedJson = json;
+        await ModelPricingJsonChanged.InvokeAsync(json);
+        return null;
+    }
+
+    private static string ReadString(JsonObject value, string key, string fallback) =>
+        value[key] is JsonValue node && node.TryGetValue<string>(out var text) ? text : fallback;
+
+    private static string ReadModelsLabel(JsonObject value)
+    {
+        if (value["models"] is not JsonArray models || models.Count == 0) return "未指定模型";
+        var names = models.Select(node => node is JsonValue item && item.TryGetValue<string>(out var name) ? name : null)
+            .Where(name => !string.IsNullOrWhiteSpace(name)).ToList();
+        return names.Count == 0 ? "未指定模型" : string.Join("、", names.Take(3)) + (names.Count > 3 ? $" 等 {names.Count} 个" : string.Empty);
+    }
+
+    private static string ReadMultiplier(JsonObject period)
+    {
+        if (period["multiplier"] is not JsonValue value) return "1.00";
+        if (value.TryGetValue<decimal>(out var number)) return number.ToString("0.00", CultureInfo.InvariantCulture);
+        if (value.TryGetValue<double>(out var floating)) return floating.ToString("0.00", CultureInfo.InvariantCulture);
+        if (value.TryGetValue<string>(out var text)) return text;
+        return "1.00";
+    }
+
+    private static string BillingModeLabel(string mode) => mode switch
+    {
+        "token" => "Token 计费",
+        "per_request" => "按次计费",
+        "image" => "图片计费",
+        "video" => "视频计费",
+        _ => mode
+    };
+
+    private sealed class PricingEntryState
+    {
+        public int Index { get; set; }
+        public string ModelsLabel { get; set; } = string.Empty;
+        public string BillingMode { get; set; } = "token";
+        public string Timezone { get; set; } = ChannelTimePricingRules.DefaultTimezone;
+        public List<PeriodState> Periods { get; } = [];
+        public bool IsToken => string.Equals(BillingMode, "token", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class PeriodState
+    {
+        public Guid Key { get; } = Guid.NewGuid();
+        public string StartTime { get; set; } = string.Empty;
+        public string EndTime { get; set; } = string.Empty;
+        public string Multiplier { get; set; } = "1.00";
+    }
+}

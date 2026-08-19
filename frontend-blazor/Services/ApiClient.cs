@@ -1010,6 +1010,29 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
             account_ids = ids.Select(long.Parse).ToArray(), schedulable
         });
 
+    public Task<AccountBatchResultDto> BulkUpdateAccountsAsync(
+        IEnumerable<string> ids,
+        IReadOnlyDictionary<string, object?> updates)
+    {
+        var payload = new Dictionary<string, object?>(updates, StringComparer.OrdinalIgnoreCase)
+        {
+            ["account_ids"] = ids.Select(long.Parse).Distinct().ToArray()
+        };
+        return SendAsync<AccountBatchResultDto>(HttpMethod.Post, $"{ApiPrefix}/admin/accounts/bulk-update", payload);
+    }
+
+    public Task<CNProviderQuotaProbeResultDto> GetCNProviderQuotaAsync(string id) =>
+        SendAsync<CNProviderQuotaProbeResultDto>(HttpMethod.Get,
+            $"{ApiPrefix}/admin/cn-providers/accounts/{Uri.EscapeDataString(id)}/quota");
+
+    public Task<CNProviderBalanceResultDto> GetCNProviderBalanceAsync(string id) =>
+        SendAsync<CNProviderBalanceResultDto>(HttpMethod.Get,
+            $"{ApiPrefix}/admin/cn-providers/accounts/{Uri.EscapeDataString(id)}/balance");
+
+    public Task<OllamaCloudUsageStateDto> RefreshOllamaCloudUsageAsync(string id) =>
+        SendAsync<OllamaCloudUsageStateDto>(HttpMethod.Post,
+            $"{ApiPrefix}/admin/accounts/{Uri.EscapeDataString(id)}/ollama-cloud-usage/refresh");
+
     public Task<JsonElement> GetAccountsDataAsync(IEnumerable<string>? ids, bool includeProxies, AccountListQuery? filters = null)
     {
         var query = new List<string> { $"include_proxies={includeProxies.ToString().ToLowerInvariant()}" };
@@ -1156,11 +1179,8 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         return GroupDto.From(group);
     }
 
-    public Task<List<GroupUsageSummaryDto>> GetAdminGroupUsageSummaryAsync(string? timezone = null) =>
-        SendAsync<List<GroupUsageSummaryDto>>(
-            HttpMethod.Get,
-            $"{ApiPrefix}/admin/groups/usage-summary"
-            + (string.IsNullOrWhiteSpace(timezone) ? string.Empty : $"?timezone={Uri.EscapeDataString(timezone)}"));
+    public Task<List<GroupUsageSummaryDto>> GetAdminGroupUsageSummaryAsync() =>
+        SendAsync<List<GroupUsageSummaryDto>>(HttpMethod.Get, $"{ApiPrefix}/admin/groups/usage-summary");
 
     public Task<List<GroupCapacitySummaryDto>> GetAdminGroupCapacitySummaryAsync() =>
         SendAsync<List<GroupCapacitySummaryDto>>(HttpMethod.Get, $"{ApiPrefix}/admin/groups/capacity-summary");
@@ -1932,12 +1952,20 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
 
     private static void AddOpsTimeQuery(List<string> query, string? timeRange, DateTimeOffset? start, DateTimeOffset? end)
     {
-        if (start.HasValue && end.HasValue)
+        if (string.Equals(timeRange, "custom", StringComparison.OrdinalIgnoreCase))
         {
-            AddOpsQuery(query, "start_time", start);
-            AddOpsQuery(query, "end_time", end);
+            if (start.HasValue && end.HasValue)
+            {
+                AddOpsQuery(query, "start_time", start);
+                AddOpsQuery(query, "end_time", end);
+            }
+            else
+            {
+                AddOpsQuery(query, "time_range", "1h");
+            }
+            return;
         }
-        else if (!string.IsNullOrWhiteSpace(timeRange) && !string.Equals(timeRange, "custom", StringComparison.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(timeRange))
         {
             AddOpsQuery(query, "time_range", timeRange);
         }
@@ -2861,6 +2889,11 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         if (!string.IsNullOrWhiteSpace(input.AccessToken)) credentials["access_token"] = input.AccessToken.Trim();
         if (!string.IsNullOrWhiteSpace(input.RefreshToken)) credentials["refresh_token"] = input.RefreshToken.Trim();
         if (!string.IsNullOrWhiteSpace(input.BaseUrl)) credentials["base_url"] = input.BaseUrl.Trim();
+        if (input.Platform is "kimi" or "zhipu" or "deepseek")
+        {
+            credentials["account_mode"] = input.AccountMode;
+            credentials["api_protocol"] = input.ApiProtocol;
+        }
         if (requireCredentials && credentials.Count == 0)
         {
             throw new ApiException("账号凭据不能为空。", HttpStatusCode.BadRequest);
@@ -2884,6 +2917,9 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
 
     private static void ApplyChannelInput(Dictionary<string, object?> payload, ChannelInput input, bool includeStatus, bool active = true)
     {
+        var timePricingError = ChannelTimePricingRules.ValidateModelPricingJson(input.ModelPricingJson);
+        if (timePricingError is not null)
+            throw new ApiException(timePricingError, HttpStatusCode.BadRequest);
         payload["name"] = input.Name.Trim(); payload["description"] = input.Description.Trim();
         payload["group_ids"] = input.GroupIds; payload["restrict_models"] = input.RestrictModels;
         payload["billing_model_source"] = input.BillingModelSource;

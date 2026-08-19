@@ -1,5 +1,9 @@
+using System.Net;
+using System.Text;
 using System.Text.Json;
+using Microsoft.JSInterop;
 using ParaGateway.Frontend.Models;
+using ParaGateway.Frontend.Services;
 using Xunit;
 
 namespace ParaGateway.Frontend.Tests;
@@ -126,6 +130,49 @@ public sealed class OpsPageParityTests
     }
 
     [Fact]
+    public void V0178OpsFixesCustomErrorTimeCategoriesAndEmptyWindowSla()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+        var client = Read("Services", "ApiClient.cs");
+
+        Assert.Contains("private bool HasSlaSample => overview.RequestCountSla > 0", markup, StringComparison.Ordinal);
+        Assert.Contains("HasSlaSample ? Percent(overview.Sla, 3) : \"-\"", markup, StringComparison.Ordinal);
+        Assert.Contains("HasSlaSample ? ThresholdTone", markup, StringComparison.Ordinal);
+        Assert.Contains("BuildErrorDistributionRows(errorDistribution.Items)", markup, StringComparison.Ordinal);
+        foreach (var label in new[] { "上游", "客户端", "系统", "其他" })
+        {
+            Assert.Contains($"new ErrorDistributionRow(\"{label}\"", markup, StringComparison.Ordinal);
+        }
+        Assert.Contains("string.Equals(timeRange, \"custom\"", client, StringComparison.Ordinal);
+        Assert.Contains("AddOpsQuery(query, \"time_range\", \"1h\")", client, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OpsErrorCustomTimeUsesExplicitBoundsAndFallsBackToOneHour()
+    {
+        var handler = new OpsQueryHandler();
+        var api = new ApiClient(new HttpClient(handler) { BaseAddress = new Uri("https://paragateway.test") }, new NullJsRuntime());
+        var start = new DateTimeOffset(2026, 8, 20, 8, 0, 0, TimeSpan.FromHours(8));
+        var end = start.AddHours(2);
+
+        await api.GetAdminOpsErrorsAsync("request", new OpsErrorListQueryDto
+        {
+            TimeRange = "custom",
+            StartTime = start,
+            EndTime = end
+        });
+
+        Assert.Contains("start_time=", handler.LastQuery, StringComparison.Ordinal);
+        Assert.Contains("end_time=", handler.LastQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("time_range=", handler.LastQuery, StringComparison.Ordinal);
+
+        await api.GetAdminOpsErrorsAsync("request", new OpsErrorListQueryDto { TimeRange = "custom" });
+
+        Assert.Contains("time_range=1h", handler.LastQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("time_range=custom", handler.LastQuery, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void OpsSystemLogsExposeOfficialFiltersHealthAndCleanupScope()
     {
         var markup = Read("Pages", "AdminOps.razor");
@@ -224,5 +271,25 @@ public sealed class OpsPageParityTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
         return File.ReadAllText(Path.Combine([root, .. segments]));
+    }
+
+    private sealed class NullJsRuntime : IJSRuntime
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) => ValueTask.FromResult(default(TValue)!);
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) => ValueTask.FromResult(default(TValue)!);
+    }
+
+    private sealed class OpsQueryHandler : HttpMessageHandler
+    {
+        public string LastQuery { get; private set; } = string.Empty;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastQuery = request.RequestUri?.Query ?? string.Empty;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"code\":0,\"message\":\"success\",\"data\":{\"items\":[],\"total\":0,\"page\":1,\"page_size\":20,\"pages\":0}}", Encoding.UTF8, "application/json")
+            });
+        }
     }
 }

@@ -1,0 +1,117 @@
+@using System.Globalization
+@using ParaGateway.Frontend.Models
+
+@if (Snapshot is not null)
+{
+    <div class="monitor-quota" data-testid="monitor-quota-view">
+        @if (!string.IsNullOrWhiteSpace(Snapshot.PlanLevel))
+        {
+            <span class="quota-plan">@Snapshot.PlanLevel</span>
+        }
+
+        @if (Snapshot.Success)
+        {
+            @foreach (var tier in Snapshot.Tiers)
+            {
+                <div class="quota-tier" title="@TierTitle(tier)">
+                    <span class="quota-label">@TierLabel(tier)</span>
+                    <i class="quota-track" aria-hidden="true">
+                        <em class="@UtilizationTone(tier.UsedPercent)" style="width: @ClampedPercent(tier.UsedPercent)%"></em>
+                    </i>
+                    <strong class="@UtilizationTone(tier.UsedPercent)">@Math.Round(tier.UsedPercent)%</strong>
+                    @if (!string.IsNullOrWhiteSpace(tier.ResetAt))
+                    {
+                        <small title="@tier.ResetAt">@FormatReset(tier.ResetAt)</small>
+                    }
+                </div>
+            }
+
+            @if (Balances.Count > 0)
+            {
+                <div class="quota-balances">
+                    @foreach (var balance in Balances)
+                    {
+                        <span class="@(balance.Balance <= 0 ? "empty" : null)">@balance.Balance.ToString("0.00", CultureInfo.InvariantCulture) @(string.IsNullOrWhiteSpace(balance.Currency) ? "?" : balance.Currency)</span>
+                    }
+                </div>
+            }
+        }
+        else
+        {
+            <span class="quota-error" title="@Snapshot.Error">@TruncatedError</span>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public MonitorQuotaSnapshotDto? Snapshot { get; set; }
+
+    private IReadOnlyList<MonitorBalanceDto> Balances
+    {
+        get
+        {
+            if (Snapshot is null) return [];
+            if (Snapshot.Balances.Count > 0) return Snapshot.Balances;
+            return Snapshot.Balance.HasValue
+                ? [new MonitorBalanceDto { Currency = Snapshot.Currency, Balance = Snapshot.Balance.Value }]
+                : [];
+        }
+    }
+
+    private string TruncatedError
+    {
+        get
+        {
+            var value = string.IsNullOrWhiteSpace(Snapshot?.Error) ? "配额暂不可用" : Snapshot.Error;
+            return value.Length <= 48 ? value : value[..48] + "...";
+        }
+    }
+
+    private static string TierLabel(MonitorQuotaTierDto tier)
+    {
+        var window = tier.Window switch
+        {
+            "5h" => "5 小时",
+            "7d" => "7 天",
+            "7d-sonnet" => "Sonnet/7 天",
+            "7d-fable" => "Fable/7 天",
+            "weekly" => "每周",
+            "daily" => "每日",
+            "30d" => "30 天",
+            "total" => "总量",
+            _ => tier.Window
+        };
+        if (string.IsNullOrWhiteSpace(tier.Label)) return window;
+        var label = tier.Label switch
+        {
+            "requests" => "请求",
+            "tokens" => "Token",
+            "shared" => "共享",
+            "pro" => "Pro",
+            "flash" => "Flash",
+            _ => tier.Label
+        };
+        return $"{label}/{window}";
+    }
+
+    private static string TierTitle(MonitorQuotaTierDto tier)
+    {
+        var values = tier.Limit.HasValue
+            ? $"；{tier.Used.GetValueOrDefault():0.##}/{tier.Limit.Value:0.##}"
+            : string.Empty;
+        return $"{TierLabel(tier)}：{tier.UsedPercent:0.#}%{values}";
+    }
+
+    private static string UtilizationTone(double value) => value >= 90 ? "danger" : value >= 75 ? "warning" : "healthy";
+    private static string ClampedPercent(double value) => Math.Clamp(value, 0, 100).ToString("0.#", CultureInfo.InvariantCulture);
+
+    private static string FormatReset(string value)
+    {
+        if (!DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var reset)) return value;
+        var remaining = reset - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero) return "即将重置";
+        if (remaining < TimeSpan.FromHours(1)) return $"{Math.Max(1, (int)Math.Round(remaining.TotalMinutes))}m";
+        if (remaining < TimeSpan.FromHours(48)) return $"{Math.Max(1, (int)Math.Round(remaining.TotalHours))}h";
+        return reset.ToLocalTime().ToString("MM-dd", CultureInfo.InvariantCulture);
+    }
+}

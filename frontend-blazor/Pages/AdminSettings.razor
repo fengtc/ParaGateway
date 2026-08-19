@@ -78,6 +78,10 @@
                         <Field Label="渠道监控模式"><InputSelect @bind-Value="settings.ChannelMonitorMode"><option value="v1">V1 主动探测</option><option value="v2">V2 被动聚合</option></InputSelect></Field>
                         <Field Label="默认探测间隔（秒）"><InputNumber @bind-Value="settings.ChannelMonitorDefaultIntervalSeconds" /></Field>
                         <ToggleField Label="隐藏吞吐量" Hint="对非管理员隐藏绝对吞吐数值"><InputCheckbox @bind-Value="settings.ChannelMonitorHideThroughput" /></ToggleField>
+                        @if (settings.ChannelMonitorMode == "v1")
+                        {
+                            <ToggleField Label="用户端展示配额快照" Hint="允许用户在渠道状态页查看账号最近一次配额或余额快照"><InputCheckbox @bind-Value="settings.ChannelMonitorShowQuota" /></ToggleField>
+                        }
                         <ToggleField Label="可用渠道" Hint="允许用户查看当前可用渠道"><InputCheckbox @bind-Value="settings.AvailableChannelsEnabled" /></ToggleField>
                         <ToggleField Label="模型广场" Hint="开放模型目录页"><InputCheckbox @bind-Value="settings.ModelPlazaEnabled" /></ToggleField>
                         <ToggleField Label="模型广场要求登录" Hint="未登录用户不能访问模型目录"><InputCheckbox @bind-Value="settings.ModelPlazaRequireAuth" /></ToggleField>
@@ -233,6 +237,7 @@
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
     private static readonly string[] AuthSourceIds = ["email", "linuxdo", "oidc", "wechat", "github", "google", "dingtalk"];
     private static readonly string[] QuotaPlatforms = ["anthropic", "openai", "gemini", "antigravity", "grok"];
+    private static readonly string[] SchedulingThresholdPlatforms = ["openai", "anthropic", "grok", "kimi", "zhipu"];
 
     private AdminSettingsDto settings = new();
     private AdminApiKeyStatusDto adminApiKey = new();
@@ -321,6 +326,7 @@
                 ["ops_query_mode_default"] = settings.OpsQueryModeDefault, ["ops_metrics_interval_seconds"] = settings.OpsMetricsIntervalSeconds,
                 ["channel_monitor_enabled"] = settings.ChannelMonitorEnabled, ["channel_monitor_mode"] = settings.ChannelMonitorMode,
                 ["channel_monitor_default_interval_seconds"] = settings.ChannelMonitorDefaultIntervalSeconds, ["channel_monitor_hide_throughput"] = settings.ChannelMonitorHideThroughput,
+                ["channel_monitor_show_quota"] = settings.ChannelMonitorShowQuota,
                 ["available_channels_enabled"] = settings.AvailableChannelsEnabled, ["model_plaza_enabled"] = settings.ModelPlazaEnabled,
                 ["model_plaza_require_auth"] = settings.ModelPlazaRequireAuth, ["model_plaza_description"] = settings.ModelPlazaDescription,
                 ["enable_model_fallback"] = settings.EnableModelFallback, ["fallback_model_anthropic"] = settings.FallbackModelAnthropic.Trim(),
@@ -357,7 +363,7 @@
                 ["openai_advanced_scheduler_weight_upstream_cost"] = settings.OpenAIAdvancedSchedulerWeightUpstreamCost.Trim(),
                 ["openai_advanced_scheduler_weight_previous_response"] = settings.OpenAIAdvancedSchedulerWeightPreviousResponse.Trim(),
                 ["openai_advanced_scheduler_weight_session_sticky"] = settings.OpenAIAdvancedSchedulerWeightSessionSticky.Trim(),
-                ["account_scheduling_thresholds"] = settings.AccountSchedulingThresholds.ToDictionary(x => x.Key, x => Math.Clamp(x.Value, 1, 100)),
+                ["account_scheduling_thresholds"] = NormalizeSchedulingThresholds(settings.AccountSchedulingThresholds),
                 ["openai_fast_policy_settings"] = settings.OpenAIFastPolicySettings,
                 ["allow_user_view_error_requests"] = settings.AllowUserViewErrorRequests,
                 ["smtp_host"] = settings.SmtpHost.Trim(), ["smtp_port"] = settings.SmtpPort, ["smtp_username"] = settings.SmtpUsername.Trim(),
@@ -568,10 +574,23 @@
         return normalized;
     }
 
+    private static Dictionary<string, int> NormalizeSchedulingThresholds(Dictionary<string, int>? thresholds)
+    {
+        var normalized = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var platform in SchedulingThresholdPlatforms)
+        {
+            normalized[platform] = thresholds is not null && thresholds.TryGetValue(platform, out var value)
+                ? Math.Clamp(value, 1, 100)
+                : 100;
+        }
+        return normalized;
+    }
+
     private void NormalizeUserDefaults()
     {
         settings.DefaultSubscriptions ??= [];
         settings.DefaultPlatformQuotas = NormalizePlatformQuotas(settings.DefaultPlatformQuotas);
+        settings.AccountSchedulingThresholds = NormalizeSchedulingThresholds(settings.AccountSchedulingThresholds);
         settings.AuthSourceDefaults = new(StringComparer.OrdinalIgnoreCase);
         foreach (var sourceId in AuthSourceIds)
         {

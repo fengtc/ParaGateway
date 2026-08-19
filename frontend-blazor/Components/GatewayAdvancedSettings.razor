@@ -107,7 +107,7 @@
 
 @code {
     [Parameter, EditorRequired] public AdminSettingsDto Settings { get; set; } = default!;
-    private static readonly string[] ThresholdPlatforms = ["openai", "anthropic", "grok"];
+    private static readonly string[] ThresholdPlatforms = ["openai", "anthropic", "grok", "kimi", "zhipu"];
 
     protected override void OnParametersSet()
     {
@@ -119,7 +119,7 @@
     private void AddFastRule() => Settings.OpenAIFastPolicySettings.Rules.Add(new OpenAIFastPolicyRuleDto { ServiceTier = "fast", Action = "pass", Scope = "all", FallbackAction = "pass" });
     private int Threshold(string platform) => Settings.AccountSchedulingThresholds.TryGetValue(platform, out var value) ? Math.Clamp(value, 1, 100) : 100;
     private void SetThreshold(string platform, object? value) => Settings.AccountSchedulingThresholds[platform] = int.TryParse(value?.ToString(), out var number) ? Math.Clamp(number, 1, 100) : 100;
-    private static string PlatformLabel(string platform) => platform switch { "openai" => "OpenAI", "anthropic" => "Anthropic", "grok" => "Grok", _ => platform };
+    private static string PlatformLabel(string platform) => platform switch { "openai" => "OpenAI", "anthropic" => "Anthropic", "grok" => "Grok", "kimi" => "Kimi", "zhipu" => "智谱", _ => platform };
     private static string JoinIds(IEnumerable<long> values) => string.Join(", ", values);
     private static List<long> SplitIds(string? value) => (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => long.TryParse(x, out var id) ? id : 0).Where(x => x > 0).Distinct().ToList();
     private static string JoinLines(IEnumerable<string> values) => string.Join(Environment.NewLine, values);

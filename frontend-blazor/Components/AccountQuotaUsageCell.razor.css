@@ -1,0 +1,14 @@
+.account-quota-cell { display: grid; min-width: 190px; gap: 5px; }
+.quota-query { display: inline-flex; width: fit-content; min-height: 26px; padding: 3px 7px; align-items: center; gap: 4px; color: var(--primary); background: transparent; border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--line)); border-radius: 6px; font-size: .7rem; font-weight: 650; }
+.quota-query:hover { background: var(--primary-soft); }
+.quota-query:disabled { opacity: .55; }
+.quota-window { display: grid; grid-template-columns: 26px 52px 66px minmax(0, 1fr); align-items: center; gap: 5px; }
+.quota-window small { overflow: hidden; color: var(--muted); font-size: .69rem; text-overflow: ellipsis; white-space: nowrap; }
+.quota-window b { color: var(--ink); text-align: right; font-size: .71rem; font-weight: 620; font-variant-numeric: tabular-nums; }
+.quota-window i { display: block; height: 5px; overflow: hidden; background: var(--line); border-radius: 99px; }
+.quota-window em { display: block; height: 100%; background: var(--primary); border-radius: inherit; }
+.quota-window em.warning { background: #c47e1b; }
+.quota-window em.danger { background: var(--danger); }
+.balance-values { color: var(--ink); font-size: .72rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.quota-unavailable { color: var(--muted); font-size: .72rem; }
+.quota-error { display: block; overflow: hidden; max-width: 220px; color: var(--danger); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }

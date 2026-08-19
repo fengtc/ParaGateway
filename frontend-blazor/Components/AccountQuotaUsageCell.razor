@@ -1,0 +1,196 @@
+@inject ApiClient Api
+
+<div class="account-quota-cell" data-platform="@Account.Platform">
+    @if (IsCNQuotaAccount)
+    {
+        <button type="button" class="quota-query" disabled="@loading" title="查询上游 5 小时和每周额度" @onclick="QueryCNQuotaAsync">
+            <Icon Name="refresh" Size="13" /> @(loading ? "查询中" : "查询额度")
+        </button>
+        @foreach (var tier in CurrentCNTiers)
+        {
+            @PercentWindow(tier.Window == "weekly" ? "周" : "5h", tier.UsedPercent, tier.ResetAt)
+        }
+    }
+    else if (IsCNBalanceAccount)
+    {
+        <button type="button" class="quota-query" disabled="@loading" title="查询上游账户余额" @onclick="QueryCNBalanceAsync">
+            <Icon Name="refresh" Size="13" /> @(loading ? "查询中" : "查询余额")
+        </button>
+        @if (CurrentBalances.Count > 0)
+        {
+            <div class="balance-values">@string.Join(" · ", CurrentBalances.Select(FormatBalance))</div>
+        }
+    }
+    else if (IsZhipuPayg)
+    {
+        <span class="quota-unavailable" title="智谱未提供公开余额查询接口">余额接口不可用</span>
+    }
+    else if (Account.OllamaCloudUsage?.Eligible == true)
+    {
+        @if (Account.OllamaCloudUsage.Snapshot?.Data?.FiveHour is { } fiveHour)
+        {
+            @PercentWindow("5h", fiveHour.UsedPercent, fiveHour.ResetAt?.ToString("O"))
+        }
+        @if (Account.OllamaCloudUsage.Snapshot?.Data?.SevenDay is { } sevenDay)
+        {
+            @PercentWindow("7d", sevenDay.UsedPercent, sevenDay.ResetAt?.ToString("O"))
+        }
+        @if (Account.OllamaCloudUsage.Configured)
+        {
+            <button type="button" class="quota-query" disabled="@loading" title="主动查询 Ollama Cloud 用量" @onclick="RefreshOllamaAsync">
+                <Icon Name="refresh" Size="13" /> @(loading ? "查询中" : "主动查询")
+            </button>
+        }
+    }
+    else if (HasLegacyQuota)
+    {
+        @LegacyWindow("日", Account.QuotaDailyUsed, Account.QuotaDailyLimit)
+        @LegacyWindow("周", Account.QuotaWeeklyUsed, Account.QuotaWeeklyLimit)
+        @LegacyWindow("总", Account.QuotaUsed, Account.QuotaLimit)
+    }
+    else
+    {
+        <span class="quota-unavailable">-</span>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <small class="quota-error" title="@error">@Truncate(error)</small>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AccountDto Account { get; set; } = new();
+
+    private CNProviderQuotaProbeResultDto? quota;
+    private CNProviderBalanceResultDto? balance;
+    private bool loading;
+    private string? error;
+
+    private string AccountMode => ReadCredential("account_mode");
+    private bool IsCNQuotaAccount => (Account.Platform is "kimi" or "zhipu") && AccountMode == "coding";
+    private bool IsCNBalanceAccount => (Account.Platform is "kimi" or "deepseek") && AccountMode != "coding";
+    private bool IsZhipuPayg => Account.Platform == "zhipu" && AccountMode != "coding";
+    private bool HasLegacyQuota => Account.QuotaLimit is > 0 || Account.QuotaDailyLimit is > 0 || Account.QuotaWeeklyLimit is > 0;
+
+    private List<CNQuotaTierDto> CurrentCNTiers
+    {
+        get
+        {
+            if (quota?.Success == true && quota.Tiers.Count > 0) return quota.Tiers;
+            var result = new List<CNQuotaTierDto>();
+            AddSnapshotTier(result, "5h");
+            AddSnapshotTier(result, "weekly");
+            return result;
+        }
+    }
+
+    private List<CNProviderBalanceEntryDto> CurrentBalances
+    {
+        get
+        {
+            if (balance?.Success == true)
+                return balance.Balances.Count > 0
+                    ? balance.Balances
+                    : [new CNProviderBalanceEntryDto { Currency = balance.Currency, Balance = balance.Balance }];
+
+            if (Account.Extra is not null
+                && Account.Extra.TryGetValue($"{Account.Platform}_balances", out var value)
+                && value.ValueKind == JsonValueKind.Array)
+            {
+                try { return value.Deserialize<List<CNProviderBalanceEntryDto>>() ?? []; }
+                catch (JsonException) { }
+            }
+            var snapshot = ReadExtraNumber($"{Account.Platform}_balance");
+            return snapshot.HasValue
+                ? [new CNProviderBalanceEntryDto { Currency = ReadExtraString($"{Account.Platform}_balance_currency"), Balance = snapshot.Value }]
+                : [];
+        }
+    }
+
+    private void AddSnapshotTier(List<CNQuotaTierDto> result, string window)
+    {
+        var used = ReadExtraNumber($"{Account.Platform}_{window}_used_percent");
+        if (used.HasValue)
+            result.Add(new CNQuotaTierDto
+            {
+                Window = window,
+                UsedPercent = used.Value,
+                ResetAt = ReadExtraString($"{Account.Platform}_{window}_reset_at")
+            });
+    }
+
+    private async Task QueryCNQuotaAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var next = await Api.GetCNProviderQuotaAsync(Account.Id);
+            if (!next.Success) throw new ApiException(string.IsNullOrWhiteSpace(next.Error) ? "额度查询失败" : next.Error);
+            quota = next;
+        });
+    }
+
+    private async Task QueryCNBalanceAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var next = await Api.GetCNProviderBalanceAsync(Account.Id);
+            if (!next.Success) throw new ApiException(string.IsNullOrWhiteSpace(next.Error) ? "余额查询失败" : next.Error);
+            balance = next;
+        });
+    }
+
+    private async Task RefreshOllamaAsync()
+    {
+        await RunAsync(async () => Account.OllamaCloudUsage = await Api.RefreshOllamaCloudUsageAsync(Account.Id));
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (loading) return;
+        loading = true;
+        error = null;
+        try { await action(); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private RenderFragment PercentWindow(string label, double percent, string? resetAt) => builder =>
+    {
+        var safe = Math.Clamp(percent, 0, 100);
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "quota-window");
+        builder.OpenElement(2, "small"); builder.AddContent(3, label); builder.CloseElement();
+        builder.OpenElement(4, "b"); builder.AddContent(5, $"{percent:0.#}%"); builder.CloseElement();
+        builder.OpenElement(6, "i"); builder.OpenElement(7, "em"); builder.AddAttribute(8, "class", PercentTone(percent)); builder.AddAttribute(9, "style", $"width:{safe:0.#}%"); builder.CloseElement(); builder.CloseElement();
+        if (!string.IsNullOrWhiteSpace(resetAt)) { builder.OpenElement(10, "small"); builder.AddAttribute(11, "title", resetAt); builder.AddContent(12, FormatReset(resetAt)); builder.CloseElement(); }
+        builder.CloseElement();
+    };
+
+    private RenderFragment LegacyWindow(string label, double? used, double? limit) => builder =>
+    {
+        if (limit is not > 0) return;
+        var percent = Math.Clamp((used ?? 0) / limit.Value * 100, 0, 100);
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "quota-window");
+        builder.OpenElement(2, "small"); builder.AddContent(3, label); builder.CloseElement();
+        builder.OpenElement(4, "b"); builder.AddContent(5, $"{used.GetValueOrDefault():0.##}/{limit.Value:0.##}"); builder.CloseElement();
+        builder.OpenElement(6, "i"); builder.OpenElement(7, "em"); builder.AddAttribute(8, "style", $"width:{percent:0.#}%"); builder.CloseElement(); builder.CloseElement();
+        builder.CloseElement();
+    };
+
+    private string ReadCredential(string key) => Account.Credentials is not null
+        && Account.Credentials.TryGetValue(key, out var value)
+        && value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : string.Empty;
+    private double? ReadExtraNumber(string key) => Account.Extra is not null
+        && Account.Extra.TryGetValue(key, out var value)
+        && value.ValueKind == JsonValueKind.Number
+        && value.TryGetDouble(out var number) ? number : null;
+    private string ReadExtraString(string key) => Account.Extra is not null
+        && Account.Extra.TryGetValue(key, out var value)
+        && value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : string.Empty;
+    private static string FormatBalance(CNProviderBalanceEntryDto value) => $"{(string.IsNullOrWhiteSpace(value.Currency) ? "¥" : value.Currency)} {(value.Balance >= 100 ? value.Balance.ToString("0") : value.Balance.ToString("0.00"))}";
+    private static string PercentTone(double value) => value >= 90 ? "danger" : value >= 75 ? "warning" : "healthy";
+    private static string Truncate(string value) => value.Length <= 72 ? value : value[..72] + "...";
+    private static string FormatReset(string value) => DateTimeOffset.TryParse(value, out var reset)
+        ? reset.ToLocalTime().ToString("MM-dd HH:mm")
+        : value;
+}

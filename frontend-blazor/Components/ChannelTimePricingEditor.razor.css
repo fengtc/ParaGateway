@@ -1,0 +1,16 @@
+.time-pricing-editor { display: grid; padding: 13px; gap: 12px; background: var(--surface-muted); border: 1px solid var(--line); border-radius: 8px; }
+.time-pricing-editor > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.time-pricing-editor > header > div, .time-pricing-entry-heading > div { display: grid; gap: 2px; }
+.time-pricing-editor header strong { color: var(--ink); font-size: .8rem; }
+.time-pricing-editor header small, .time-pricing-entry-heading small { color: var(--muted); font-size: .7rem; }
+.inline-alert.compact { margin: 0; padding: 8px 10px; }
+.time-pricing-entry { display: grid; padding: 12px; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; }
+.time-pricing-entry-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.time-pricing-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) auto; align-items: end; gap: 10px; }
+.time-pricing-toolbar .button { margin-bottom: 1px; }
+.time-period-list { display: grid; gap: 8px; }
+.time-period-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) 34px; align-items: end; gap: 8px; padding-top: 9px; border-top: 1px solid var(--line); }
+.time-period-row .icon-button { margin-bottom: 3px; }
+.time-pricing-empty { padding: 18px 10px; color: var(--muted); border: 1px dashed var(--line); border-radius: 7px; text-align: center; font-size: .74rem; }
+.time-pricing-empty.compact { padding: 10px; }
+@media (max-width: 720px) { .time-pricing-editor > header, .time-pricing-entry-heading { align-items: stretch; flex-direction: column; } .time-pricing-toolbar { grid-template-columns: 1fr; } .time-period-row { grid-template-columns: 1fr 1fr; } .time-period-row .icon-button { justify-self: end; } }

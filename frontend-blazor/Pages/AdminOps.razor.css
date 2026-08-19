@@ -394,7 +394,10 @@
 .bar-list > div > span { color: var(--muted); }
 .bar-list i { display: block; height: 10px; overflow: hidden; background: #e8eeeb; border-radius: 3px; }
 .bar-list em { display: block; height: 100%; background: #3b82f6; border-radius: inherit; }
-.error-bars em { background: #ef4444; }
+.error-bars em.upstream { background: #f59e0b; }
+.error-bars em.client { background: #3b82f6; }
+.error-bars em.system { background: #ef4444; }
+.error-bars em.other { background: #94a3b8; }
 .bar-list b { text-align: right; }
 
 .ops-table-card { min-height: auto; }

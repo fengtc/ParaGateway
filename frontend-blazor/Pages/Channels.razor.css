@@ -1,0 +1,3 @@
+.channel-editor-grid { align-items: start; }
+.channel-editor-grid > .full { grid-column: 1 / -1; min-width: 0; }
+@media (max-width: 720px) { .channel-editor-grid > .full { grid-column: auto; } }
