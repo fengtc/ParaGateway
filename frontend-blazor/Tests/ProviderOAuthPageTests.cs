@@ -78,12 +78,12 @@ public sealed class ProviderOAuthPageTests
     }
 
     [Fact]
-    public void ProviderPageAllowsOAuthSchedulingEditsWithoutCredentialEditing()
+    public void ProviderPageKeepsOAuthInsideTheNativeAccountFlow()
     {
         var markup = File.ReadAllText(FindPage("Providers.razor"));
 
-        Assert.Contains("href=\"/provider-oauth\"", markup, StringComparison.Ordinal);
-        Assert.Contains("官方 OAuth", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"/provider-oauth\"", markup, StringComparison.Ordinal);
+        Assert.Contains("<NativeAccountCreateModal", markup, StringComparison.Ordinal);
     }
 
     [Fact]

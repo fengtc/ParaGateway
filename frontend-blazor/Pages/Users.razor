@@ -284,7 +284,7 @@
                                 @if (IsColumnVisible("usage_antigravity")) { <td>@UsageCell(user.Id, "antigravity")</td> }
                                 @if (IsColumnVisible("concurrency"))
                                 {
-                                    <td><div class="concurrency-cell"><span>@user.CurrentConcurrency / @user.Concurrency</span><span class="usage-bar"><i style="width:@ConcurrencyPercent(user)%"></i></span><small>@(user.RpmLimit == 0 ? "RPM 不限" : $"{user.RpmLimit} RPM")</small></div></td>
+                                    <td><div class="concurrency-cell"><span>@user.CurrentConcurrency / @user.Concurrency</span><span class="usage-bar"><i style="width:@ConcurrencyPercent(user)%"></i></span><small>@(user.RpmLimit == 0 ? "RPM 不限" : $"{user.RpmLimit} RPM") · @(user.TpmLimit == 0 ? "TPM 不限" : $"{user.TpmLimit} TPM")</small></div></td>
                                 }
                                 @if (IsColumnVisible("status")) { <td><span class="state-dot @(user.Status == "active" ? "active" : "disabled")"></span>@(user.Status == "active" ? "已启用" : "已禁用")</td> }
                                 @if (IsColumnVisible("last_active_at")) { <td class="date-cell">@FormatDateTime(user.LastActiveAt)</td> }
@@ -297,26 +297,7 @@
                                         {
                                             <button type="button" class="text-action @(user.Status == "active" ? "warning" : "success")" title="@(user.Status == "active" ? "禁用" : "启用")" @onclick="() => ToggleStatusAsync(user)"><Icon Name="@(user.Status == "active" ? "ban" : "circle-check")" Size="15" /><span>@(user.Status == "active" ? "禁用" : "启用")</span></button>
                                         }
-                                        <div class="row-menu-anchor">
-                                            <button type="button" class="text-action" title="更多" aria-expanded="@(activeActionId == user.Id)" @onclick="() => ToggleActionMenu(user.Id)"><Icon Name="more" Size="15" /><span>更多</span></button>
-                                            @if (activeActionId == user.Id)
-                                            {
-                                                <div class="row-action-menu">
-                                                    <button type="button" @onclick="() => OpenKeysAsync(user)"><Icon Name="key" Size="15" />API 密钥</button>
-                                                    <button type="button" @onclick="() => OpenGroupsAsync(user)"><Icon Name="users" Size="15" />授权分组</button>
-                                                    <div class="menu-divider"></div>
-                                                    <button type="button" @onclick='() => OpenBalance(user, "add")'><Icon Name="plus" Size="15" />充值</button>
-                                                    <button type="button" @onclick='() => OpenBalance(user, "subtract")'><Icon Name="minus" Size="15" />扣款</button>
-                                                    <button type="button" @onclick="() => OpenQuotaAsync(user)"><Icon Name="activity" Size="15" />平台限额</button>
-                                                    <button type="button" @onclick="() => OpenHistoryAsync(user)"><Icon Name="dollar" Size="15" />余额历史</button>
-                                                    @if (user.Role != "admin")
-                                                    {
-                                                        <div class="menu-divider"></div>
-                                                        <button type="button" class="danger-text" @onclick="() => DeleteAsync(user)"><Icon Name="trash" Size="15" />删除</button>
-                                                    }
-                                                </div>
-                                            }
-                                        </div>
+                                        <button type="button" class="text-action" title="更多" aria-expanded="@(activeActionId == user.Id)" @onclick="e => ToggleActionMenuAsync(user, e)"><Icon Name="more" Size="15" /><span>更多</span></button>
                                     </div>
                                 </td>
                             </tr>
@@ -343,6 +324,25 @@
     }
 </section>
 
+@if (activeActionId is not null && actionMenuPosition is not null && users.FirstOrDefault(user => user.Id == activeActionId) is { } actionMenuUser)
+{
+    <button type="button" class="row-action-menu-backdrop" tabindex="-1" aria-label="关闭 @actionMenuUser.Email 的更多操作" @onclick="CloseActionMenu"></button>
+    <div class="row-action-menu" style="@ActionMenuStyle" role="menu" aria-label="@actionMenuUser.Email 的更多操作">
+        <button type="button" role="menuitem" @onclick="() => OpenKeysAsync(actionMenuUser)"><Icon Name="key" Size="15" />API 密钥</button>
+        <button type="button" role="menuitem" @onclick="() => OpenGroupsAsync(actionMenuUser)"><Icon Name="users" Size="15" />授权分组</button>
+        <div class="menu-divider"></div>
+        <button type="button" role="menuitem" @onclick='() => OpenBalance(actionMenuUser, "add")'><Icon Name="plus" Size="15" />充值</button>
+        <button type="button" role="menuitem" @onclick='() => OpenBalance(actionMenuUser, "subtract")'><Icon Name="minus" Size="15" />扣款</button>
+        <button type="button" role="menuitem" @onclick="() => OpenQuotaAsync(actionMenuUser)"><Icon Name="activity" Size="15" />平台限额</button>
+        <button type="button" role="menuitem" @onclick="() => OpenHistoryAsync(actionMenuUser)"><Icon Name="dollar" Size="15" />余额历史</button>
+        @if (actionMenuUser.Role != "admin")
+        {
+            <div class="menu-divider"></div>
+            <button type="button" role="menuitem" class="danger-text" @onclick="() => DeleteAsync(actionMenuUser)"><Icon Name="trash" Size="15" />删除</button>
+        }
+    </div>
+}
+
 <AppModal Open="editorOpen" Title="@(editingUser is null ? "创建用户" : "编辑用户")" MaxWidth="620px" OnClose="CloseEditor">
     <ChildContent>
         <EditForm id="user-editor" Model="editor" OnValidSubmit="SaveUserAsync" FormName="user-editor">
@@ -356,6 +356,13 @@
                     <small class="field-hint">密码至少 6 个字符；生成后可直接复制保存。</small>
                 </div>
                 <div class="form-field full"><label for="user-name">用户名</label><InputText id="user-name" @bind-Value="editor.Username" /></div>
+                @if (DepartmentAttribute is { } departmentAttribute)
+                {
+                    <div class="form-field full">
+                        <label for="user-department">@departmentAttribute.Name</label>
+                        <input id="user-department" type="text" value="@GetEditorAttribute(departmentAttribute.Id)" placeholder="@departmentAttribute.Placeholder" @oninput="e => SetEditorAttribute(departmentAttribute.Id, e.Value?.ToString())" />
+                    </div>
+                }
                 <div class="form-field"><label for="user-role">角色</label><InputSelect id="user-role" @bind-Value="editor.Role" disabled="@IsEditingSelf"><option value="user">普通用户</option><option value="admin">管理员</option></InputSelect></div>
                 @if (editingUser is null)
                 {
@@ -366,11 +373,11 @@
                     <div class="form-field full"><label for="user-notes">备注</label><InputTextArea id="user-notes" @bind-Value="editor.Notes" rows="3" /></div>
                 }
                 <div class="form-field"><label for="user-concurrency">并发上限</label><InputNumber id="user-concurrency" @bind-Value="editor.Concurrency" min="0" /></div>
-                <div class="form-field"><label for="user-rpm">RPM 上限</label><InputNumber id="user-rpm" @bind-Value="editor.RpmLimit" min="0" /><small class="field-hint">0 表示不限制</small></div>
-                @if (editingUser is not null && EnabledAttributes.Count > 0)
+                <div class="form-field"><label for="user-rpm">RPM 上限</label><InputNumber id="user-rpm" @bind-Value="editor.RpmLimit" min="0" /><small class="field-hint">0 表示不限制</small></div><div class="form-field"><label for="user-tpm">TPM 上限</label><InputNumber id="user-tpm" @bind-Value="editor.TpmLimit" min="0" /><small class="field-hint">输入+输出 Token；0 表示不限制</small></div>
+                @if (editingUser is not null && OtherEditorAttributes.Count > 0)
                 {
                     <div class="form-subsection full"><strong>用户属性</strong><span>按已启用的属性定义维护该用户信息。</span></div>
-                    @foreach (var definition in EnabledAttributes)
+                    @foreach (var definition in OtherEditorAttributes)
                     {
                         <div class="form-field @(definition.Type == "textarea" ? "full" : null)">
                             <label>@definition.Name</label>
@@ -397,9 +404,9 @@
 
 <AppModal Open="bulkOpen" Title="批量编辑用户限制" MaxWidth="520px" OnClose="CloseBulk">
     <ChildContent>
-        <div class="bulk-form"><p>已选择 <strong>@selectedIds.Count</strong> 个用户。</p><label class="toggle-row"><InputCheckbox @bind-Value="bulkConcurrencyEnabled" /><span><strong>更新并发上限</strong><small>覆盖所选用户的当前配置</small></span></label>@if (bulkConcurrencyEnabled) { <div class="form-field"><label>并发上限</label><InputNumber @bind-Value="bulkConcurrency" min="0" /></div> }<label class="toggle-row"><InputCheckbox @bind-Value="bulkRpmEnabled" /><span><strong>更新 RPM 上限</strong><small>0 表示不限制</small></span></label>@if (bulkRpmEnabled) { <div class="form-field"><label>RPM 上限</label><InputNumber @bind-Value="bulkRpm" min="0" /></div> }@if (modalError is not null) { <div class="inline-alert danger">@modalError</div> }</div>
+        <div class="bulk-form"><p>已选择 <strong>@selectedIds.Count</strong> 个用户。</p><label class="toggle-row"><InputCheckbox @bind-Value="bulkConcurrencyEnabled" /><span><strong>更新并发上限</strong><small>覆盖所选用户的当前配置</small></span></label>@if (bulkConcurrencyEnabled) { <div class="form-field"><label>并发上限</label><InputNumber @bind-Value="bulkConcurrency" min="0" /></div> }<label class="toggle-row"><InputCheckbox @bind-Value="bulkRpmEnabled" /><span><strong>更新 RPM 上限</strong><small>0 表示不限制</small></span></label>@if (bulkRpmEnabled) { <div class="form-field"><label>RPM 上限</label><InputNumber @bind-Value="bulkRpm" min="0" /></div> }<label class="toggle-row"><InputCheckbox @bind-Value="bulkTpmEnabled" /><span><strong>更新 TPM 上限</strong><small>输入+输出 Token；0 表示不限制</small></span></label>@if (bulkTpmEnabled) { <div class="form-field"><label>TPM 上限</label><InputNumber @bind-Value="bulkTpm" min="0" /></div> }@if (modalError is not null) { <div class="inline-alert danger">@modalError</div> }</div>
     </ChildContent>
-    <Footer><button type="button" class="button secondary" @onclick="CloseBulk">取消</button><button type="button" class="button primary" disabled="@(saving || (!bulkConcurrencyEnabled && !bulkRpmEnabled))" @onclick="SaveBulkAsync">@(saving ? "应用中…" : "应用")</button></Footer>
+    <Footer><button type="button" class="button secondary" @onclick="CloseBulk">取消</button><button type="button" class="button primary" disabled="@(saving || (!bulkConcurrencyEnabled && !bulkRpmEnabled && !bulkTpmEnabled))" @onclick="SaveBulkAsync">@(saving ? "应用中…" : "应用")</button></Footer>
 </AppModal>
 
 <AppModal Open="keysOpen" Title="用户 API 密钥" MaxWidth="780px" OnClose="CloseKeys">
@@ -533,6 +540,7 @@
     private const string SortLastActive = "last_active_at";
     private const string SortLastUsed = "last_used_at";
     private const string SortCreated = "created_at";
+    private const string DepartmentAttributeKey = "department";
     private const string UsageSortStorageKey = "admin-users-usage-sort";
     private static readonly string[] QuotaPlatforms = ["anthropic", "openai", "gemini", "antigravity", "grok"];
     private static readonly HashSet<string> UsageColumnKeys = ["usage", "usage_anthropic", "usage_openai", "usage_gemini", "usage_antigravity"];
@@ -570,6 +578,7 @@
     private int pages = 1;
     private long total;
     private long? activeActionId;
+    private FloatingMenuPosition? actionMenuPosition;
     private long? expandedGroupUserId;
     private string? openUsageSortMenu;
     private string? usageSortKey;
@@ -585,8 +594,11 @@
     private bool bulkOpen;
     private bool bulkConcurrencyEnabled;
     private bool bulkRpmEnabled;
+
+    private bool bulkTpmEnabled;
     private int bulkConcurrency;
     private int bulkRpm;
+    private int bulkTpm;
     private bool keysOpen;
     private List<ApiKeyDto> userKeys = [];
     private readonly HashSet<string> keyGroupUpdating = [];
@@ -626,6 +638,8 @@
         : groups.Where(x => x.Status == "active" && x.IsExclusive && x.SubscriptionType == "standard" && x.Id != replaceOldGroup.Id).ToList();
     private GoGroup? SelectedReplacementGroup => ReplacementGroups.FirstOrDefault(x => x.Id == replaceSelectedGroupId);
     private IReadOnlyList<UserAttributeDefinitionDto> EnabledAttributes => attributeDefinitions.Where(x => x.Enabled).OrderBy(x => x.DisplayOrder).ToList();
+    private UserAttributeDefinitionDto? DepartmentAttribute => EnabledAttributes.FirstOrDefault(x => string.Equals(x.Key, DepartmentAttributeKey, StringComparison.OrdinalIgnoreCase));
+    private IReadOnlyList<UserAttributeDefinitionDto> OtherEditorAttributes => EnabledAttributes.Where(x => !string.Equals(x.Key, DepartmentAttributeKey, StringComparison.OrdinalIgnoreCase)).ToList();
     private IReadOnlyList<GoGroup> ActiveExclusiveGroups => groups.Where(x => x.IsExclusive && x.SubscriptionType == "standard" && x.Status == "active").ToList();
     private IReadOnlyList<FilterOption> BuiltInFilters => [new("role", "角色"), new("status", "状态"), new("group", "授权分组"), new("apiKeyGroup", "API Key 分组")];
     private IReadOnlyList<ColumnOption> ToggleableColumns => [
@@ -796,7 +810,43 @@
 
     private void ToggleSelected(long id, ChangeEventArgs e) { if (e.Value is true) selectedIds.Add(id); else selectedIds.Remove(id); }
     private void ToggleAll(ChangeEventArgs e) { if (e.Value is true) foreach (var user in users) selectedIds.Add(user.Id); else foreach (var user in users) selectedIds.Remove(user.Id); }
-    private void ToggleActionMenu(long id) { activeActionId = activeActionId == id ? null : id; expandedGroupUserId = null; openUsageSortMenu = null; }
+    private async Task ToggleActionMenuAsync(GoUser user, MouseEventArgs e)
+    {
+        if (activeActionId == user.Id)
+        {
+            CloseActionMenu();
+            return;
+        }
+
+        expandedGroupUserId = null;
+        openUsageSortMenu = null;
+        var itemCount = user.Role == "admin" ? 6 : 7;
+        var menuHeight = (itemCount * 34) + (user.Role == "admin" ? 21 : 30);
+
+        try
+        {
+            actionMenuPosition = await JS.InvokeAsync<FloatingMenuPosition>(
+                "paraGateway.positionFloatingMenu", e.ClientX, e.ClientY, 190, menuHeight, 8);
+        }
+        catch (JSException)
+        {
+            actionMenuPosition = new(
+                Math.Max(8, (int)Math.Round(e.ClientY) - menuHeight - 6),
+                Math.Max(8, (int)Math.Round(e.ClientX) - 190));
+        }
+
+        activeActionId = user.Id;
+    }
+
+    private void CloseActionMenu()
+    {
+        activeActionId = null;
+        actionMenuPosition = null;
+    }
+
+    private string ActionMenuStyle => actionMenuPosition is null
+        ? "visibility:hidden"
+        : $"top:{actionMenuPosition.Top}px;left:{actionMenuPosition.Left}px";
     private void OpenAttributesConfig() { showFilterMenu = false; showColumnMenu = false; attributesOpen = true; }
     private async Task CloseAttributesConfigAsync()
     {
@@ -807,12 +857,12 @@
 
     private void OpenCreate()
     {
-        editingUser = null; editor = new() { Role = "user", Concurrency = 1, RpmLimit = 0 }; editorAttributes = []; modalError = null; editorOpen = true; GeneratePassword();
+        editingUser = null; editor = new() { Role = "user", Concurrency = 1, RpmLimit = 0, TpmLimit = 0 }; editorAttributes = []; modalError = null; editorOpen = true; GeneratePassword();
     }
 
     private async Task OpenEditAsync(GoUser user)
     {
-        activeActionId = null; editingUser = user; editor = new() { Email = user.Email, Username = user.Username, Notes = user.Notes, Role = user.Role, Concurrency = user.Concurrency, RpmLimit = user.RpmLimit }; editorAttributes = []; modalError = null; editorOpen = true;
+        activeActionId = null; editingUser = user; editor = new() { Email = user.Email, Username = user.Username, Notes = user.Notes, Role = user.Role, Concurrency = user.Concurrency, RpmLimit = user.RpmLimit, TpmLimit = user.TpmLimit }; editorAttributes = []; modalError = null; editorOpen = true;
         try { editorAttributes = (await Api.GetUserAttributeValuesAsync(user.Id.ToString())).ToDictionary(x => x.AttributeId, x => x.Value); }
         catch (ApiException ex) { modalError = ex.Message; }
     }
@@ -832,20 +882,21 @@
         modalError = null;
         if (editingUser is null && string.IsNullOrWhiteSpace(editor.Password)) { modalError = "请输入初始密码"; return; }
         if (!string.IsNullOrWhiteSpace(editor.Password) && editor.Password.Length < 6) { modalError = "密码至少需要 6 个字符"; return; }
-        if (editor.Concurrency < 0 || editor.RpmLimit < 0) { modalError = "并发和 RPM 不能为负数"; return; }
+        if (editor.Concurrency < 0 || editor.RpmLimit < 0 || editor.TpmLimit < 0) { modalError = "并发、RPM 和 TPM 不能为负数"; return; }
         saving = true;
         var editing = editingUser;
         var succeeded = await RunSensitiveAsync(async () =>
         {
             if (editing is null)
             {
-                var payload = new Dictionary<string, object?> { ["email"] = editor.Email.Trim(), ["password"] = editor.Password, ["username"] = editor.Username.Trim(), ["role"] = editor.Role, ["concurrency"] = editor.Concurrency, ["rpm_limit"] = editor.RpmLimit };
+                var payload = new Dictionary<string, object?> { ["email"] = editor.Email.Trim(), ["password"] = editor.Password, ["username"] = editor.Username.Trim(), ["role"] = editor.Role, ["concurrency"] = editor.Concurrency, ["rpm_limit"] = editor.RpmLimit, ["tpm_limit"] = editor.TpmLimit };
                 if (editor.Balance.HasValue) payload["balance"] = editor.Balance.Value;
-                await Api.CreateAdminUserAsync(payload);
+                var created = await Api.CreateAdminUserAsync(payload);
+                if (DepartmentAttribute is not null && editorAttributes.Count > 0) await Api.UpdateUserAttributeValuesAsync(created.Id.ToString(), editorAttributes);
             }
             else
             {
-                var payload = new Dictionary<string, object?> { ["email"] = editor.Email.Trim(), ["username"] = editor.Username.Trim(), ["notes"] = editor.Notes.Trim(), ["role"] = editor.Role, ["concurrency"] = editor.Concurrency, ["rpm_limit"] = editor.RpmLimit };
+                var payload = new Dictionary<string, object?> { ["email"] = editor.Email.Trim(), ["username"] = editor.Username.Trim(), ["notes"] = editor.Notes.Trim(), ["role"] = editor.Role, ["concurrency"] = editor.Concurrency, ["rpm_limit"] = editor.RpmLimit, ["tpm_limit"] = editor.TpmLimit };
                 if (!string.IsNullOrWhiteSpace(editor.Password)) payload["password"] = editor.Password.Trim();
                 await Api.UpdateAdminUserAsync(editing.Id, payload);
                 if (EnabledAttributes.Count > 0) await Api.UpdateUserAttributeValuesAsync(editing.Id.ToString(), editorAttributes);
@@ -885,15 +936,15 @@
         catch (ApiException ex) { error = ex.Message; }
     }
 
-    private void OpenBulkEdit() { bulkOpen = true; bulkConcurrencyEnabled = false; bulkRpmEnabled = false; bulkConcurrency = 0; bulkRpm = 0; modalError = null; }
+    private void OpenBulkEdit() { bulkOpen = true; bulkConcurrencyEnabled = false; bulkRpmEnabled = false; bulkTpmEnabled = false; bulkConcurrency = 0; bulkRpm = 0; bulkTpm = 0; modalError = null; }
     private void CloseBulk() { if (!saving) bulkOpen = false; }
     private async Task SaveBulkAsync()
     {
-        modalError = null; if (bulkConcurrency < 0 || bulkRpm < 0) { modalError = "限制值不能为负数"; return; }
-        var fields = string.Join("、", new[] { bulkConcurrencyEnabled ? $"并发={bulkConcurrency}" : null, bulkRpmEnabled ? $"RPM={bulkRpm}" : null }.Where(x => x is not null));
+        modalError = null; if (bulkConcurrency < 0 || bulkRpm < 0 || bulkTpm < 0) { modalError = "限制值不能为负数"; return; }
+        var fields = string.Join("、", new[] { bulkConcurrencyEnabled ? $"并发={bulkConcurrency}" : null, bulkRpmEnabled ? $"RPM={bulkRpm}" : null, bulkTpmEnabled ? $"TPM={bulkTpm}" : null }.Where(x => x is not null));
         if (!await JS.InvokeAsync<bool>("confirm", $"确认将 {selectedIds.Count} 个用户的{fields}？")) return;
         saving = true;
-        try { var result = await Api.BatchUpdateAdminUserLimitsAsync(selectedIds, bulkConcurrencyEnabled ? bulkConcurrency : null, bulkRpmEnabled ? bulkRpm : null); Toasts.Success($"已更新 {result.Affected} 个用户"); bulkOpen = false; selectedIds.Clear(); await LoadAsync(); }
+        try { var result = await Api.BatchUpdateAdminUserLimitsAsync(selectedIds, bulkConcurrencyEnabled ? bulkConcurrency : null, bulkRpmEnabled ? bulkRpm : null, bulkTpmEnabled ? bulkTpm : null); Toasts.Success($"已更新 {result.Affected} 个用户"); bulkOpen = false; selectedIds.Clear(); await LoadAsync(); }
         catch (ApiException ex) { modalError = ex.Message; }
         finally { saving = false; }
     }
@@ -1167,11 +1218,13 @@
         public decimal? Balance { get; set; }
         public int Concurrency { get; set; } = 1;
         public int RpmLimit { get; set; }
+        public int TpmLimit { get; set; }
     }
     private sealed class GroupAccessRow { public GoGroup Group { get; set; } = new(); public bool Selected { get; set; } public double? CustomRate { get; set; } public double? OriginalCustomRate { get; set; } }
     private sealed record FilterOption(string Key, string Label);
     private sealed record ColumnOption(string Key, string Label);
     private sealed record GroupSummary(int ExclusiveCount, int PublicCount, string Title);
+    private sealed record FloatingMenuPosition(int Top, int Left);
     private sealed class UsageSortPreference { public string Key { get; set; } = string.Empty; public string Metric { get; set; } = "today"; public string Order { get; set; } = "desc"; }
     private sealed class UserFilterState { public string? Role { get; set; } public string? Status { get; set; } public string? Group { get; set; } public long? ApiKeyGroup { get; set; } public Dictionary<long, string>? Attributes { get; set; } }
 }

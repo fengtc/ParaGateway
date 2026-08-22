@@ -153,6 +153,7 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		SetNillableLastLoginAt(userIn.LastLoginAt).
 		SetNillableLastActiveAt(userIn.LastActiveAt).
 		SetRpmLimit(userIn.RPMLimit).
+		SetTpmLimit(userIn.TPMLimit).
 		Save(txCtx)
 	if err != nil {
 		return translatePersistenceError(err, nil, service.ErrEmailExists)
@@ -312,6 +313,9 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 	if fields.RPMLimit {
 		updateOp = updateOp.SetRpmLimit(userIn.RPMLimit)
+	}
+	if fields.TPMLimit {
+		updateOp = updateOp.SetTpmLimit(userIn.TPMLimit)
 	}
 	if fields.Status {
 		updateOp = updateOp.SetStatus(userIn.Status)
@@ -1079,6 +1083,15 @@ func (r *userRepository) BatchSetConcurrency(ctx context.Context, userIDs []int6
 	if err != nil {
 		return 0, fmt.Errorf("batch set concurrency: %w", err)
 	}
+	affected, _ := res.RowsAffected()
+	return int(affected), nil
+}
+
+func (r *userRepository) BatchUpdateTPMLimit(ctx context.Context, userIDs []int64, value int) (int, error) {
+	if len(userIDs) == 0 { return 0, nil }
+	value = max(value, 0)
+	res, err := r.sql.ExecContext(ctx, "UPDATE users SET tpm_limit = $1, updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL", value, pq.Array(userIDs))
+	if err != nil { return 0, fmt.Errorf("batch set tpm limit: %w", err) }
 	affected, _ := res.RowsAffected()
 	return int(affected), nil
 }

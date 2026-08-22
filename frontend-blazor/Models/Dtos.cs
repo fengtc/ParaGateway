@@ -14,7 +14,7 @@ public sealed class SetupDatabaseInput
     public int Port { get; set; } = 5432;
     public string User { get; set; } = "postgres";
     public string Password { get; set; } = string.Empty;
-    [JsonPropertyName("dbname")] public string DatabaseName { get; set; } = "sub2api";
+    [JsonPropertyName("dbname")] public string DatabaseName { get; set; } = "paragateway";
     [JsonPropertyName("sslmode")] public string SslMode { get; set; } = "disable";
 }
 
@@ -183,6 +183,7 @@ public sealed class GoUser
     [JsonPropertyName("frozen_balance")] public decimal FrozenBalance { get; set; }
     public int Concurrency { get; set; }
     [JsonPropertyName("rpm_limit")] public int RpmLimit { get; set; }
+    [JsonPropertyName("tpm_limit")] public int TpmLimit { get; set; }
     public string Status { get; set; } = "active";
     [JsonPropertyName("allowed_groups")] public List<long> AllowedGroups { get; set; } = [];
     [JsonPropertyName("group_rates")] public Dictionary<long, double> GroupRates { get; set; } = [];
@@ -848,19 +849,6 @@ public sealed class PasskeyCredentialDto
     [JsonPropertyName("created_at")] public DateTimeOffset CreatedAt { get; set; }
     [JsonPropertyName("last_used_at")] public DateTimeOffset? LastUsedAt { get; set; }
     public bool Backup { get; set; }
-}
-
-public sealed class AdminComplianceStatusDto
-{
-    public bool Required { get; set; }
-    public string Version { get; set; } = string.Empty;
-    [JsonPropertyName("document_path_zh")] public string DocumentPathZh { get; set; } = string.Empty;
-    [JsonPropertyName("document_path_en")] public string DocumentPathEn { get; set; } = string.Empty;
-    [JsonPropertyName("document_url_zh")] public string DocumentUrlZh { get; set; } = string.Empty;
-    [JsonPropertyName("document_url_en")] public string DocumentUrlEn { get; set; } = string.Empty;
-    [JsonPropertyName("ack_phrase_zh")] public string AckPhraseZh { get; set; } = string.Empty;
-    [JsonPropertyName("ack_phrase_en")] public string AckPhraseEn { get; set; } = string.Empty;
-    public JsonElement? Acknowledgement { get; set; }
 }
 
 public sealed class UserAttributeDefinitionDto
@@ -2034,6 +2022,84 @@ public sealed class AccountTodayStatsBatchDto
     public Dictionary<string, AccountTodayStatsDto> Stats { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
+public sealed class AccountUsageWindowStatsDto
+{
+    public long Requests { get; set; }
+    public long Tokens { get; set; }
+    public double Cost { get; set; }
+    [JsonPropertyName("standard_cost")] public double StandardCost { get; set; }
+    [JsonPropertyName("user_cost")] public double UserCost { get; set; }
+}
+
+public sealed class AccountUsageProgressDto
+{
+    public double Utilization { get; set; }
+    [JsonPropertyName("resets_at")] public DateTimeOffset? ResetsAt { get; set; }
+    [JsonPropertyName("remaining_seconds")] public int RemainingSeconds { get; set; }
+    [JsonPropertyName("window_stats")] public AccountUsageWindowStatsDto? WindowStats { get; set; }
+    [JsonPropertyName("used_requests")] public long UsedRequests { get; set; }
+    [JsonPropertyName("limit_requests")] public long LimitRequests { get; set; }
+}
+
+public sealed class AntigravityModelQuotaDto
+{
+    public int Utilization { get; set; }
+    [JsonPropertyName("reset_time")] public string ResetTime { get; set; } = string.Empty;
+}
+
+public sealed class AccountUsageInfoDto
+{
+    public string Source { get; set; } = string.Empty;
+    [JsonPropertyName("updated_at")] public DateTimeOffset? UpdatedAt { get; set; }
+    [JsonPropertyName("five_hour")] public AccountUsageProgressDto? FiveHour { get; set; }
+    [JsonPropertyName("seven_day")] public AccountUsageProgressDto? SevenDay { get; set; }
+    [JsonPropertyName("seven_day_sonnet")] public AccountUsageProgressDto? SevenDaySonnet { get; set; }
+    [JsonPropertyName("seven_day_fable")] public AccountUsageProgressDto? SevenDayFable { get; set; }
+    [JsonPropertyName("thirty_day")] public AccountUsageProgressDto? ThirtyDay { get; set; }
+    [JsonPropertyName("gemini_shared_daily")] public AccountUsageProgressDto? GeminiSharedDaily { get; set; }
+    [JsonPropertyName("gemini_pro_daily")] public AccountUsageProgressDto? GeminiProDaily { get; set; }
+    [JsonPropertyName("gemini_flash_daily")] public AccountUsageProgressDto? GeminiFlashDaily { get; set; }
+    [JsonPropertyName("gemini_shared_minute")] public AccountUsageProgressDto? GeminiSharedMinute { get; set; }
+    [JsonPropertyName("gemini_pro_minute")] public AccountUsageProgressDto? GeminiProMinute { get; set; }
+    [JsonPropertyName("gemini_flash_minute")] public AccountUsageProgressDto? GeminiFlashMinute { get; set; }
+    [JsonPropertyName("antigravity_quota")] public Dictionary<string, AntigravityModelQuotaDto> AntigravityQuota { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string Error { get; set; } = string.Empty;
+}
+
+public sealed class AccountUsageBatchResponseDto
+{
+    public Dictionary<string, AccountUsageInfoDto> Usage { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> Errors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class OpenAIQuotaResetCreditDto
+{
+    [JsonPropertyName("expires_at")] public string ExpiresAt { get; set; } = string.Empty;
+}
+
+public sealed class OpenAIQuotaResetCreditsDto
+{
+    [JsonPropertyName("available_count")] public int AvailableCount { get; set; }
+    public List<OpenAIQuotaResetCreditDto> Credits { get; set; } = [];
+}
+
+public sealed class OpenAIQuotaUsageDto
+{
+    [JsonPropertyName("rate_limit_reset_credits")] public OpenAIQuotaResetCreditsDto? RateLimitResetCredits { get; set; }
+    [JsonPropertyName("fetched_at")] public long FetchedAt { get; set; }
+    [JsonPropertyName("cache_persisted")] public bool CachePersisted { get; set; }
+}
+
+public sealed class OpenAIQuotaResetResultDto
+{
+    public string Code { get; set; } = string.Empty;
+    [JsonPropertyName("windows_reset")] public int WindowsReset { get; set; }
+    public OpenAIQuotaUsageDto? Quota { get; set; }
+    [JsonPropertyName("cache_refreshed")] public bool CacheRefreshed { get; set; }
+    [JsonPropertyName("account_state_recovered")] public bool AccountStateRecovered { get; set; }
+    [JsonPropertyName("warning_code")] public string WarningCode { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// Worker 风格的独立上游账号。它与 Go 官方 AccountDto/accounts 表没有映射关系。
 /// </summary>
@@ -2214,7 +2280,10 @@ public sealed class AccountInput : IValidatableObject
     public string ExtraJson { get; set; } = string.Empty;
     public string BaseUrl { get; set; } = string.Empty;
     public string AccountMode { get; set; } = "payg";
-    public string ApiProtocol { get; set; } = "chat_completions";
+    public string ApiProtocol { get; set; } = "adaptive";
+    [JsonIgnore] public string AdaptiveChatCompletionsBaseUrl { get; set; } = string.Empty;
+    [JsonIgnore] public string AdaptiveAnthropicBaseUrl { get; set; } = string.Empty;
+    [JsonIgnore] public string AdaptiveResponsesBaseUrl { get; set; } = string.Empty;
     [Range(1, 10_000, ErrorMessage = "并发上限必须在 1 到 10000 之间")] public int Concurrency { get; set; } = 8;
     [Range(0, 1_000_000, ErrorMessage = "优先级必须在 0 到 1000000 之间")] public int Priority { get; set; } = 100;
     [Range(0, 100)] public double RateMultiplier { get; set; } = 1;
@@ -2231,12 +2300,47 @@ public sealed class AccountInput : IValidatableObject
     public bool RateSyncEnabled { get; set; }
     public List<long> GroupIds { get; set; } = [];
     [JsonIgnore] public bool IsEditing { get; set; }
+    [JsonIgnore] public string ModelRestrictionMode { get; set; } = "whitelist";
+    [JsonIgnore] public List<string> AllowedModels { get; set; } = [];
+    [JsonIgnore] public List<ModelMappingInput> ModelMappings { get; set; } = [];
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (!string.IsNullOrWhiteSpace(BaseUrl) && !new UrlAttribute().IsValid(BaseUrl))
         {
             yield return new ValidationResult("Base URL 格式不正确", [nameof(BaseUrl)]);
+        }
+
+        var requiresAdaptiveBaseUrls = Platform is "kimi" or "zhipu" or "deepseek"
+            && string.Equals(Type, "apikey", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(ApiProtocol, "adaptive", StringComparison.OrdinalIgnoreCase);
+        if (requiresAdaptiveBaseUrls)
+        {
+            if (string.IsNullOrWhiteSpace(AdaptiveChatCompletionsBaseUrl))
+                yield return new ValidationResult("请输入 Chat Completions Base URL", [nameof(AdaptiveChatCompletionsBaseUrl)]);
+            if (string.IsNullOrWhiteSpace(AdaptiveAnthropicBaseUrl))
+                yield return new ValidationResult("请输入 Anthropic Base URL", [nameof(AdaptiveAnthropicBaseUrl)]);
+            if (Platform == "deepseek" && string.IsNullOrWhiteSpace(AdaptiveResponsesBaseUrl))
+                yield return new ValidationResult("请输入 Responses Base URL", [nameof(AdaptiveResponsesBaseUrl)]);
+        }
+
+        foreach (var (value, member, label) in new[]
+        {
+            (AdaptiveChatCompletionsBaseUrl, nameof(AdaptiveChatCompletionsBaseUrl), "Chat Completions Base URL"),
+            (AdaptiveAnthropicBaseUrl, nameof(AdaptiveAnthropicBaseUrl), "Anthropic Base URL"),
+            (AdaptiveResponsesBaseUrl, nameof(AdaptiveResponsesBaseUrl), "Responses Base URL")
+        })
+        {
+            if (!string.IsNullOrWhiteSpace(value) && !new UrlAttribute().IsValid(value))
+            {
+                yield return new ValidationResult($"{label} 格式不正确", [member]);
+            }
+        }
+
+        var modelRestrictionError = AccountModelRestrictions.Validate(this);
+        if (modelRestrictionError is not null)
+        {
+            yield return new ValidationResult(modelRestrictionError, [nameof(AllowedModels), nameof(ModelMappings)]);
         }
 
         if (IsEditing && string.IsNullOrWhiteSpace(ApiKey) && string.IsNullOrWhiteSpace(AccessToken)
@@ -2332,6 +2436,7 @@ public sealed class GroupDto
     public string PeakStart { get; set; } = string.Empty;
     public string PeakEnd { get; set; } = string.Empty;
     public double PeakRateMultiplier { get; set; }
+    public bool LongContextPricingEnabled { get; set; }
     public int RpmLimit { get; set; }
     public static GroupDto From(GoGroup group) => new()
     {
@@ -2344,6 +2449,7 @@ public sealed class GroupDto
         MonthlyLimitUsd = group.MonthlyLimitUsd, RpmLimit = group.RpmLimit,
         PeakRateEnabled = group.PeakRateEnabled, PeakStart = group.PeakStart,
         PeakEnd = group.PeakEnd, PeakRateMultiplier = group.PeakRateMultiplier,
+        LongContextPricingEnabled = group.LongContextPricingEnabled,
         SubscriptionType = group.SubscriptionType,
         AdvancedJson = JsonSerializer.Serialize(group, JsonDefaults.Options)
     };
@@ -2454,6 +2560,7 @@ public sealed class GroupInput
     [Range(0, double.MaxValue)] public double? WeeklyLimitUsd { get; set; }
     [Range(0, double.MaxValue)] public double? MonthlyLimitUsd { get; set; }
     [Range(0, 1_000_000)] public int RpmLimit { get; set; }
+    public bool LongContextPricingEnabled { get; set; } = true;
     public string AdvancedJson { get; set; } = string.Empty;
 }
 

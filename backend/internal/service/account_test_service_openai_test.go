@@ -597,3 +597,54 @@ func TestAccountTestService_OpenAIChatCompletionsPathRejectsNonJSONStream(t *tes
 	require.Contains(t, recorder.Body.String(), "/v1/chat/completions")
 	require.NotContains(t, recorder.Body.String(), `"success":true`)
 }
+
+func TestAccountTestService_CopilotRefreshesMissingAccessTokenBeforeProbe(t *testing.T) {
+	exchange := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "token legacy-github-token", r.Header.Get("Authorization"))
+		_, _ = io.WriteString(w, `{"token":"fresh-copilot-token","expires_at":4102444800,"refresh_in":1200}`)
+	}))
+	defer exchange.Close()
+
+	account := newCopilotGatewayTestAccount()
+	delete(account.Credentials, "access_token")
+	account.Credentials["github_access_token"] = "legacy-github-token"
+	account.Credentials["billing_pat"] = "preserved-billing-pat"
+	account.Credentials["base_url"] = "https://api.individual.githubcopilot.com"
+	account.Credentials["model_mapping"] = map[string]any{"claude-sonnet-4-6": "claude-sonnet-4.6"}
+
+	repo := &refreshAPIAccountRepo{account: account}
+	oauthService := &OpenAIOAuthService{
+		copilotHTTPClient: exchange.Client(),
+		copilotEndpoints:  copilotOAuthEndpoints{tokenExchangeURL: exchange.URL},
+	}
+	provider := NewOpenAITokenProvider(repo, nil, oauthService)
+	provider.SetRefreshAPI(
+		NewOAuthRefreshAPI(repo, nil),
+		NewOpenAITokenRefresher(oauthService, repo),
+	)
+
+	response := newJSONResponse(http.StatusOK, "")
+	response.Body = io.NopCloser(strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{response}}
+	svc := &AccountTestService{
+		accountRepo:         repo,
+		openAITokenProvider: provider,
+		httpUpstream:        upstream,
+		cfg:                 newCopilotGatewayTestService(nil).cfg,
+	}
+	ctx, recorder := newTestContext()
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "claude-sonnet-4-6", "", "")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+	request := upstream.requests[0]
+	require.Equal(t, "Bearer fresh-copilot-token", request.Header.Get("Authorization"))
+	require.Equal(t, "vscode-chat", request.Header.Get("Copilot-Integration-Id"))
+	require.Equal(t, "https://api.individual.githubcopilot.com/chat/completions", request.URL.String())
+	body, err := io.ReadAll(request.Body)
+	require.NoError(t, err)
+	require.Equal(t, "claude-sonnet-4.6", gjson.GetBytes(body, "model").String())
+	require.Equal(t, "fresh-copilot-token", repo.account.GetOpenAIAccessToken())
+	require.Equal(t, "preserved-billing-pat", repo.account.GetCredential("billing_pat"))
+	require.Contains(t, recorder.Body.String(), "test_complete")
+}

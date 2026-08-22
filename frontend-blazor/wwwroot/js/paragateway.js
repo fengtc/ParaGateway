@@ -42,6 +42,31 @@ window.paraGateway = window.paraGateway || {};
 })(window.paraGateway);
 
 (function (gateway) {
+    function clamp(value, minimum, maximum) {
+        return Math.min(Math.max(value, minimum), maximum);
+    }
+
+    gateway.positionFloatingMenu = function (anchorX, anchorY, requestedWidth, requestedHeight, requestedPadding) {
+        const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+        const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+        const padding = Math.max(0, Number(requestedPadding) || 8);
+        const width = Math.min(Math.max(1, Number(requestedWidth) || 190), Math.max(1, viewportWidth - (padding * 2)));
+        const height = Math.min(Math.max(1, Number(requestedHeight) || 240), Math.max(1, viewportHeight - (padding * 2)));
+        const gap = 6;
+        const x = Number(anchorX) || padding;
+        const y = Number(anchorY) || padding;
+
+        const preferredLeft = viewportWidth < 768 ? x - (width / 2) : x - width;
+        const left = clamp(preferredLeft, padding, Math.max(padding, viewportWidth - width - padding));
+        let top = y + gap;
+        if (top + height > viewportHeight - padding) top = y - height - gap;
+        top = clamp(top, padding, Math.max(padding, viewportHeight - height - padding));
+
+        return { top: Math.round(top), left: Math.round(left) };
+    };
+})(window.paraGateway);
+
+(function (gateway) {
     const themeKey = 'theme';
     const sidebarKey = 'paragateway.sidebar.collapsed';
 

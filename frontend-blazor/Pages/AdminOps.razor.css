@@ -569,14 +569,14 @@
 .system-log-tools > span,
 .system-log-filters label { font-size: .8rem; }
 .alert-history h3 { font-size: .88rem; }
-.ops-table { font-size: .88rem; }
-.ops-table th { font-size: .8rem; }
-.ops-table code { font-size: .8rem; }
+.ops-table { font-size: .83rem; }
+.ops-table th { font-size: .76rem; }
+.ops-table code { font-size: .75rem; }
 .level-badge,
 .log-health-badges span { font-size: .76rem; }
-.ops-pagination { font-size: .85rem; }
+.ops-pagination { font-size: .8rem; }
 .ops-pagination button,
-.ops-pagination select { font-size: .85rem; }
+.ops-pagination select { font-size: .8rem; }
 .form-grid label,
 .settings-tabs button { font-size: .85rem; }
 .form-grid label small,

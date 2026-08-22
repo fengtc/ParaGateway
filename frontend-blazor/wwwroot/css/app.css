@@ -34,6 +34,13 @@
     --form-control-focus: #5a9c82;
     --form-control-focus-ring: rgba(48, 135, 101, .12);
     --form-control-radius: 5px;
+    --management-list-body-font: .83rem;
+    --management-list-header-font: .76rem;
+    --management-list-primary-font: .88rem;
+    --management-list-secondary-font: .75rem;
+    --management-list-action-font: .69rem;
+    --management-list-control-font: .8rem;
+    --management-list-pagination-font: .8rem;
     font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
     font-synthesis: none;
     letter-spacing: 0;
@@ -902,7 +909,7 @@ a:focus-visible {
     width: 100%;
     margin: 0;
     border-collapse: collapse;
-    font-size: .79rem;
+    font-size: var(--management-list-body-font);
 }
 
 .wide-table .data-table {
@@ -924,7 +931,7 @@ a:focus-visible {
 .data-table th {
     padding: 10px 14px;
     color: var(--muted);
-    font-size: .68rem;
+    font-size: var(--management-list-header-font);
     font-weight: 700;
     text-align: left;
     text-transform: uppercase;
@@ -964,7 +971,108 @@ a:focus-visible {
     margin-top: 2px;
     overflow-wrap: anywhere;
     color: var(--muted);
-    font-size: .7rem;
+    font-size: var(--management-list-secondary-font);
+}
+
+/*
+ * Every page-level data list follows the readable hierarchy established by
+ * group management. Important declarations are intentional here: Blazor CSS
+ * isolation is loaded after app.css and several legacy pages still carry
+ * smaller component-scoped declarations.
+ */
+.page-content table {
+    font-size: var(--management-list-body-font) !important;
+    line-height: 1.5;
+}
+
+.page-content table thead th,
+.page-content table thead th :where(*) {
+    font-size: var(--management-list-header-font) !important;
+    letter-spacing: 0 !important;
+}
+
+.page-content table tbody td {
+    font-size: var(--management-list-body-font) !important;
+}
+
+.page-content table tbody td :where(*) {
+    font-size: inherit !important;
+    letter-spacing: 0 !important;
+}
+
+.page-content table tbody td :where(strong, b) {
+    font-size: var(--management-list-primary-font) !important;
+}
+
+.page-content table tbody td :where(
+    small,
+    code,
+    time,
+    em,
+    [class*="badge"],
+    [class*="pill"],
+    [class*="chip"],
+    [class*="muted"],
+    [class*="date"],
+    [class*="meta"],
+    [class*="hint"],
+    [class*="numeric"],
+    [class*="limit"],
+    [class*="usage"],
+    [class*="quota"],
+    [class*="capacity"],
+    [class*="count"]
+) {
+    font-size: var(--management-list-secondary-font) !important;
+}
+
+.page-content table tbody td :where(
+    [class*="badge"],
+    [class*="pill"],
+    [class*="chip"],
+    [class*="muted"],
+    [class*="date"],
+    [class*="meta"],
+    [class*="hint"],
+    [class*="numeric"],
+    [class*="limit"],
+    [class*="usage"],
+    [class*="quota"],
+    [class*="capacity"],
+    [class*="count"]
+) :where(*) {
+    font-size: inherit !important;
+}
+
+.page-content table tbody td :where(button, a) {
+    font-size: var(--management-list-action-font) !important;
+}
+
+.page-content table tbody td :where(input, select, textarea) {
+    font-size: var(--management-list-control-font) !important;
+}
+
+.page-content :is(
+    [class$="-pagination"],
+    [class*="-pagination "],
+    [class$="-pager"],
+    [class*="-pager "],
+    .table-footer,
+    .pager-summary
+) {
+    font-size: var(--management-list-pagination-font) !important;
+}
+
+.page-content :is(
+    [class$="-pagination"],
+    [class*="-pagination "],
+    [class$="-pager"],
+    [class*="-pager "],
+    .table-footer,
+    .pager-summary
+) :where(*) {
+    font-size: inherit !important;
+    letter-spacing: 0 !important;
 }
 
 .numeric-cell {
@@ -1509,59 +1617,6 @@ body:has(.native-account-backdrop) {
     border-radius: 7px;
     box-shadow: 0 24px 60px rgba(16, 23, 20, .2);
     pointer-events: auto;
-}
-
-.compliance-backdrop {
-    z-index: 120;
-}
-
-.compliance-dialog {
-    max-width: 900px;
-}
-
-.legal-document-content {
-    max-height: min(48vh, 560px);
-    margin: 0 0 18px;
-    padding: 16px 18px;
-    overflow: auto;
-    color: var(--ink);
-    background: var(--surface-soft);
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    font-size: .8rem;
-    line-height: 1.7;
-}
-
-.legal-document-content h1,
-.legal-document-content h2,
-.legal-document-content h3 {
-    margin: 0 0 10px;
-    color: var(--ink);
-    line-height: 1.35;
-}
-
-.legal-document-content h1 { font-size: 1.05rem; }
-.legal-document-content h2 { margin-top: 18px; font-size: .92rem; }
-.legal-document-content h3 { margin-top: 14px; font-size: .84rem; }
-
-.legal-document-content p,
-.legal-document-content ul,
-.legal-document-content ol {
-    margin: 0 0 10px;
-}
-
-.legal-document-content li + li { margin-top: 4px; }
-
-.compliance-phrase {
-    margin-bottom: 7px;
-    padding: 9px 11px;
-    color: #285d49;
-    background: #edf7f2;
-    border: 1px solid #c4e4d5;
-    border-radius: 4px;
-    font-size: .78rem;
-    font-weight: 650;
-    overflow-wrap: anywhere;
 }
 
 .modal-header,
@@ -2581,7 +2636,6 @@ html[data-theme="dark"] .search-box,
 html[data-theme="dark"] .json-editor,
 html[data-theme="dark"] .json-readonly,
 html[data-theme="dark"] .model-sync-summary,
-html[data-theme="dark"] .legal-document-content,
 html[data-theme="dark"] .segmented-control {
     color: var(--ink);
     background: var(--surface-soft);
@@ -3013,8 +3067,7 @@ html[data-theme="dark"] .result-pill.warning,
 html[data-theme="dark"] .key-state.warning,
 html[data-theme="dark"] .keyword-notice.warning,
 html[data-theme="dark"] .key-status-list p,
-html[data-theme="dark"] .delete-preview p,
-html[data-theme="dark"] .version-badge.has-update {
+html[data-theme="dark"] .delete-preview p {
     color: #fcd34d;
     background: rgba(180, 83, 9, .24);
     border-color: rgba(245, 158, 11, .34);
@@ -3078,7 +3131,6 @@ html[data-theme="dark"] .metric-icon.blue,
 html[data-theme="dark"] .metric-icon.amber,
 html[data-theme="dark"] .metric-icon.red,
 html[data-theme="dark"] .error-state .state-icon,
-html[data-theme="dark"] .compliance-phrase,
 html[data-theme="dark"] .oauth-result,
 html[data-theme="dark"] .oauth-callback-band,
 html[data-theme="dark"] .oauth-segments,

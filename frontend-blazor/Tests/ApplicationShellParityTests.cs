@@ -32,18 +32,32 @@ public sealed class ApplicationShellParityTests
         var dashboard = menu.IndexOf("href=\"/admin/dashboard\"", StringComparison.Ordinal);
         var ops = menu.IndexOf("href=\"/admin/ops\"", StringComparison.Ordinal);
         var users = menu.IndexOf("href=\"/admin/users\"", StringComparison.Ordinal);
+        var riskControl = menu.IndexOf("href=\"/admin/risk-control\"", StringComparison.Ordinal);
+        var promptUpgrade = menu.IndexOf("href=\"/admin/prompt-audit\"", StringComparison.Ordinal);
         var groups = menu.IndexOf("href=\"/admin/groups\"", StringComparison.Ordinal);
         var accounts = menu.IndexOf("href=\"/admin/accounts\"", StringComparison.Ordinal);
         var settings = menu.IndexOf("href=\"/admin/settings\"", StringComparison.Ordinal);
 
-        Assert.True(dashboard >= 0 && dashboard < ops && ops < users && users < groups && groups < accounts && accounts < settings);
-        Assert.Contains("安全审计", menu, StringComparison.Ordinal);
+        Assert.True(dashboard >= 0 && dashboard < ops && ops < users && users < riskControl && riskControl < promptUpgrade && promptUpgrade < groups && groups < accounts && accounts < settings);
+        Assert.Contains("内容审核", menu, StringComparison.Ordinal);
+        Assert.Contains("提示词审计", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("安全审计", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("nav-group-button", menu, StringComparison.Ordinal);
         Assert.Contains("我的账户", menu, StringComparison.Ordinal);
-        Assert.Contains("扩展管理", menu, StringComparison.Ordinal);
-        Assert.Contains("官方 OAuth", menu, StringComparison.Ordinal);
         Assert.Contains("账号管理", menu, StringComparison.Ordinal);
-        Assert.Contains("GetSystemVersionAsync", menu, StringComparison.Ordinal);
-        Assert.Contains("CheckSystemUpdatesAsync", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetSystemVersionAsync", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("CheckSystemUpdatesAsync", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("version-badge", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("v0.1.179", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("扩展管理", menu, StringComparison.Ordinal);
+        foreach (var misplacedRoute in new[]
+        {
+            "/provider-oauth", "/admin/models", "/admin/user-attributes", "/admin/backup",
+            "/admin/data-management", "/admin/error-passthrough", "/admin/tls-fingerprints"
+        })
+        {
+            Assert.DoesNotContain($"href=\"{misplacedRoute}\"", menu, StringComparison.OrdinalIgnoreCase);
+        }
         foreach (var hiddenLabel in new[] { "渠道管理", "上游账号", "兑换码", "优惠码", "邀请返利" })
         {
             Assert.DoesNotContain(hiddenLabel, menu, StringComparison.Ordinal);
@@ -60,6 +74,48 @@ public sealed class ApplicationShellParityTests
         Assert.DoesNotContain("/purchase", menu, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("/orders", menu, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("支付", menu, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AdminPersonalNavigationMatchesOfficialThreeEntryMenu()
+    {
+        var menu = ReadSource("Layout", "NavMenu.razor");
+        var sectionStart = menu.IndexOf("<div class=\"sidebar-section personal-section\">", StringComparison.Ordinal);
+        var sectionEnd = menu.IndexOf("<div class=\"sidebar-section user-section\">", sectionStart, StringComparison.Ordinal);
+
+        Assert.True(sectionStart >= 0 && sectionEnd > sectionStart);
+        var personalSection = menu[sectionStart..sectionEnd];
+
+        Assert.Contains("href=\"/api-keys\"", personalSection, StringComparison.Ordinal);
+        Assert.Contains("href=\"/usage\"", personalSection, StringComparison.Ordinal);
+        Assert.Contains("href=\"/account\"", personalSection, StringComparison.Ordinal);
+        Assert.Equal(3, personalSection.Split("<NavLink ", StringSplitOptions.None).Length - 1);
+
+        foreach (var extraEntry in new[] { "批量生图", "可用渠道", "渠道状态", "我的订阅" })
+        {
+            Assert.DoesNotContain(extraEntry, personalSection, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void ExtensionCapabilitiesStayWithTheirOfficialOwningPages()
+    {
+        var menu = ReadSource("Layout", "NavMenu.razor");
+        var accounts = ReadSource("Pages", "Providers.razor");
+        var users = ReadSource("Pages", "Users.razor");
+        var settings = ReadSource("Pages", "AdminSettings.razor");
+        var createAccount = ReadSource("Components", "NativeAccountCreateModal.razor");
+
+        Assert.DoesNotContain("扩展管理", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"/provider-oauth\"", menu, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("href=\"/provider-oauth\"", accounts, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("错误透传规则", accounts, StringComparison.Ordinal);
+        Assert.Contains("TLS 指纹模板", accounts, StringComparison.Ordinal);
+        Assert.Contains("OpenAttributesConfig", users, StringComparison.Ordinal);
+        Assert.Contains("href=\"/admin/data-management\"", settings, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("href=\"/admin/backups\"", settings, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("GitHub Copilot", createAccount, StringComparison.Ordinal);
+        Assert.Contains("AccountModelRestrictionEditor", createAccount, StringComparison.Ordinal);
     }
 
     [Fact]

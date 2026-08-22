@@ -20,6 +20,8 @@ func TestAccountFromServiceShallow_RedactsSensitiveCredentials(t *testing.T) {
 			"refresh_token": "rt-secret",
 			"id_token":      "id-secret",
 			"api_key":       "sk-secret",
+			"github_token":  "gh-secret",
+			"billing_pat":   "pat-secret",
 			"base_url":      "https://api.example.com",
 			"model_mapping": map[string]any{"foo": "bar"},
 		},
@@ -33,6 +35,8 @@ func TestAccountFromServiceShallow_RedactsSensitiveCredentials(t *testing.T) {
 	require.NotContains(t, got.Credentials, "refresh_token")
 	require.NotContains(t, got.Credentials, "id_token")
 	require.NotContains(t, got.Credentials, "api_key")
+	require.NotContains(t, got.Credentials, "github_token")
+	require.NotContains(t, got.Credentials, "billing_pat")
 	// 非敏感键保留
 	require.Equal(t, "https://api.example.com", got.Credentials["base_url"])
 	require.Equal(t, map[string]any{"foo": "bar"}, got.Credentials["model_mapping"])
@@ -42,6 +46,8 @@ func TestAccountFromServiceShallow_RedactsSensitiveCredentials(t *testing.T) {
 	require.True(t, got.CredentialsStatus["has_refresh_token"])
 	require.True(t, got.CredentialsStatus["has_id_token"])
 	require.True(t, got.CredentialsStatus["has_api_key"])
+	require.True(t, got.CredentialsStatus["has_github_token"])
+	require.True(t, got.CredentialsStatus["has_billing_pat"])
 
 	// JSON 序列化校验：响应体里不会出现敏感子串
 	raw, err := json.Marshal(got)
@@ -50,9 +56,13 @@ func TestAccountFromServiceShallow_RedactsSensitiveCredentials(t *testing.T) {
 	require.NotContains(t, string(raw), "at-secret")
 	require.NotContains(t, string(raw), "sk-secret")
 	require.NotContains(t, string(raw), "id-secret")
+	require.NotContains(t, string(raw), "gh-secret")
+	require.NotContains(t, string(raw), "pat-secret")
 	// 状态标识应序列化进 JSON
 	require.Contains(t, string(raw), "credentials_status")
 	require.Contains(t, string(raw), "has_refresh_token")
+	require.Contains(t, string(raw), "has_github_token")
+	require.Contains(t, string(raw), "has_billing_pat")
 
 	// 原始 service.Account 不应被改动
 	require.Equal(t, "rt-secret", src.Credentials["refresh_token"])

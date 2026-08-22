@@ -65,7 +65,7 @@ func TestHandleOpenAIUpstreamTransportError_PersistentEvictsAndFailsOver(t *test
 
 	before := time.Now()
 	retErr := svc.handleOpenAIUpstreamTransportError(context.Background(), c, account,
-		errors.New(`Post "https://chatgpt.com/backend-api/codex/responses": socks connect tcp 85.255.176.68:12324->chatgpt.com:443: username/password authentication failed`), false)
+		errors.New(`Post "https://chatgpt.com/backend-api/codex/responses": socks connect tcp 192.0.2.10:12324->chatgpt.com:443: username/password authentication failed`), false)
 	after := time.Now()
 
 	// Failover error (handler will switch accounts), not a direct response.

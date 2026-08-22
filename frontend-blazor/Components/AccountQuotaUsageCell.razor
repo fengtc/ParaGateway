@@ -1,10 +1,59 @@
 @inject ApiClient Api
+@inject IJSRuntime JS
 
 <div class="account-quota-cell" data-platform="@Account.Platform">
-    @if (IsCNQuotaAccount)
+    @if (IsOfficialUsageAccount)
     {
-        <button type="button" class="quota-query" disabled="@loading" title="查询上游 5 小时和每周额度" @onclick="QueryCNQuotaAsync">
-            <Icon Name="refresh" Size="13" /> @(loading ? "查询中" : "查询额度")
+        @if (UsageLoading && CurrentUsage is null)
+        {
+            <div class="quota-loading" aria-label="正在加载用量窗口"><span></span><span></span></div>
+        }
+        else
+        {
+            @foreach (var item in CurrentWindows)
+            {
+                <div class="quota-window" title="@item.Title">
+                    <small class="quota-label @item.Tone">@item.Label</small>
+                    <i><em class="@PercentTone(item.Window.Utilization) @item.Tone" style="width:@PercentWidth(item.Window.Utilization)"></em></i>
+                    <b>@item.Window.Utilization.ToString("0.#")%</b>
+                    <small class="quota-reset" title="@item.Window.ResetsAt?.ToString("O")">@FormatReset(item.Window)</small>
+                </div>
+                @if (item.Window.WindowStats is { } stats)
+                {
+                    <div class="quota-stats" aria-label="@item.Label 窗口统计">
+                        <span>@stats.Requests req</span>
+                        <span>@FormatCompact(stats.Tokens)</span>
+                        <span>A $@stats.StandardCost.ToString("0.##")</span>
+                        <span>U $@stats.UserCost.ToString("0.##")</span>
+                    </div>
+                }
+            }
+
+            @if (!CurrentWindows.Any())
+            {
+                <span class="quota-unavailable">-</span>
+            }
+
+            <div class="quota-actions">
+                <button type="button" disabled="@actionLoading" title="主动查询上游最新用量" @onclick="QueryOfficialUsageAsync">
+                    <Icon Name="refresh" Size="12" /> @(usageQueryLoading ? "查询中" : "查询")
+                </button>
+                @if (IsOpenAIOAuth)
+                {
+                    <button type="button" disabled="@actionLoading" title="查询可用的 OpenAI 限流重置次数" @onclick="QueryOpenAIQuotaCountAsync">
+                        <Icon Name="refresh" Size="12" /> @(quotaCountLoading ? "查询中" : ResetCountLabel)
+                    </button>
+                    <button type="button" class="reset-action" disabled="@(actionLoading || !CanResetOpenAIQuota)" title="@ResetButtonTitle" @onclick="ResetOpenAIQuotaAsync">
+                        <Icon Name="refresh" Size="12" /> @(quotaResetting ? "重置中" : "重置")
+                    </button>
+                }
+            </div>
+        }
+    }
+    else if (IsCNQuotaAccount)
+    {
+        <button type="button" class="quota-query" disabled="@actionLoading" title="查询上游 5 小时和每周额度" @onclick="QueryCNQuotaAsync">
+            <Icon Name="refresh" Size="13" /> @(actionLoading ? "查询中" : "查询额度")
         </button>
         @foreach (var tier in CurrentCNTiers)
         {
@@ -13,8 +62,8 @@
     }
     else if (IsCNBalanceAccount)
     {
-        <button type="button" class="quota-query" disabled="@loading" title="查询上游账户余额" @onclick="QueryCNBalanceAsync">
-            <Icon Name="refresh" Size="13" /> @(loading ? "查询中" : "查询余额")
+        <button type="button" class="quota-query" disabled="@actionLoading" title="查询上游账户余额" @onclick="QueryCNBalanceAsync">
+            <Icon Name="refresh" Size="13" /> @(actionLoading ? "查询中" : "查询余额")
         </button>
         @if (CurrentBalances.Count > 0)
         {
@@ -37,8 +86,8 @@
         }
         @if (Account.OllamaCloudUsage.Configured)
         {
-            <button type="button" class="quota-query" disabled="@loading" title="主动查询 Ollama Cloud 用量" @onclick="RefreshOllamaAsync">
-                <Icon Name="refresh" Size="13" /> @(loading ? "查询中" : "主动查询")
+            <button type="button" class="quota-query" disabled="@actionLoading" title="主动查询 Ollama Cloud 用量" @onclick="RefreshOllamaAsync">
+                <Icon Name="refresh" Size="13" /> @(actionLoading ? "查询中" : "主动查询")
             </button>
         }
     }
@@ -53,25 +102,157 @@
         <span class="quota-unavailable">-</span>
     }
 
-    @if (!string.IsNullOrWhiteSpace(error))
+    @if (!string.IsNullOrWhiteSpace(CurrentError))
     {
-        <small class="quota-error" title="@error">@Truncate(error)</small>
+        <small class="quota-error" title="@CurrentError">@Truncate(CurrentError)</small>
+    }
+    else if (!string.IsNullOrWhiteSpace(feedback))
+    {
+        <small class="quota-feedback">@feedback</small>
     }
 </div>
 
 @code {
     [Parameter, EditorRequired] public AccountDto Account { get; set; } = new();
+    [Parameter] public AccountUsageInfoDto? Usage { get; set; }
+    [Parameter] public bool UsageLoading { get; set; }
+    [Parameter] public string? UsageError { get; set; }
+    [Parameter] public EventCallback<AccountUsageInfoDto> OnUsageChanged { get; set; }
+    [Parameter] public EventCallback OnAccountChanged { get; set; }
 
     private CNProviderQuotaProbeResultDto? quota;
     private CNProviderBalanceResultDto? balance;
-    private bool loading;
-    private string? error;
+    private AccountUsageInfoDto? localUsage;
+    private OpenAIQuotaUsageDto? openAIQuota;
+    private bool actionLoading, usageQueryLoading, quotaCountLoading, quotaResetting, resetCountLoaded;
+    private string? localError, feedback, boundAccountId;
 
+    protected override void OnParametersSet()
+    {
+        if (!string.Equals(boundAccountId, Account.Id, StringComparison.Ordinal))
+        {
+            boundAccountId = Account.Id;
+            localUsage = Usage;
+            openAIQuota = null;
+            resetCountLoaded = TryReadCachedResetCount(out _);
+            localError = null;
+            feedback = null;
+            return;
+        }
+
+        if (!usageQueryLoading) localUsage = Usage;
+        if (openAIQuota is null) resetCountLoaded = TryReadCachedResetCount(out _);
+    }
+
+    private AccountUsageInfoDto? CurrentUsage => localUsage ?? Usage;
+    private string? CurrentError => localError ?? UsageError ?? (string.IsNullOrWhiteSpace(CurrentUsage?.Error) ? null : CurrentUsage.Error);
     private string AccountMode => ReadCredential("account_mode");
+    private string OAuthProfile => ReadCredential("oauth_profile");
+    private bool IsCopilot => string.Equals(OAuthProfile, "github_copilot", StringComparison.OrdinalIgnoreCase);
+    private bool IsOpenAIOAuth => Account.Platform == "openai" && Account.Type == "oauth" && !IsCopilot;
+    private bool IsOfficialUsageAccount => Account.Platform switch
+    {
+        "anthropic" => Account.Type is "oauth" or "setup-token",
+        "openai" => IsOpenAIOAuth,
+        "gemini" => true,
+        "antigravity" or "grok" => Account.Type == "oauth",
+        _ => false
+    };
     private bool IsCNQuotaAccount => (Account.Platform is "kimi" or "zhipu") && AccountMode == "coding";
     private bool IsCNBalanceAccount => (Account.Platform is "kimi" or "deepseek") && AccountMode != "coding";
     private bool IsZhipuPayg => Account.Platform == "zhipu" && AccountMode != "coding";
     private bool HasLegacyQuota => Account.QuotaLimit is > 0 || Account.QuotaDailyLimit is > 0 || Account.QuotaWeeklyLimit is > 0;
+    private bool CanResetOpenAIQuota => !Account.ParentAccountId.HasValue && ResetCount > 0;
+    private int ResetCount => openAIQuota?.RateLimitResetCredits?.AvailableCount ?? (TryReadCachedResetCount(out var count) ? count : 0);
+    private string ResetCountLabel => resetCountLoaded ? $"次数 {ResetCount}" : "次数";
+    private string ResetButtonTitle => Account.ParentAccountId.HasValue ? "影子账号不能重置，请在主账号操作" : !resetCountLoaded ? "请先查询可用次数" : ResetCount <= 0 ? "没有可用的重置次数" : $"消耗一次额度重置机会，当前可用 {ResetCount} 次";
+
+    private List<UsageWindowRow> CurrentWindows
+    {
+        get
+        {
+            var result = new List<UsageWindowRow>();
+            var usage = CurrentUsage;
+            if (usage is null) return result;
+            AddWindow(result, "5h", usage.FiveHour, "indigo");
+            AddWindow(result, "7d", usage.SevenDay, "emerald");
+            AddWindow(result, "7d S", usage.SevenDaySonnet, "purple");
+            AddWindow(result, "7d F", usage.SevenDayFable, "amber");
+            AddWindow(result, "30d", usage.ThirtyDay, "indigo");
+            AddWindow(result, "共享/日", usage.GeminiSharedDaily, "emerald");
+            AddWindow(result, "Pro/日", usage.GeminiProDaily, "indigo");
+            AddWindow(result, "Flash/日", usage.GeminiFlashDaily, "amber");
+            AddWindow(result, "共享/分", usage.GeminiSharedMinute, "emerald");
+            AddWindow(result, "Pro/分", usage.GeminiProMinute, "indigo");
+            AddWindow(result, "Flash/分", usage.GeminiFlashMinute, "amber");
+            foreach (var pair in usage.AntigravityQuota.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase).Take(6))
+            {
+                result.Add(new UsageWindowRow(ShortModelName(pair.Key), pair.Key, new AccountUsageProgressDto
+                {
+                    Utilization = pair.Value.Utilization,
+                    ResetsAt = DateTimeOffset.TryParse(pair.Value.ResetTime, out var reset) ? reset : null
+                }, "indigo"));
+            }
+            return result;
+        }
+    }
+
+    private static void AddWindow(List<UsageWindowRow> rows, string label, AccountUsageProgressDto? window, string tone)
+    {
+        if (window is not null) rows.Add(new UsageWindowRow(label, label, window, tone));
+    }
+
+    private async Task QueryOfficialUsageAsync()
+    {
+        if (actionLoading) return;
+        actionLoading = usageQueryLoading = true;
+        localError = null;
+        feedback = null;
+        try
+        {
+            localUsage = await Api.GetAccountUsageAsync(Account.Id, true, "active");
+            await OnUsageChanged.InvokeAsync(localUsage);
+        }
+        catch (ApiException ex) { localError = ex.Message; }
+        finally { actionLoading = usageQueryLoading = false; }
+    }
+
+    private async Task QueryOpenAIQuotaCountAsync()
+    {
+        if (actionLoading) return;
+        actionLoading = quotaCountLoading = true;
+        localError = null;
+        feedback = null;
+        try
+        {
+            openAIQuota = await Api.RefreshOpenAIQuotaAsync(Account.Id);
+            resetCountLoaded = true;
+            if (!openAIQuota.CachePersisted) feedback = "次数已查询，但缓存未更新";
+        }
+        catch (ApiException ex) { localError = ex.Message; }
+        finally { actionLoading = quotaCountLoading = false; }
+    }
+
+    private async Task ResetOpenAIQuotaAsync()
+    {
+        if (actionLoading || !CanResetOpenAIQuota) return;
+        if (!await JS.InvokeAsync<bool>("confirm", $"确认消耗 1 次额度，重置账号“{Account.Name}”的 OpenAI 用量窗口？")) return;
+        actionLoading = quotaResetting = true;
+        localError = null;
+        feedback = null;
+        try
+        {
+            var result = await Api.ResetOpenAIQuotaAsync(Account.Id);
+            openAIQuota = result.CacheRefreshed ? result.Quota : null;
+            resetCountLoaded = result.CacheRefreshed;
+            feedback = string.IsNullOrWhiteSpace(result.WarningCode)
+                ? $"已重置 {result.WindowsReset} 个用量窗口"
+                : "额度已消耗，账号状态或次数缓存需要刷新";
+            await OnAccountChanged.InvokeAsync();
+        }
+        catch (ApiException ex) { localError = ex.Message; }
+        finally { actionLoading = quotaResetting = false; }
+    }
 
     private List<CNQuotaTierDto> CurrentCNTiers
     {
@@ -140,28 +321,38 @@
         });
     }
 
-    private async Task RefreshOllamaAsync()
-    {
-        await RunAsync(async () => Account.OllamaCloudUsage = await Api.RefreshOllamaCloudUsageAsync(Account.Id));
-    }
+    private async Task RefreshOllamaAsync() => await RunAsync(async () => Account.OllamaCloudUsage = await Api.RefreshOllamaCloudUsageAsync(Account.Id));
 
     private async Task RunAsync(Func<Task> action)
     {
-        if (loading) return;
-        loading = true;
-        error = null;
+        if (actionLoading) return;
+        actionLoading = true;
+        localError = null;
         try { await action(); }
-        catch (ApiException ex) { error = ex.Message; }
-        finally { loading = false; }
+        catch (ApiException ex) { localError = ex.Message; }
+        finally { actionLoading = false; }
+    }
+
+    private bool TryReadCachedResetCount(out int count)
+    {
+        count = 0;
+        if (Account.Extra is null
+            || !Account.Extra.TryGetValue("codex_reset_credit_snapshot", out var snapshot)
+            || snapshot.ValueKind != JsonValueKind.Object
+            || !snapshot.TryGetProperty("available_count", out var value)
+            || value.ValueKind != JsonValueKind.Number
+            || !value.TryGetInt32(out count)) return false;
+        count = Math.Max(0, count);
+        return true;
     }
 
     private RenderFragment PercentWindow(string label, double percent, string? resetAt) => builder =>
     {
         var safe = Math.Clamp(percent, 0, 100);
-        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "quota-window");
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "quota-window legacy");
         builder.OpenElement(2, "small"); builder.AddContent(3, label); builder.CloseElement();
-        builder.OpenElement(4, "b"); builder.AddContent(5, $"{percent:0.#}%"); builder.CloseElement();
-        builder.OpenElement(6, "i"); builder.OpenElement(7, "em"); builder.AddAttribute(8, "class", PercentTone(percent)); builder.AddAttribute(9, "style", $"width:{safe:0.#}%"); builder.CloseElement(); builder.CloseElement();
+        builder.OpenElement(4, "i"); builder.OpenElement(5, "em"); builder.AddAttribute(6, "class", PercentTone(percent)); builder.AddAttribute(7, "style", $"width:{safe:0.#}%"); builder.CloseElement(); builder.CloseElement();
+        builder.OpenElement(8, "b"); builder.AddContent(9, $"{percent:0.#}%"); builder.CloseElement();
         if (!string.IsNullOrWhiteSpace(resetAt)) { builder.OpenElement(10, "small"); builder.AddAttribute(11, "title", resetAt); builder.AddContent(12, FormatReset(resetAt)); builder.CloseElement(); }
         builder.CloseElement();
     };
@@ -170,10 +361,10 @@
     {
         if (limit is not > 0) return;
         var percent = Math.Clamp((used ?? 0) / limit.Value * 100, 0, 100);
-        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "quota-window");
+        builder.OpenElement(0, "div"); builder.AddAttribute(1, "class", "quota-window legacy");
         builder.OpenElement(2, "small"); builder.AddContent(3, label); builder.CloseElement();
-        builder.OpenElement(4, "b"); builder.AddContent(5, $"{used.GetValueOrDefault():0.##}/{limit.Value:0.##}"); builder.CloseElement();
-        builder.OpenElement(6, "i"); builder.OpenElement(7, "em"); builder.AddAttribute(8, "style", $"width:{percent:0.#}%"); builder.CloseElement(); builder.CloseElement();
+        builder.OpenElement(4, "i"); builder.OpenElement(5, "em"); builder.AddAttribute(6, "style", $"width:{percent:0.#}%"); builder.CloseElement(); builder.CloseElement();
+        builder.OpenElement(7, "b"); builder.AddContent(8, $"{used.GetValueOrDefault():0.##}/{limit.Value:0.##}"); builder.CloseElement();
         builder.CloseElement();
     };
 
@@ -189,8 +380,32 @@
         && value.ValueKind == JsonValueKind.String ? value.GetString() ?? string.Empty : string.Empty;
     private static string FormatBalance(CNProviderBalanceEntryDto value) => $"{(string.IsNullOrWhiteSpace(value.Currency) ? "¥" : value.Currency)} {(value.Balance >= 100 ? value.Balance.ToString("0") : value.Balance.ToString("0.00"))}";
     private static string PercentTone(double value) => value >= 90 ? "danger" : value >= 75 ? "warning" : "healthy";
+    private static string PercentWidth(double value) => $"{Math.Clamp(value, 0, 100):0.#}%";
     private static string Truncate(string value) => value.Length <= 72 ? value : value[..72] + "...";
+    private static string ShortModelName(string value) => value.Length <= 12 ? value : value[..11] + "…";
+    private static string FormatCompact(long value) => value switch
+    {
+        >= 1_000_000_000 => $"{value / 1_000_000_000d:0.#}B",
+        >= 1_000_000 => $"{value / 1_000_000d:0.#}M",
+        >= 1_000 => $"{value / 1_000d:0.#}K",
+        _ => value.ToString()
+    };
+    private static string FormatReset(AccountUsageProgressDto window)
+    {
+        if (window.ResetsAt.HasValue)
+        {
+            var remaining = window.ResetsAt.Value - DateTimeOffset.Now;
+            if (remaining <= TimeSpan.Zero) return "现在";
+            if (remaining.TotalDays >= 1) return $"{Math.Ceiling(remaining.TotalDays):0}天后";
+            if (remaining.TotalHours >= 1) return $"{Math.Ceiling(remaining.TotalHours):0}小时后";
+            return $"{Math.Max(1, Math.Ceiling(remaining.TotalMinutes)):0}分钟后";
+        }
+        if (window.RemainingSeconds > 0) return window.RemainingSeconds >= 3600 ? $"{Math.Ceiling(window.RemainingSeconds / 3600d):0}小时后" : $"{Math.Ceiling(window.RemainingSeconds / 60d):0}分钟后";
+        return window.Utilization <= 0 ? "现在" : "-";
+    }
     private static string FormatReset(string value) => DateTimeOffset.TryParse(value, out var reset)
         ? reset.ToLocalTime().ToString("MM-dd HH:mm")
         : value;
+
+    private sealed record UsageWindowRow(string Label, string Title, AccountUsageProgressDto Window, string Tone);
 }

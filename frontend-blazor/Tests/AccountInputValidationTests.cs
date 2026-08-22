@@ -27,6 +27,43 @@ public sealed class AccountInputValidationTests
             && result.MemberNames.Contains(nameof(AccountInput.BaseUrl)));
     }
 
+    [Fact]
+    public void AdaptiveDeepSeekRequiresAllNativeProtocolBaseUrls()
+    {
+        var input = CreateAdaptiveAccount("deepseek");
+
+        var missing = Validate(input);
+
+        Assert.Contains(missing, result => result.MemberNames.Contains(nameof(AccountInput.AdaptiveChatCompletionsBaseUrl)));
+        Assert.Contains(missing, result => result.MemberNames.Contains(nameof(AccountInput.AdaptiveAnthropicBaseUrl)));
+        Assert.Contains(missing, result => result.MemberNames.Contains(nameof(AccountInput.AdaptiveResponsesBaseUrl)));
+
+        input.AdaptiveChatCompletionsBaseUrl = "https://api.deepseek.com";
+        input.AdaptiveAnthropicBaseUrl = "https://api.deepseek.com/anthropic";
+        input.AdaptiveResponsesBaseUrl = "https://api.deepseek.com/responses";
+
+        Assert.Empty(Validate(input));
+    }
+
+    [Fact]
+    public void AdaptiveKimiDoesNotRequireResponsesBaseUrl()
+    {
+        var input = CreateAdaptiveAccount("kimi");
+        input.AdaptiveChatCompletionsBaseUrl = "https://api.moonshot.cn/v1";
+        input.AdaptiveAnthropicBaseUrl = "https://api.moonshot.cn/anthropic";
+
+        Assert.Empty(Validate(input));
+    }
+
+    private static AccountInput CreateAdaptiveAccount(string platform) => new()
+    {
+        Name = "adaptive-cn",
+        Platform = platform,
+        Type = "apikey",
+        ApiKey = "sk-test",
+        ApiProtocol = "adaptive"
+    };
+
     private static AccountInput CreateEditingAccount() => new()
     {
         IsEditing = true,

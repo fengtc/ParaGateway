@@ -50,7 +50,7 @@
                     </div>
                 }
             </div>
-            <button type="button" class="button primary" data-tour="keys-create-btn" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 创建密钥</button>
+            <button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 创建密钥</button>
         </div>
     </div>
 
@@ -202,8 +202,8 @@
             <div class="key-editor-section">
                 <h3>基本信息</h3>
                 <div class="form-grid">
-                    <div class="form-field full"><label for="key-name">名称</label><InputText id="key-name" @bind-Value="form.Name" @oninput="OnNameInput" placeholder="我的 API 密钥" data-tour="key-form-name" /><ValidationMessage For="() => form.Name" /></div>
-                    <div class="form-field full"><label for="key-group">分组</label><InputSelect id="key-group" TValue="long?" @bind-Value="form.GroupId" data-tour="key-form-group"><option value="">选择分组</option>@foreach (var group in groups) { <option value="@group.Id">@GroupOptionLabel(group)</option> }</InputSelect><ValidationMessage For="() => form.GroupId" /></div>
+                    <div class="form-field full"><label for="key-name">名称</label><InputText id="key-name" @bind-Value="form.Name" @oninput="OnNameInput" placeholder="我的 API 密钥" /><ValidationMessage For="() => form.Name" /></div>
+                    <div class="form-field full"><label for="key-group">分组</label><InputSelect id="key-group" TValue="long?" @bind-Value="form.GroupId"><option value="">选择分组</option>@foreach (var group in groups) { <option value="@group.Id">@GroupOptionLabel(group)</option> }</InputSelect><ValidationMessage For="() => form.GroupId" /></div>
                     @if (editingId is not null)
                     {
                         <div class="form-field full"><label for="key-status">状态</label><InputSelect id="key-status" @bind-Value="form.Status"><option value="active">活跃</option><option value="inactive">已停用</option></InputSelect></div>
@@ -272,7 +272,7 @@
             </div>
         </EditForm>
     </ChildContent>
-    <Footer><button type="button" class="button secondary" disabled="@saving" @onclick="CloseEditor">取消</button><button type="submit" form="key-editor" class="button primary" disabled="@saving" data-tour="key-form-submit">@if (saving) { <span class="spinner light"></span> } @(editingId is null ? "创建" : "更新")</button></Footer>
+    <Footer><button type="button" class="button secondary" disabled="@saving" @onclick="CloseEditor">取消</button><button type="submit" form="key-editor" class="button primary" disabled="@saving">@if (saving) { <span class="spinner light"></span> } @(editingId is null ? "创建" : "更新")</button></Footer>
 </AppModal>
 
 <AppModal Open="@(deleteTarget is not null)" Title="删除密钥" MaxWidth="480px" OnClose="CloseDelete">

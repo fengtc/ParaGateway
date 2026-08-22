@@ -24,7 +24,7 @@ func TestClassifyOpenAITransportError(t *testing.T) {
 		persistent bool
 	}{
 		// Durable — config/credential/routing problems. Retrying same proxy won't help.
-		{"socks5 proxy credential rejected", errors.New(`Post "https://chatgpt.com/backend-api/codex/responses": socks connect tcp 85.255.176.68:12324->chatgpt.com:443: username/password authentication failed`), true},
+		{"socks5 proxy credential rejected", errors.New(`Post "https://chatgpt.com/backend-api/codex/responses": socks connect tcp 192.0.2.10:12324->chatgpt.com:443: username/password authentication failed`), true},
 		{"proxy connection refused", errors.New(`proxyconnect tcp: dial tcp 1.2.3.4:1080: connect: connection refused`), true},
 		{"no route to host", errors.New(`dial tcp 1.2.3.4:443: connect: no route to host`), true},
 		{"dns resolution failure", errors.New(`dial tcp: lookup proxy.example.com: no such host`), true},

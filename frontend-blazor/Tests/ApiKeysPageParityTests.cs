@@ -83,7 +83,7 @@ public sealed class ApiKeysPageParityTests
         Assert.Contains("navigator.clipboard.writeText(text)", script, StringComparison.Ordinal);
         Assert.Contains("document.createElement('textarea')", script, StringComparison.Ordinal);
         Assert.Contains("document.execCommand('copy')", script, StringComparison.Ordinal);
-        Assert.Contains("20260819-clipboard-fallback-a", index, StringComparison.Ordinal);
+        Assert.Contains("js/paragateway.js?v=20260820-account-row-menu-a", index, StringComparison.Ordinal);
     }
 
     [Fact]

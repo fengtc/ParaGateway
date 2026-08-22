@@ -19,6 +19,22 @@ public sealed class NativeAccountCreateModalStyleTests
     }
 
     [Fact]
+    public void CreateAccountSupportsAdaptiveCNProtocolEndpoints()
+    {
+        var markup = Read("Components", "NativeAccountCreateModal.razor");
+
+        Assert.Contains("""<option value="adaptive">""", markup, StringComparison.Ordinal);
+        Assert.Contains("native-cn-chat-base-url", markup, StringComparison.Ordinal);
+        Assert.Contains("native-cn-anthropic-base-url", markup, StringComparison.Ordinal);
+        Assert.Contains("native-cn-responses-base-url", markup, StringComparison.Ordinal);
+        Assert.Contains("EnsureAdaptiveBaseUrls(form, force: true)", markup, StringComparison.Ordinal);
+        Assert.Contains("ValidateAdaptiveBaseUrls()", markup, StringComparison.Ordinal);
+        Assert.Contains("AdaptiveChatCompletionsBaseUrl = form.AdaptiveChatCompletionsBaseUrl.Trim()", markup, StringComparison.Ordinal);
+        Assert.Contains("AdaptiveAnthropicBaseUrl = form.AdaptiveAnthropicBaseUrl.Trim()", markup, StringComparison.Ordinal);
+        Assert.Contains("AdaptiveResponsesBaseUrl = form.AdaptiveResponsesBaseUrl.Trim()", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CreateAccountStylesUseTheSharedThemeAndFormMetrics()
     {
         var styles = Read("Components", "NativeAccountCreateModal.razor.css");

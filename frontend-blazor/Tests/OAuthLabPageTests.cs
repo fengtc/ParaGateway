@@ -17,11 +17,11 @@ public sealed class OAuthLabPageTests
     }
 
     [Fact]
-    public void ProviderPageOnlyShowsOAuthLabEntryWhenTheWorkerEnablesIt()
+    public void ProviderPageDoesNotExposeTheLegacyOAuthLabEntry()
     {
         var markup = File.ReadAllText(FindPage("Providers.razor"));
 
-        Assert.Contains("href=\"/provider-oauth\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"/provider-oauth\"", markup, StringComparison.Ordinal);
     }
 
     private static string FindPage(string pageName)

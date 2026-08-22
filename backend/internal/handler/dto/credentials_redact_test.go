@@ -17,6 +17,8 @@ func TestRedactCredentials_StripsSensitiveKeysAndReportsStatus(t *testing.T) {
 		"refresh_token":                "rt-secret",
 		"access_token":                 "at-secret",
 		"api_key":                      "sk-secret",
+		"github_token":                 "gh-secret",
+		"billing_pat":                  "pat-secret",
 		"wif_client_secret_ciphertext": "encrypted-wif-secret",
 		"aws_secret_access_key":        "aws-secret",
 		"service_account_json":         map[string]any{"private_key": "..."},
@@ -34,6 +36,8 @@ func TestRedactCredentials_StripsSensitiveKeysAndReportsStatus(t *testing.T) {
 	require.NotContains(t, out, "refresh_token")
 	require.NotContains(t, out, "access_token")
 	require.NotContains(t, out, "api_key")
+	require.NotContains(t, out, "github_token")
+	require.NotContains(t, out, "billing_pat")
 	require.NotContains(t, out, "wif_client_secret_ciphertext")
 	require.NotContains(t, out, "aws_secret_access_key")
 	require.NotContains(t, out, "service_account_json")
@@ -48,6 +52,8 @@ func TestRedactCredentials_StripsSensitiveKeysAndReportsStatus(t *testing.T) {
 	require.True(t, status["has_refresh_token"])
 	require.True(t, status["has_access_token"])
 	require.True(t, status["has_api_key"])
+	require.True(t, status["has_github_token"])
+	require.True(t, status["has_billing_pat"])
 	require.True(t, status["has_wif_client_secret_ciphertext"])
 	require.True(t, status["has_aws_secret_access_key"])
 	require.True(t, status["has_service_account_json"])
@@ -87,7 +93,7 @@ func TestRedactCredentials_DoesNotMutateInput(t *testing.T) {
 func TestRedactCredentials_AllKnownSensitiveKeys(t *testing.T) {
 	keys := []string{
 		"access_token", "refresh_token", "id_token",
-		"api_key", "wif_client_secret_ciphertext", "session_key", "cookie",
+		"api_key", "github_token", "billing_pat", "wif_client_secret_ciphertext", "session_key", "cookie",
 		"aws_secret_access_key", "aws_session_token",
 		"service_account_json", "service_account", "private_key",
 		"agent_private_key",

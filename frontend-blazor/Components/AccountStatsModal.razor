@@ -1,0 +1,263 @@
+@using System.Globalization
+@inject ApiClient Api
+
+<AppModal Open="@Open" Title="用量统计" MaxWidth="1180px" OnClose="CloseAsync">
+    <ChildContent>
+        <div class="account-stats-modal" aria-busy="@loading">
+            @if (Account is not null)
+            {
+                <section class="account-stats-identity">
+                    <div class="account-stats-identity-main">
+                        <span class="account-stats-identity-icon"><Icon Name="pulse" Size="21" /></span>
+                        <div>
+                            <strong>@Account.Name</strong>
+                            <span>最近 30 天使用情况</span>
+                        </div>
+                    </div>
+                    <span class="account-stats-status @(Account.Status.Equals("active", StringComparison.OrdinalIgnoreCase) ? "active" : null)">@StatusLabel(Account.Status)</span>
+                </section>
+            }
+
+            @if (loading)
+            {
+                <LoadingState Text="正在载入账号统计" />
+            }
+            else if (!string.IsNullOrWhiteSpace(error))
+            {
+                <div class="account-stats-error">
+                    <Icon Name="alert" Size="21" />
+                    <div><strong>统计载入失败</strong><span>@error</span></div>
+                    <button type="button" class="button secondary small" @onclick="LoadAsync">重新载入</button>
+                </div>
+            }
+            else if (stats is { Summary: { } summary })
+            {
+                <div class="account-stats-primary-grid">
+                    <section class="stats-primary-card cost">
+                        <header><span>30 天总成本</span><i><Icon Name="dollar" Size="17" /></i></header>
+                        <strong>$@FormatCost(summary.TotalCost)</strong>
+                        <small>累计成本 · 用户计费 $@FormatCost(summary.TotalUserCost) · 标准费用 $@FormatCost(summary.TotalStandardCost)</small>
+                    </section>
+                    <section class="stats-primary-card requests">
+                        <header><span>30 天总请求</span><i><Icon Name="zap" Size="17" /></i></header>
+                        <strong>@FormatNumber(summary.TotalRequests)</strong>
+                        <small>累计调用次数</small>
+                    </section>
+                    <section class="stats-primary-card average-cost">
+                        <header><span>日均成本</span><i><Icon Name="calendar" Size="17" /></i></header>
+                        <strong>$@FormatCost(summary.AvgDailyCost)</strong>
+                        <small>基于实际使用 @summary.ActualDaysUsed 天 · 用户计费 $@FormatCost(summary.AvgDailyUserCost)</small>
+                    </section>
+                    <section class="stats-primary-card average-requests">
+                        <header><span>日均请求</span><i><Icon Name="activity" Size="17" /></i></header>
+                        <strong>@FormatNumber(Math.Round(summary.AvgDailyRequests))</strong>
+                        <small>平均每日使用量</small>
+                    </section>
+                </div>
+
+                <div class="account-stats-detail-grid">
+                    <section class="stats-detail-card">
+                        <header><i class="cyan"><Icon Name="clock" Size="16" /></i><h3>今日概览</h3></header>
+                        <dl>
+                            <div><dt>账号计费</dt><dd>$@FormatCost(summary.Today?.Cost ?? 0)</dd></div>
+                            <div><dt>用户计费</dt><dd>$@FormatCost(summary.Today?.UserCost ?? 0)</dd></div>
+                            <div><dt>请求数</dt><dd>@FormatNumber(summary.Today?.Requests ?? 0)</dd></div>
+                            <div><dt>Token</dt><dd>@FormatTokens(summary.Today?.Tokens ?? 0)</dd></div>
+                        </dl>
+                    </section>
+                    <section class="stats-detail-card">
+                        <header><i class="orange"><Icon Name="zap" Size="16" /></i><h3>最高成本日</h3></header>
+                        <dl>
+                            <div><dt>日期</dt><dd>@DayLabel(summary.HighestCostDay)</dd></div>
+                            <div><dt>账号计费</dt><dd class="accent-orange">$@FormatCost(summary.HighestCostDay?.Cost ?? 0)</dd></div>
+                            <div><dt>用户计费</dt><dd>$@FormatCost(summary.HighestCostDay?.UserCost ?? 0)</dd></div>
+                            <div><dt>请求数</dt><dd>@FormatNumber(summary.HighestCostDay?.Requests ?? 0)</dd></div>
+                        </dl>
+                    </section>
+                    <section class="stats-detail-card">
+                        <header><i class="indigo"><Icon Name="activity" Size="16" /></i><h3>最高请求日</h3></header>
+                        <dl>
+                            <div><dt>日期</dt><dd>@DayLabel(summary.HighestRequestDay)</dd></div>
+                            <div><dt>请求数</dt><dd class="accent-indigo">@FormatNumber(summary.HighestRequestDay?.Requests ?? 0)</dd></div>
+                            <div><dt>账号计费</dt><dd>$@FormatCost(summary.HighestRequestDay?.Cost ?? 0)</dd></div>
+                            <div><dt>用户计费</dt><dd>$@FormatCost(summary.HighestRequestDay?.UserCost ?? 0)</dd></div>
+                        </dl>
+                    </section>
+                </div>
+
+                <div class="account-stats-detail-grid compact">
+                    <section class="stats-detail-card">
+                        <header><i class="teal"><Icon Name="box" Size="16" /></i><h3>累计 Token</h3></header>
+                        <dl>
+                            <div><dt>总 Token</dt><dd>@FormatTokens(summary.TotalTokens)</dd></div>
+                            <div><dt>日均 Token</dt><dd>@FormatTokens(summary.AvgDailyTokens)</dd></div>
+                        </dl>
+                    </section>
+                    <section class="stats-detail-card">
+                        <header><i class="rose"><Icon Name="zap" Size="16" /></i><h3>性能</h3></header>
+                        <dl>
+                            <div><dt>平均响应时间</dt><dd>@FormatDuration(summary.AvgDurationMs)</dd></div>
+                            <div><dt>活跃天数</dt><dd>@summary.ActualDaysUsed / @summary.Days</dd></div>
+                        </dl>
+                    </section>
+                    <section class="stats-detail-card">
+                        <header><i class="lime"><Icon Name="activity" Size="16" /></i><h3>最近活动</h3></header>
+                        <dl>
+                            <div><dt>今日请求</dt><dd>@FormatNumber(summary.Today?.Requests ?? 0)</dd></div>
+                            <div><dt>今日 Token</dt><dd>@FormatTokens(summary.Today?.Tokens ?? 0)</dd></div>
+                            <div><dt>今日成本</dt><dd>$@FormatCost(summary.Today?.Cost ?? 0)</dd></div>
+                        </dl>
+                    </section>
+                </div>
+
+                <section class="account-stats-trend-panel">
+                    <header><h3>使用趋势</h3><span>账号计费、用户计费与请求数</span></header>
+                    @if (HistoryRows.Count == 0)
+                    {
+                        <div class="account-stats-chart-empty">暂无趋势数据</div>
+                    }
+                    else
+                    {
+                        <DxChart Data="@HistoryRows" Width="100%" Height="270px">
+                            <DxChartLineSeries T="AccountUsageHistoryDto" TArgument="string" TValue="double"
+                                               Name="账号计费 (USD)" ArgumentField="point => point.Label" ValueField="point => point.ActualCost" />
+                            <DxChartLineSeries T="AccountUsageHistoryDto" TArgument="string" TValue="double"
+                                               Name="用户计费 (USD)" ArgumentField="point => point.Label" ValueField="point => point.UserCost" />
+                            <DxChartLineSeries T="AccountUsageHistoryDto" TArgument="string" TValue="long"
+                                               Name="请求数" ArgumentField="point => point.Label" ValueField="point => point.Requests" Axis="RequestAxis" />
+                            <DxChartValueAxis>
+                                <DxChartAxisTitle Text="费用 (USD)" />
+                            </DxChartValueAxis>
+                            <DxChartValueAxis Name="RequestAxis" Alignment="ChartAxisAlignment.Far">
+                                <DxChartAxisTitle Text="请求数" />
+                            </DxChartValueAxis>
+                            <DxChartTooltip Enabled="true" />
+                        </DxChart>
+                    }
+                </section>
+
+                <AccountStatsDistributionPanel Title="模型分布" NameLabel="模型" Items="@ModelItems" ShowAccountCost="true" />
+                <AccountStatsDistributionPanel Title="入站端点分布" NameLabel="端点" Items="@EndpointItems" />
+                <AccountStatsDistributionPanel Title="上游端点分布" NameLabel="端点" Items="@UpstreamEndpointItems" />
+            }
+            else
+            {
+                <div class="account-stats-no-data"><Icon Name="activity" Size="34" /><strong>暂无统计数据</strong></div>
+            }
+        </div>
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseAsync">关闭</button></Footer>
+</AppModal>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public AccountDto? Account { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private AccountUsageStatsDto? stats;
+    private string? error, loadedAccountId;
+    private bool loading, wasOpen;
+    private int loadGeneration;
+
+    private IReadOnlyList<AccountUsageHistoryDto> HistoryRows => stats?.History ?? [];
+    private IReadOnlyList<AccountStatsDistributionItemDto> ModelItems => (stats?.Models ?? [])
+        .Select(item => new AccountStatsDistributionItemDto
+        {
+            Name = item.Model,
+            Requests = item.Requests,
+            TotalTokens = item.TotalTokens,
+            ActualCost = item.ActualCost,
+            AccountCost = item.AccountCost,
+            Cost = item.Cost
+        }).ToList();
+    private IReadOnlyList<AccountStatsDistributionItemDto> EndpointItems => MapEndpoints(stats?.Endpoints);
+    private IReadOnlyList<AccountStatsDistributionItemDto> UpstreamEndpointItems => MapEndpoints(stats?.UpstreamEndpoints);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Open)
+        {
+            wasOpen = false;
+            loadGeneration++;
+            return;
+        }
+
+        if (Account is null) return;
+        if (wasOpen && string.Equals(loadedAccountId, Account.Id, StringComparison.Ordinal)) return;
+
+        wasOpen = true;
+        loadedAccountId = Account.Id;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (Account is null) return;
+        var accountId = Account.Id;
+        var generation = ++loadGeneration;
+        loading = true;
+        error = null;
+        stats = null;
+        try
+        {
+            var result = await Api.GetAccountStatsAsync(accountId, 30);
+            if (generation == loadGeneration) stats = result;
+        }
+        catch (ApiException ex)
+        {
+            if (generation == loadGeneration) error = ex.Message;
+        }
+        finally
+        {
+            if (generation == loadGeneration) loading = false;
+        }
+    }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+
+    private static IReadOnlyList<AccountStatsDistributionItemDto> MapEndpoints(IEnumerable<AccountUsageEndpointStatDto>? source) =>
+        (source ?? []).Select(item => new AccountStatsDistributionItemDto
+        {
+            Name = item.Endpoint,
+            Requests = item.Requests,
+            TotalTokens = item.TotalTokens,
+            ActualCost = item.ActualCost,
+            Cost = item.Cost
+        }).ToList();
+
+    private static string StatusLabel(string value) => value.ToLowerInvariant() switch
+    {
+        "active" => "正常",
+        "error" => "错误",
+        "inactive" => "未启用",
+        "rate_limited" => "速率限制",
+        _ => value
+    };
+
+    private static string DayLabel(AccountUsageDaySummaryDto? value) => value is null
+        ? "-"
+        : !string.IsNullOrWhiteSpace(value.Label) ? value.Label : !string.IsNullOrWhiteSpace(value.Date) ? value.Date : "-";
+
+    private static string FormatNumber(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+    private static string FormatNumber(double value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private static string FormatTokens(double value) => value switch
+    {
+        >= 1_000_000_000 => $"{value / 1_000_000_000d:0.##}B",
+        >= 1_000_000 => $"{value / 1_000_000d:0.##}M",
+        >= 1_000 => $"{value / 1_000d:0.##}K",
+        _ => value.ToString("N0", CultureInfo.InvariantCulture)
+    };
+
+    private static string FormatCost(double value) => value switch
+    {
+        >= 1000 => $"{value / 1000:0.00}K",
+        >= 1 => value.ToString("0.00", CultureInfo.InvariantCulture),
+        >= 0.01 => value.ToString("0.000", CultureInfo.InvariantCulture),
+        _ => value.ToString("0.0000", CultureInfo.InvariantCulture)
+    };
+
+    private static string FormatDuration(double milliseconds) => milliseconds >= 1000
+        ? $"{milliseconds / 1000:0.00}s"
+        : $"{Math.Round(milliseconds):0}ms";
+}

@@ -10,7 +10,7 @@
 <div class="accounts-page">
     <section class="accounts-toolbar" aria-label="账号筛选与操作">
         <div class="account-filter-row">
-            <div class="account-search">
+            <div class="search-box account-search">
                 <Icon Name="search" Size="17" />
                 <input value="@search" @oninput="SearchChanged" placeholder="搜索账号名称..." aria-label="搜索账号" />
             </div>
@@ -90,7 +90,6 @@
                         <label class="menu-toggle-row"><input type="checkbox" @bind="includeProxiesOnExport" /><span>导出关联代理</span></label>
                         <div class="menu-divider"></div>
                         <p class="menu-section-title">工具</p>
-                        <a class="tool-menu-row" href="/provider-oauth"><Icon Name="shield" Size="16" /><span>官方 OAuth 接入</span></a>
                         <a class="tool-menu-row" href="/admin/error-passthrough"><Icon Name="alert" Size="16" /><span>错误透传规则</span></a>
                         <a class="tool-menu-row" href="/admin/tls-fingerprints"><Icon Name="key" Size="16" /><span>TLS 指纹模板</span></a>
                         <div class="menu-divider"></div>
@@ -149,7 +148,7 @@
                             @if (IsColumnVisible("auth")) { <th>认证</th> }
                             @if (IsColumnVisible("capacity")) { <th>容量</th> }
                             @if (IsColumnVisible("status")) { <th><button type="button" class="table-sort" @onclick='() => SortAsync("status")'>状态 @SortGlyph("status")</button></th> }
-                            @if (IsColumnVisible("schedulable")) { <th><button type="button" class="table-sort" @onclick='() => SortAsync("schedulable")'>调度 @SortGlyph("schedulable")</button></th> }
+                            @if (IsColumnVisible("schedulable")) { <th class="schedule-column"><button type="button" class="table-sort" @onclick='() => SortAsync("schedulable")'>调度 @SortGlyph("schedulable")</button></th> }
                             @if (IsColumnVisible("today")) { <th>今日统计</th> }
                             @if (IsColumnVisible("groups")) { <th>分组</th> }
                             @if (IsColumnVisible("usage")) { <th title="显示后端返回的日、周和总配额用量；具体窗口由上游账号决定。">用量窗口</th> }
@@ -185,10 +184,20 @@
                                     @if (IsColumnVisible("auth")) { <td><div class="auth-cell"><strong>@AuthenticationLabel(row)</strong><small class="@(CredentialConfigured(row) ? "configured" : "missing")">@(CredentialConfigured(row) ? "凭据已配置" : "凭据待补充")</small></div></td> }
                                     @if (IsColumnVisible("capacity")) { <td><div class="capacity-cell" title="并发上限与负载因子由原账号调度器使用；实时评分由后端动态计算。"><strong>@row.CurrentConcurrency / @row.Concurrency</strong><small>当前 / 并发上限</small>@if (row.LoadFactor.HasValue) { <small>负载因子 @row.LoadFactor</small> }@if (row.ActiveSessions.HasValue) { <small>会话 @row.ActiveSessions</small> }@if (row.CurrentRpm.HasValue) { <small>当前 RPM @row.CurrentRpm</small> }</div></td> }
                                     @if (IsColumnVisible("status")) { <td><span class="status-badge @StatusClass(row)" title="@StatusTitle(row)">@StatusLabel(row)</span></td> }
-                                    @if (IsColumnVisible("schedulable")) { <td><button type="button" class="schedule-switch @(row.Schedulable ? "on" : null)" role="switch" aria-checked="@row.Schedulable.ToString().ToLowerInvariant()" aria-label="切换 @row.Name 调度" title="@(row.Schedulable ? "暂停调度" : "恢复调度")" disabled="@busy" @onclick="() => ToggleSchedulingAsync(row)"><span></span></button></td> }
+                                    @if (IsColumnVisible("schedulable")) { <td class="schedule-column"><button type="button" class="schedule-switch @(row.Schedulable ? "on" : null)" role="switch" aria-checked="@row.Schedulable.ToString().ToLowerInvariant()" aria-label="切换 @row.Name 调度" title="@(row.Schedulable ? "暂停调度" : "恢复调度")" disabled="@busy" @onclick="() => ToggleSchedulingAsync(row)"></button></td> }
                                     @if (IsColumnVisible("today")) { <td>@if (todayStats.TryGetValue(row.Id, out var stats)) { <div class="today-stats"><strong>$@stats.StandardCost.ToString("0.####")</strong><small>@stats.Requests 次 · @stats.Tokens token</small></div> } else { <span class="muted-cell">-</span> }</td> }
                                     @if (IsColumnVisible("groups")) { <td><div class="group-badges">@if (row.Groups.Count == 0) { <span class="muted-cell">未分组</span> } else { @foreach (var group in row.Groups.Take(4)) { <span>@group.Name</span> } @if (row.Groups.Count > 4) { <small>+@(row.Groups.Count - 4)</small> } }</div></td> }
-                                    @if (IsColumnVisible("usage")) { <td><AccountQuotaUsageCell Account="row" /></td> }
+                                    @if (IsColumnVisible("usage"))
+                                    {
+                                        <td>
+                                            <AccountQuotaUsageCell Account="row"
+                                                                   Usage="@(usageByAccountId.TryGetValue(row.Id, out var accountUsage) ? accountUsage : null)"
+                                                                   UsageLoading="@usageLoadingIds.Contains(row.Id)"
+                                                                   UsageError="@(usageErrors.TryGetValue(row.Id, out var usageError) ? usageError : null)"
+                                                                   OnUsageChanged="usage => HandleUsageChanged(row.Id, usage)"
+                                                                   OnAccountChanged="() => LoadAsync(true)" />
+                                        </td>
+                                    }
                                     @if (IsColumnVisible("proxy")) { <td>@if (row.Proxy is null) { <span class="muted-cell">-</span> } else { <div class="proxy-cell"><strong>@row.Proxy.Name</strong><small>@row.Proxy.Protocol://@row.Proxy.Host:@row.Proxy.Port</small></div> }</td> }
                                     @if (IsColumnVisible("priority")) { <td>@row.Priority</td> }
                                     @if (IsColumnVisible("score")) { <td><code>@SchedulerScore(row)</code></td> }
@@ -198,7 +207,24 @@
                                     @if (IsColumnVisible("created")) { <td>@FormatDate(row.CreatedAt)</td> }
                                     @if (IsColumnVisible("expires")) { <td><div class="expiry-cell"><span>@FormatExpiry(row.ExpiresAt)</span>@if (IsExpired(row.ExpiresAt)) { <small class="danger-text">已过期</small> } else if (row.AutoPauseOnExpired && row.ExpiresAt.HasValue) { <small>到期自动暂停</small> }</div></td> }
                                     @if (IsColumnVisible("notes")) { <td><span class="notes-cell" title="@row.Notes">@(string.IsNullOrWhiteSpace(row.Notes) ? "-" : row.Notes)</span></td> }
-                                    <td class="actions-column"><div class="row-actions"><button type="button" class="row-action" title="测试连接" aria-label="测试 @row.Name" disabled="@busy" @onclick="() => TestAsync(row)"><Icon Name="pulse" Size="15" /><span>测试</span></button><button type="button" class="row-action" title="编辑" aria-label="编辑 @row.Name" @onclick="() => OpenEdit(row)"><Icon Name="pencil" Size="15" /><span>编辑</span></button><button type="button" class="row-action danger" title="删除" aria-label="删除 @row.Name" @onclick="() => OpenDelete(row)"><Icon Name="trash" Size="15" /><span>删除</span></button><div class="row-more-wrap"><button type="button" class="row-action" title="更多" aria-label="更多 @row.Name" @onclick="() => ToggleRowMenu(row.Id)"><Icon Name="more" Size="15" /><span>更多</span></button>@if (rowMenuId == row.Id) { <div class="row-action-menu"><button type="button" @onclick="() => ShowStatsAsync(row)">查看统计</button><button type="button" @onclick="() => DuplicateAsync(row)">复制账号</button>@if (CanRefreshToken(row)) { <button type="button" @onclick="() => RefreshTokenAsync(row)">刷新 OAuth 令牌</button> }<button type="button" @onclick="() => RecoverStateAsync(row)">恢复状态</button><button type="button" @onclick="() => ClearRateLimitAsync(row)">清除速率限制</button><button type="button" @onclick="() => ResetQuotaAsync(row)">重置配额</button><a href="/admin/models?account=@row.Id">查看模型</a></div> }</div></div></td>
+                                    <td class="actions-column">
+                                        <div class="row-actions">
+                                            <button type="button" class="row-action" title="测试连接" aria-label="测试 @row.Name" disabled="@busy" @onclick="() => TestAsync(row)"><Icon Name="pulse" Size="15" /><span>测试</span></button>
+                                            <button type="button" class="row-action" title="编辑" aria-label="编辑 @row.Name" @onclick="() => OpenEdit(row)"><Icon Name="pencil" Size="15" /><span>编辑</span></button>
+                                            <button type="button" class="row-action danger" title="删除" aria-label="删除 @row.Name" @onclick="() => OpenDelete(row)"><Icon Name="trash" Size="15" /><span>删除</span></button>
+                                            <div class="row-more-wrap">
+                                                <button type="button"
+                                                        class="row-action"
+                                                        title="更多"
+                                                        aria-label="更多 @row.Name"
+                                                        aria-haspopup="menu"
+                                                        aria-expanded="@(rowMenuId == row.Id)"
+                                                        @onclick="(MouseEventArgs e) => ToggleRowMenuAsync(row, e)">
+                                                    <Icon Name="more" Size="15" /><span>更多</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </td>
                                 </tr>
                             }
                         }
@@ -222,6 +248,23 @@
     }
 </div>
 
+@if (rowMenuId is not null && rowMenuPosition is not null && accounts.FirstOrDefault(row => row.Id == rowMenuId) is { } menuRow)
+{
+    <button type="button" class="row-action-menu-backdrop" tabindex="-1" aria-label="关闭 @menuRow.Name 的更多操作" @onclick="CloseRowMenu"></button>
+    <div class="row-action-menu" style="@RowMenuStyle" role="menu" aria-label="@menuRow.Name 的更多操作">
+        <button type="button" role="menuitem" @onclick="() => OpenStats(menuRow)">查看统计</button>
+        <button type="button" role="menuitem" @onclick="() => DuplicateAsync(menuRow)">复制账号</button>
+        @if (CanRefreshToken(menuRow))
+        {
+            <button type="button" role="menuitem" @onclick="() => RefreshTokenAsync(menuRow)">刷新 OAuth 令牌</button>
+        }
+        <button type="button" role="menuitem" @onclick="() => RecoverStateAsync(menuRow)">恢复状态</button>
+        <button type="button" role="menuitem" @onclick="() => ClearRateLimitAsync(menuRow)">清除速率限制</button>
+        <button type="button" role="menuitem" @onclick="() => ResetQuotaAsync(menuRow)">重置配额</button>
+        <a href="/admin/models?account=@menuRow.Id" role="menuitem" @onclick="CloseRowMenu">查看模型</a>
+    </div>
+}
+
 <NativeAccountCreateModal Open="@createOpen" Groups="@groups" Proxies="@proxies" OnClose="CloseCreate" OnCreated="HandleCreatedAsync" />
 
 <AppModal Open="editorOpen" Title="编辑账号" MaxWidth="820px" OnClose="CloseEditor">
@@ -236,7 +279,6 @@
                 <div class="form-field"><label for="account-type">认证类型</label><select id="account-type" value="@form.Type" @onchange="AuthenticationTypeEditorChanged" disabled="@(editingId is not null)"><option value="apikey">API Key / 自定义 Base URL</option><option value="oauth">OAuth</option>@if (form.Platform == "anthropic") { <option value="setup-token">Setup Token</option><option value="bedrock">AWS Bedrock</option> }@if (form.Platform is "anthropic" or "gemini") { <option value="service_account">Vertex Service Account</option> }@if (editingId is not null && form.Type == "upstream") { <option value="upstream">旧版 Upstream（仅兼容）</option> }</select><small class="form-hint">编辑已有账号时不可更改平台或认证类型；如需迁移，请新建账号。</small></div>
                 @if (form.Type is "oauth" or "setup-token")
                 {
-                    <div class="inline-alert info full"><Icon Name="shield" Size="18" /><span>推荐通过“官方 OAuth 接入”完成授权，凭据只保存在 Go 服务端。</span><a class="button secondary small" href="/provider-oauth">前往授权</a></div>
                     <div class="form-field"><label for="account-access-token">Access Token</label><InputText id="account-access-token" @bind-Value="form.AccessToken" type="password" autocomplete="new-password" /></div>
                     <div class="form-field"><label for="account-refresh-token">Refresh Token</label><InputText id="account-refresh-token" @bind-Value="form.RefreshToken" type="password" autocomplete="new-password" /></div>
                 }
@@ -247,11 +289,23 @@
                         <div class="inline-alert info full"><Icon Name="info" Size="18" /><span>“账号管理”保留原平台账号与官方 OAuth 接入。Worker 风格的兼容上游、WIF、权重、RPM 和熔断策略请在独立的“上游账号”页面配置。</span><a class="button secondary small" href="/admin/upstream-accounts">前往上游账号</a></div>
                     }
                     <div class="form-field full"><label for="account-api-key">API Key（编辑时留空表示不修改）</label><InputText id="account-api-key" @bind-Value="form.ApiKey" type="password" autocomplete="new-password" /><ValidationMessage For="() => form.ApiKey" /></div>
-                    <div class="form-field full"><label for="account-base-url">Base URL（可选）</label><InputText id="account-base-url" @bind-Value="form.BaseUrl" type="url" placeholder="https://api.openai.com" /><ValidationMessage For="() => form.BaseUrl" /></div>
+                    @if (!IsCNPlatform(form.Platform) || form.ApiProtocol != "adaptive")
+                    {
+                        <div class="form-field full"><label for="account-base-url">Base URL（可选）</label><InputText id="account-base-url" @bind-Value="form.BaseUrl" type="url" placeholder="https://api.openai.com" /><ValidationMessage For="() => form.BaseUrl" /></div>
+                    }
                     @if (IsCNPlatform(form.Platform))
                     {
                         <div class="form-field"><label for="account-cn-mode">账号模式</label><select id="account-cn-mode" value="@form.AccountMode" @onchange="CNAccountModeEditorChanged"><option value="payg">按量付费（PAYG）</option>@if (form.Platform != "deepseek") { <option value="coding">Coding Plan</option> }</select></div>
-                        <div class="form-field"><label for="account-cn-protocol">API 协议</label><select id="account-cn-protocol" value="@form.ApiProtocol" @onchange="CNApiProtocolEditorChanged"><option value="chat_completions">Chat Completions</option><option value="anthropic">Anthropic Messages</option>@if (form.Platform == "deepseek") { <option value="responses">Responses</option> }</select></div>
+                        <div class="form-field"><label for="account-cn-protocol">API 协议</label><select id="account-cn-protocol" value="@form.ApiProtocol" @onchange="CNApiProtocolEditorChanged"><option value="adaptive">自适应（按入站协议）</option><option value="chat_completions">Chat Completions</option><option value="anthropic">Anthropic Messages</option>@if (form.Platform == "deepseek") { <option value="responses">Responses</option> }</select></div>
+                        @if (form.ApiProtocol == "adaptive")
+                        {
+                            <div class="form-field"><label for="account-cn-chat-base-url">Chat Completions Base URL</label><InputText id="account-cn-chat-base-url" @bind-Value="form.AdaptiveChatCompletionsBaseUrl" type="url" /><ValidationMessage For="() => form.AdaptiveChatCompletionsBaseUrl" /></div>
+                            <div class="form-field"><label for="account-cn-anthropic-base-url">Anthropic Base URL</label><InputText id="account-cn-anthropic-base-url" @bind-Value="form.AdaptiveAnthropicBaseUrl" type="url" /><ValidationMessage For="() => form.AdaptiveAnthropicBaseUrl" /></div>
+                            @if (form.Platform == "deepseek")
+                            {
+                                <div class="form-field full"><label for="account-cn-responses-base-url">Responses Base URL</label><InputText id="account-cn-responses-base-url" @bind-Value="form.AdaptiveResponsesBaseUrl" type="url" /><ValidationMessage For="() => form.AdaptiveResponsesBaseUrl" /></div>
+                            }
+                        }
                     }
                 }
                 else if (form.Type == "bedrock")
@@ -265,6 +319,12 @@
                 else
                 {
                     <div class="form-field full"><label for="account-credentials-json">凭据 JSON</label><InputTextArea id="account-credentials-json" @bind-Value="form.CredentialsJson" rows="7" /><ValidationMessage For="() => form.CredentialsJson" /></div>
+                }
+                @if (AccountModelRestrictions.ShouldShow(form.Platform, form.Type))
+                {
+                    <div class="form-field full model-restriction-field">
+                        <AccountModelRestrictionEditor Model="form" AccountId="editingId" />
+                    </div>
                 }
                 <div class="form-field"><label for="account-notes">备注</label><InputText id="account-notes" @bind-Value="form.Notes" /></div>
                 <div class="form-field"><label for="account-proxy">代理 ID（可选）</label><InputNumber id="account-proxy" @bind-Value="form.ProxyId" /></div>
@@ -338,10 +398,7 @@
     <Footer><button type="button" class="button secondary" @onclick="CloseDelete">取消</button><button type="button" class="button danger" disabled="@busy" @onclick="ConfirmDeleteAsync">删除</button></Footer>
 </AppModal>
 
-<AppModal Open="statsOpen" Title="@(statsAccount is null ? "账号统计" : $"账号统计 · {statsAccount.Name}")" MaxWidth="760px" OnClose="CloseStats">
-    <ChildContent>@if (statsLoading) { <LoadingState Text="正在载入账号统计" /> } else if (!string.IsNullOrWhiteSpace(statsJson)) { <pre class="json-preview">@statsJson</pre> } else { <EmptyState Title="暂无统计" Description="后端未返回可展示的统计数据。" /> }</ChildContent>
-    <Footer><button type="button" class="button secondary" @onclick="CloseStats">关闭</button></Footer>
-</AppModal>
+<AccountStatsModal Open="@statsOpen" Account="@statsAccount" OnClose="CloseStats" />
 
 <AppModal Open="crsOpen" Title="从 CRS 同步账号" MaxWidth="720px" OnClose="CloseCrsSync">
     <ChildContent>
@@ -378,6 +435,9 @@
     private readonly HashSet<string> selectedIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> hiddenColumns = new(StringComparer.OrdinalIgnoreCase) { "today", "proxy", "notes", "priority", "score", "rate" };
     private readonly Dictionary<string, AccountTodayStatsDto> todayStats = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AccountUsageInfoDto> usageByAccountId = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> usageErrors = new(StringComparer.Ordinal);
+    private readonly HashSet<string> usageLoadingIds = new(StringComparer.Ordinal);
     private AccountInput form = new();
     private EditContext? editorContext;
     private CrsSyncInput crsForm = new();
@@ -386,10 +446,11 @@
     private Task? autoRefreshTask;
     private string search = string.Empty, platformFilter = string.Empty, typeFilter = string.Empty, statusFilter = string.Empty, privacyFilter = string.Empty, groupFilter = string.Empty;
     private string sortBy = "name", sortOrder = "asc", formExpiryLocal = string.Empty;
-    private string? editingId, rowMenuId, error, modalError, editorTestMessage, editorTestFingerprint, statsJson, crsResultJson, bulkOpenAIError;
+    private string? editingId, rowMenuId, error, modalError, editorTestMessage, editorTestFingerprint, crsResultJson, bulkOpenAIError;
+    private FloatingMenuPosition? rowMenuPosition;
     private AccountDto? deletingAccount, statsAccount;
     private int page = 1, pageSize = 20, total, totalPages = 1;
-    private bool loading = true, busy, saving, editorTesting, editorOpen, createOpen, deleteOpen, statsOpen, statsLoading, toolsMenuOpen, autoRefreshMenuOpen;
+    private bool loading = true, busy, saving, editorTesting, editorOpen, createOpen, deleteOpen, statsOpen, toolsMenuOpen, autoRefreshMenuOpen;
     private bool autoRefreshEnabled, selectingAll, exporting, includeProxiesOnExport, crsOpen, crsBusy, crsPreviewReady;
     private bool bulkOpenAISettingsOpen, bulkOpenAISaving, applyOpenAILongContext, openAILongContextEnabled;
     private bool applyOpenAICapabilities, openAIChatCapability = true, openAIEmbeddingsCapability = true, applyOpenAIResponsesMode;
@@ -456,7 +517,7 @@
         {
             var result = await Api.GetAccountsPageAsync(CurrentQuery());
             accounts = result.Items; total = result.Total; totalPages = Math.Max(1, result.TotalPages); page = Math.Min(Math.Max(1, result.Page), totalPages);
-            await LoadTodayStatsAsync();
+            await Task.WhenAll(LoadTodayStatsAsync(), LoadUsageAsync());
         }
         catch (ApiException ex) { if (!silent) error = ex.Message; }
         finally { loading = false; autoRefreshCountdown = autoRefreshIntervalSeconds; }
@@ -473,6 +534,47 @@
         }
         catch (ApiException) { }
     }
+
+    private async Task LoadUsageAsync()
+    {
+        usageByAccountId.Clear();
+        usageErrors.Clear();
+        usageLoadingIds.Clear();
+        if (!IsColumnVisible("usage") || accounts.Count == 0) return;
+
+        var supportedIds = accounts.Where(SupportsUsageWindows).Select(account => account.Id).ToArray();
+        if (supportedIds.Length == 0) return;
+        foreach (var id in supportedIds) usageLoadingIds.Add(id);
+        try
+        {
+            var response = await Api.GetAccountUsageBatchAsync(supportedIds);
+            foreach (var pair in response.Usage) usageByAccountId[pair.Key] = pair.Value;
+            foreach (var pair in response.Errors) usageErrors[pair.Key] = pair.Value;
+        }
+        catch (ApiException ex)
+        {
+            foreach (var id in supportedIds) usageErrors[id] = ex.Message;
+        }
+        finally
+        {
+            usageLoadingIds.Clear();
+        }
+    }
+
+    private void HandleUsageChanged(string accountId, AccountUsageInfoDto usage)
+    {
+        usageByAccountId[accountId] = usage;
+        usageErrors.Remove(accountId);
+    }
+
+    private static bool SupportsUsageWindows(AccountDto account) => account.Platform switch
+    {
+        "anthropic" => account.Type is "oauth" or "setup-token",
+        "openai" => account.Type == "oauth" && !IsCopilot(account),
+        "gemini" => true,
+        "antigravity" or "grok" => account.Type == "oauth",
+        _ => false
+    };
 
     private async Task ManualRefreshAsync() { toolsMenuOpen = false; await LoadAsync(); }
     private async Task FiltersChangedAsync() { page = 1; ClearSelection(); await LoadAsync(); }
@@ -555,7 +657,7 @@
     }
     private async Task SaveAutoRefreshAsync() { try { await JS.InvokeVoidAsync("localStorage.setItem", AutoRefreshKey, JsonSerializer.Serialize(new AutoRefreshPreference { Enabled = autoRefreshEnabled, IntervalSeconds = autoRefreshIntervalSeconds })); } catch (JSException) { } }
     private async Task SaveSortAsync() { try { await JS.InvokeVoidAsync("localStorage.setItem", SortKey, JsonSerializer.Serialize(new AccountSortPreference { Key = sortBy, Order = sortOrder })); } catch (JSException) { } }
-    private async Task ToggleColumnAsync(string key) { if (!hiddenColumns.Add(key)) hiddenColumns.Remove(key); try { await JS.InvokeVoidAsync("localStorage.setItem", HiddenColumnsKey, JsonSerializer.Serialize(hiddenColumns)); } catch (JSException) { } if (key is "today" or "score") await LoadAsync(); }
+    private async Task ToggleColumnAsync(string key) { if (!hiddenColumns.Add(key)) hiddenColumns.Remove(key); try { await JS.InvokeVoidAsync("localStorage.setItem", HiddenColumnsKey, JsonSerializer.Serialize(hiddenColumns)); } catch (JSException) { } if (key is "today" or "score" or "usage") await LoadAsync(); }
     private bool IsColumnVisible(string key) => !hiddenColumns.Contains(key);
 
     private void OpenCreate() { editingId = null; form = new AccountInput { ExtraJson = "{}" }; formExpiryLocal = string.Empty; modalError = null; editorTestMessage = null; editorTestFingerprint = null; createOpen = true; toolsMenuOpen = false; }
@@ -571,6 +673,9 @@
             BaseUrl = ReadCredential(account, "base_url"), Concurrency = account.Concurrency,
             AccountMode = string.IsNullOrWhiteSpace(accountMode) ? "payg" : accountMode,
             ApiProtocol = string.IsNullOrWhiteSpace(apiProtocol) ? "chat_completions" : apiProtocol,
+            AdaptiveChatCompletionsBaseUrl = ReadCredentialObjectString(account, "api_base_urls", "chat_completions"),
+            AdaptiveAnthropicBaseUrl = ReadCredentialObjectString(account, "api_base_urls", "anthropic"),
+            AdaptiveResponsesBaseUrl = ReadCredentialObjectString(account, "api_base_urls", "responses"),
             LoadFactor = account.LoadFactor, Priority = account.Priority,
             RateMultiplier = account.RateMultiplier, ProxyId = account.ProxyId, ExpiresAt = account.ExpiresAt,
             AutoPauseOnExpired = account.AutoPauseOnExpired, Schedulable = account.Schedulable,
@@ -579,9 +684,11 @@
             ExtraJson = account.Extra is null ? "{}" : JsonSerializer.Serialize(account.Extra, PrettyJson),
             GroupIds = [.. account.GroupIds]
         };
+        if (form.ApiProtocol == "adaptive") EnsureAdaptiveBaseUrls(form);
+        AccountModelRestrictions.Load(form, account.Credentials);
         formExpiryLocal = account.ExpiresAt.HasValue ? FromUnix(account.ExpiresAt.Value).ToLocalTime().ToString("yyyy-MM-ddTHH:mm") : string.Empty;
         editorContext = new EditContext(form);
-        modalError = null; editorTestMessage = null; editorTestFingerprint = null; editorOpen = true; rowMenuId = null;
+        modalError = null; editorTestMessage = null; editorTestFingerprint = null; editorOpen = true; CloseRowMenu();
     }
     private void CloseEditor() { editorOpen = false; editorContext = null; }
     private void CloseCreate() => createOpen = false;
@@ -594,31 +701,47 @@
         {
             form.Type = "apikey";
             form.AccountMode = "payg";
-            form.ApiProtocol = "chat_completions";
-            form.BaseUrl = DefaultCNBaseUrl(form.Platform, form.AccountMode, form.ApiProtocol);
+            form.ApiProtocol = "adaptive";
+            EnsureAdaptiveBaseUrls(form, force: true);
         }
+        ResetEditorModelRestrictions();
         InvalidateEditorTest();
     }
 
     private void CNAccountModeEditorChanged(ChangeEventArgs e)
     {
+        var previousMode = form.AccountMode;
         form.AccountMode = form.Platform == "deepseek" ? "payg" : e.Value?.ToString() == "coding" ? "coding" : "payg";
-        form.BaseUrl = DefaultCNBaseUrl(form.Platform, form.AccountMode, form.ApiProtocol);
+        if (form.ApiProtocol == "adaptive") EnsureAdaptiveBaseUrls(form, previousMode);
+        else form.BaseUrl = DefaultCNBaseUrl(form.Platform, form.AccountMode, form.ApiProtocol);
         InvalidateEditorTest();
     }
 
     private void CNApiProtocolEditorChanged(ChangeEventArgs e)
     {
         var requested = e.Value?.ToString() ?? "chat_completions";
-        form.ApiProtocol = requested == "responses" && form.Platform != "deepseek" ? "chat_completions" : requested;
-        form.BaseUrl = DefaultCNBaseUrl(form.Platform, form.AccountMode, form.ApiProtocol);
+        form.ApiProtocol = requested switch
+        {
+            "adaptive" => "adaptive",
+            "responses" when form.Platform != "deepseek" => "chat_completions",
+            _ => requested
+        };
+        if (form.ApiProtocol == "adaptive") EnsureAdaptiveBaseUrls(form);
+        else form.BaseUrl = DefaultCNBaseUrl(form.Platform, form.AccountMode, form.ApiProtocol);
         InvalidateEditorTest();
     }
     private void AuthenticationTypeEditorChanged(ChangeEventArgs e)
     {
         var next = e.Value?.ToString()?.Trim().ToLowerInvariant() ?? "apikey";
         form.Type = IsAuthenticationTypeSupported(form.Platform, next) ? next : "apikey";
+        ResetEditorModelRestrictions();
         InvalidateEditorTest();
+    }
+    private void ResetEditorModelRestrictions()
+    {
+        form.ModelRestrictionMode = AccountModelRestrictions.SupportsWhitelist(form.Platform) ? "whitelist" : "mapping";
+        form.AllowedModels.Clear();
+        form.ModelMappings.Clear();
     }
     private static bool IsAuthenticationTypeSupported(string platform, string type) => type switch
     {
@@ -632,7 +755,8 @@
     private string EditorConnectionFingerprint() => JsonSerializer.Serialize(new
     {
         form.Platform, form.Type, form.ApiKey,
-        form.AccessToken, form.RefreshToken, form.CredentialsJson, form.BaseUrl, form.ProxyId, form.ExtraJson
+        form.AccessToken, form.RefreshToken, form.CredentialsJson, form.BaseUrl,
+        form.AdaptiveChatCompletionsBaseUrl, form.AdaptiveAnthropicBaseUrl, form.AdaptiveResponsesBaseUrl, form.ProxyId, form.ExtraJson
     });
     private void ExpiryChanged(ChangeEventArgs e) { formExpiryLocal = e.Value?.ToString() ?? string.Empty; if (DateTime.TryParse(formExpiryLocal, out var value)) form.ExpiresAt = new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Local)).ToUnixTimeSeconds(); else form.ExpiresAt = null; }
     private void ToggleEditorGroup(long id, bool selected) { if (selected && !form.GroupIds.Contains(id)) form.GroupIds.Add(id); else if (!selected) form.GroupIds.Remove(id); }
@@ -708,19 +832,81 @@
         finally { editorTesting = false; }
     }
 
-    private void OpenDelete(AccountDto row) { deletingAccount = row; deleteOpen = true; rowMenuId = null; }
+    private void OpenDelete(AccountDto row) { deletingAccount = row; deleteOpen = true; CloseRowMenu(); }
     private void CloseDelete() { deleteOpen = false; deletingAccount = null; }
     private async Task ConfirmDeleteAsync() { if (deletingAccount is null) return; busy = true; try { await Api.DeleteAccountAsync(deletingAccount.Id); Toasts.Success("账号删除成功"); CloseDelete(); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
-    private void ToggleRowMenu(string id) => rowMenuId = rowMenuId == id ? null : id;
-    private async Task ToggleSchedulingAsync(AccountDto row) { busy = true; try { await Api.SetAccountSchedulableAsync(row.Id, !row.Schedulable); Toasts.Success(row.Schedulable ? "调度已关闭" : "调度已开启"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
-    private async Task TestAsync(AccountDto row) { rowMenuId = null; busy = true; error = null; try { var result = await Api.TestAccountAsync(row.Id); if (result.Success) Toasts.Success($"连接成功{(result.LatencyMs.HasValue ? $"（{result.LatencyMs} ms）" : string.Empty)}"); else error = string.IsNullOrWhiteSpace(result.Message) ? "连接测试失败" : result.Message; } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
-    private async Task DuplicateAsync(AccountDto row) { rowMenuId = null; busy = true; try { await Api.DuplicateAccountAsync(row.Id); Toasts.Success("账号已复制"); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
-    private async Task RefreshTokenAsync(AccountDto row) { rowMenuId = null; busy = true; try { await Api.RefreshAccountAsync(row.Id); Toasts.Success("Token 刷新成功"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
-    private async Task RecoverStateAsync(AccountDto row) { rowMenuId = null; busy = true; try { await Api.RecoverAccountStateAsync(row.Id); Toasts.Success("账号状态已恢复"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
-    private async Task ClearRateLimitAsync(AccountDto row) { rowMenuId = null; if (!await JS.InvokeAsync<bool>("confirm", $"确认清除账号“{row.Name}”的速率限制？")) return; busy = true; try { await Api.ClearAccountRateLimitAsync(row.Id); Toasts.Success("速率限制已清除"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
-    private async Task ResetQuotaAsync(AccountDto row) { rowMenuId = null; if (!await JS.InvokeAsync<bool>("confirm", $"确认重置账号“{row.Name}”的配额用量？")) return; busy = true; try { await Api.ResetAccountQuotaAsync(row.Id); Toasts.Success("账号配额已重置"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
-    private async Task ShowStatsAsync(AccountDto row) { rowMenuId = null; statsAccount = row; statsOpen = true; statsLoading = true; statsJson = null; try { var value = await Api.GetAccountStatsAsync(row.Id); statsJson = JsonSerializer.Serialize(value, PrettyJson); } catch (ApiException ex) { statsJson = JsonSerializer.Serialize(new { error = ex.Message }, PrettyJson); } finally { statsLoading = false; } }
-    private void CloseStats() { statsOpen = false; statsAccount = null; statsJson = null; }
+    private async Task ToggleRowMenuAsync(AccountDto row, MouseEventArgs e)
+    {
+        if (rowMenuId == row.Id)
+        {
+            CloseRowMenu();
+            return;
+        }
+
+        toolsMenuOpen = false;
+        autoRefreshMenuOpen = false;
+        var itemCount = CanRefreshToken(row) ? 7 : 6;
+        var menuHeight = (itemCount * 32) + 12;
+
+        try
+        {
+            rowMenuPosition = await JS.InvokeAsync<FloatingMenuPosition>(
+                "paraGateway.positionFloatingMenu", e.ClientX, e.ClientY, 190, menuHeight, 8);
+        }
+        catch (JSException)
+        {
+            rowMenuPosition = new(
+                Math.Max(8, (int)Math.Round(e.ClientY) - menuHeight - 6),
+                Math.Max(8, (int)Math.Round(e.ClientX) - 190));
+        }
+
+        rowMenuId = row.Id;
+    }
+
+    private void CloseRowMenu()
+    {
+        rowMenuId = null;
+        rowMenuPosition = null;
+    }
+
+    private string RowMenuStyle => rowMenuPosition is null
+        ? "visibility:hidden"
+        : $"top:{rowMenuPosition.Top}px;left:{rowMenuPosition.Left}px";
+    private async Task ToggleSchedulingAsync(AccountDto row)
+    {
+        if (busy) return;
+
+        var previous = row.Schedulable;
+        var requested = !previous;
+        row.Schedulable = requested;
+        busy = true;
+        error = null;
+        StateHasChanged();
+
+        try
+        {
+            var saved = await Api.SetAccountSchedulableAsync(row.Id, requested);
+            row.Schedulable = saved.Schedulable;
+            Toasts.Success(saved.Schedulable ? "调度已开启" : "调度已关闭");
+        }
+        catch (ApiException ex)
+        {
+            row.Schedulable = previous;
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+    private async Task TestAsync(AccountDto row) { CloseRowMenu(); busy = true; error = null; try { var result = await Api.TestAccountAsync(row.Id); if (result.Success) Toasts.Success($"连接成功{(result.LatencyMs.HasValue ? $"（{result.LatencyMs} ms）" : string.Empty)}"); else error = string.IsNullOrWhiteSpace(result.Message) ? "连接测试失败" : result.Message; } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task DuplicateAsync(AccountDto row) { CloseRowMenu(); busy = true; try { await Api.DuplicateAccountAsync(row.Id); Toasts.Success("账号已复制"); await LoadAsync(); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task RefreshTokenAsync(AccountDto row) { CloseRowMenu(); busy = true; try { await Api.RefreshAccountAsync(row.Id); Toasts.Success("Token 刷新成功"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task RecoverStateAsync(AccountDto row) { CloseRowMenu(); busy = true; try { await Api.RecoverAccountStateAsync(row.Id); Toasts.Success("账号状态已恢复"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task ClearRateLimitAsync(AccountDto row) { CloseRowMenu(); if (!await JS.InvokeAsync<bool>("confirm", $"确认清除账号“{row.Name}”的速率限制？")) return; busy = true; try { await Api.ClearAccountRateLimitAsync(row.Id); Toasts.Success("速率限制已清除"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private async Task ResetQuotaAsync(AccountDto row) { CloseRowMenu(); if (!await JS.InvokeAsync<bool>("confirm", $"确认重置账号“{row.Name}”的配额用量？")) return; busy = true; try { await Api.ResetAccountQuotaAsync(row.Id); Toasts.Success("账号配额已重置"); await LoadAsync(true); } catch (ApiException ex) { error = ex.Message; } finally { busy = false; } }
+    private void OpenStats(AccountDto row) { CloseRowMenu(); statsAccount = row; statsOpen = true; }
+    private void CloseStats() { statsOpen = false; statsAccount = null; }
 
     private async Task BulkDeleteAsync() { if (selectedIds.Count == 0 || !await JS.InvokeAsync<bool>("confirm", $"确认删除选中的 {selectedIds.Count} 个账号？此操作无法撤销。")) return; await RunBulkAsync(() => Api.BatchDeleteAccountsAsync(selectedIds), "账号已批量删除"); }
     private async Task BulkClearErrorsAsync() { if (selectedIds.Count == 0) return; await RunBulkAsync(() => Api.BatchClearAccountErrorsAsync(selectedIds), "账号状态已重置"); }
@@ -838,7 +1024,9 @@
     private static string PlatformLabel(string value) => value.ToLowerInvariant() switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", "kimi" => "Kimi", "zhipu" => "智谱 GLM", "deepseek" => "DeepSeek", _ => value };
     private static string AccountPlatformLabel(AccountDto row) => IsCopilot(row) ? "GitHub Copilot" : PlatformLabel(row.Platform);
     private static string OAuthProfile(AccountDto row) => ReadJsonString(row.Credentials, "oauth_profile") ?? ReadJsonString(row.Extra, "oauth_profile") ?? string.Empty;
-    private static bool IsCopilot(AccountDto row) => string.Equals(OAuthProfile(row), "github_copilot", StringComparison.OrdinalIgnoreCase);
+    private static bool IsCopilot(AccountDto row) =>
+        string.Equals(row.Platform, "copilot", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(OAuthProfile(row), "github_copilot", StringComparison.OrdinalIgnoreCase);
     private static string AccountTypeLabel(AccountDto row) => TypeLabel(row.Type);
     private static bool CanRefreshToken(AccountDto row) => row.ParentAccountId is null && row.Type is "oauth" or "setup-token";
     private static string AccountBaseUrl(AccountDto row)
@@ -861,8 +1049,8 @@
     }
     private static string AuthenticationLabel(AccountDto row)
     {
+        if (IsCopilot(row)) return "GitHub Copilot 凭据";
         var profile = OAuthProfile(row).ToLowerInvariant();
-        if (profile == "github_copilot") return "GitHub Device OAuth";
         if (profile == "codex_cli") return "Codex CLI OAuth";
         if (profile.Contains("claude", StringComparison.Ordinal)) return "Claude Code OAuth";
         return row.Type.ToLowerInvariant() switch
@@ -883,6 +1071,10 @@
     private static string StatusTitle(AccountDto row) => string.IsNullOrWhiteSpace(row.ErrorMessage) ? (string.IsNullOrWhiteSpace(row.TempUnschedulableReason) ? StatusLabel(row) : row.TempUnschedulableReason) : row.ErrorMessage;
     private static string AccountEmail(AccountDto row) { if (!string.IsNullOrWhiteSpace(row.ParentEmail)) return row.ParentEmail; return ReadJsonString(row.Credentials, "email") ?? ReadJsonString(row.Credentials, "user_email") ?? string.Empty; }
     private static string ReadCredential(AccountDto row, string key) => ReadJsonString(row.Credentials, key) ?? string.Empty;
+    private static string ReadCredentialObjectString(AccountDto row, string objectKey, string key) =>
+        row.Credentials is not null && row.Credentials.TryGetValue(objectKey, out var value)
+        && value.ValueKind == JsonValueKind.Object && value.TryGetProperty(key, out var nested)
+        && nested.ValueKind == JsonValueKind.String ? nested.GetString() ?? string.Empty : string.Empty;
     private static bool ReadExtraBool(AccountDto row, string key) => row.Extra is not null && row.Extra.TryGetValue(key, out var value) && value.ValueKind is JsonValueKind.True;
     private static string ReadExtraString(AccountDto row, string key) => ReadJsonString(row.Extra, key) ?? string.Empty;
     private static string? ReadJsonString(Dictionary<string, JsonElement>? source, string key) => source is not null && source.TryGetValue(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
@@ -904,6 +1096,34 @@
             _ => string.Empty
         };
     }
+    private static void EnsureAdaptiveBaseUrls(AccountInput input, string? previousMode = null, bool force = false)
+    {
+        var previousChat = previousMode is null ? string.Empty : DefaultCNBaseUrl(input.Platform, previousMode, "chat_completions");
+        var previousAnthropic = previousMode is null ? string.Empty : DefaultCNBaseUrl(input.Platform, previousMode, "anthropic");
+        var previousResponses = previousMode is null ? string.Empty : DefaultCNBaseUrl(input.Platform, previousMode, "responses");
+        input.AdaptiveChatCompletionsBaseUrl = RebaseAdaptiveUrl(
+            input.AdaptiveChatCompletionsBaseUrl, previousChat,
+            DefaultCNBaseUrl(input.Platform, input.AccountMode, "chat_completions"), force);
+        input.AdaptiveAnthropicBaseUrl = RebaseAdaptiveUrl(
+            input.AdaptiveAnthropicBaseUrl, previousAnthropic,
+            DefaultCNBaseUrl(input.Platform, input.AccountMode, "anthropic"), force);
+        input.AdaptiveResponsesBaseUrl = input.Platform == "deepseek"
+            ? RebaseAdaptiveUrl(input.AdaptiveResponsesBaseUrl, previousResponses,
+                DefaultCNBaseUrl(input.Platform, input.AccountMode, "responses"), force)
+            : string.Empty;
+        input.BaseUrl = input.AdaptiveChatCompletionsBaseUrl;
+    }
+
+    private static string RebaseAdaptiveUrl(string current, string previousDefault, string nextDefault, bool force)
+    {
+        if (force || string.IsNullOrWhiteSpace(current)
+            || (!string.IsNullOrWhiteSpace(previousDefault)
+                && string.Equals(current.Trim(), previousDefault, StringComparison.OrdinalIgnoreCase)))
+        {
+            return nextDefault;
+        }
+        return current.Trim();
+    }
     private static bool HasQuota(AccountDto row) => row.QuotaLimit is > 0 || row.QuotaDailyLimit is > 0 || row.QuotaWeeklyLimit is > 0;
     private static MarkupString UsageWindow(string label, double? used, double? limit) { if (limit is not > 0) return new MarkupString(string.Empty); var percent = Math.Clamp((used ?? 0) / limit.Value * 100, 0, 100); return new MarkupString($"<span><small>{label}</small><b>{used.GetValueOrDefault():0.##}/{limit.Value:0.##}</b><i><em style='width:{percent:0.#}%'></em></i></span>"); }
     private static string SchedulerScore(AccountDto row) { var score = row.SchedulerScores.FirstOrDefault() ?? row.SchedulerScore; if (score is null) return "-"; return score.StickyScoreInfinity ? $"{score.BaseScore:0.######} / +∞" : $"{score.BaseScore:0.######} / {score.StickyScore:0.######}"; }
@@ -923,4 +1143,5 @@
 
     private sealed class AutoRefreshPreference { public bool Enabled { get; set; } public int IntervalSeconds { get; set; } = 30; }
     private sealed class AccountSortPreference { public string Key { get; set; } = "name"; public string Order { get; set; } = "asc"; }
+    private sealed record FloatingMenuPosition(int Top, int Left);
 }

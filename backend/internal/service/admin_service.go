@@ -147,6 +147,7 @@ type CreateUserInput struct {
 	Balance       *float64
 	Concurrency   int
 	RPMLimit      int
+	TPMLimit      int
 	AllowedGroups []int64
 	// ActorAdminID 执行本次操作的管理员ID(来自JWT)，仅用于权限敏感操作的审计日志。
 	ActorAdminID int64
@@ -161,6 +162,7 @@ type UpdateUserInput struct {
 	Balance       *float64 // 使用指针区分"未提供"和"设置为0"
 	Concurrency   *int     // 使用指针区分"未提供"和"设置为0"
 	RPMLimit      *int     // 使用指针区分"未提供"和"设置为0"
+	TPMLimit      *int     // 使用指针区分"未提供"和"设置为0"
 	Status        string
 	AllowedGroups *[]int64 // 使用指针区分"未提供"和"设置为空数组"
 	// GroupRates 用户专属分组倍率配置
@@ -473,9 +475,12 @@ type ReplaceUserGroupResult struct {
 
 // UserRPMStatus describes a user's current per-minute RPM usage.
 type UserRPMStatus struct {
-	UserRPMUsed  int                  `json:"user_rpm_used"`
-	UserRPMLimit int                  `json:"user_rpm_limit"`
-	PerGroup     []UserGroupRPMStatus `json:"per_group"`
+	UserRPMUsed          int                  `json:"user_rpm_used"`
+	UserRPMLimit         int                  `json:"user_rpm_limit"`
+	UserTPMUsed          int                  `json:"user_tpm_used"`
+	UserTPMLimit         int                  `json:"user_tpm_limit"`
+	TPMRetryAfterSeconds int                  `json:"tpm_retry_after_seconds"`
+	PerGroup             []UserGroupRPMStatus `json:"per_group"`
 }
 
 // UserGroupRPMStatus describes current per-minute RPM usage for one user/group pair.

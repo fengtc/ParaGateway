@@ -1,0 +1,113 @@
+.stats-distribution-panel {
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+}
+
+.stats-distribution-heading {
+    display: flex;
+    margin-bottom: 12px;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.stats-distribution-heading h3,
+.stats-distribution-heading p {
+    margin: 0;
+}
+
+.stats-distribution-heading h3 {
+    color: var(--ink);
+    font-size: .9rem;
+    font-weight: 700;
+}
+
+.stats-distribution-heading p {
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: .76rem;
+}
+
+.stats-distribution-layout {
+    display: grid;
+    grid-template-columns: minmax(190px, 230px) minmax(0, 1fr);
+    align-items: center;
+    gap: 18px;
+}
+
+.stats-distribution-chart {
+    min-width: 0;
+}
+
+.stats-distribution-table-wrap {
+    max-height: 220px;
+    overflow: auto;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+}
+
+.stats-distribution-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: var(--ink);
+    font-size: .78rem;
+}
+
+.stats-distribution-table th,
+.stats-distribution-table td {
+    min-width: 82px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+    text-align: right;
+    white-space: nowrap;
+}
+
+.stats-distribution-table th {
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    color: var(--muted);
+    background: var(--surface-muted);
+    font-weight: 700;
+}
+
+.stats-distribution-table th:first-child,
+.stats-distribution-table td:first-child {
+    min-width: 150px;
+    max-width: 240px;
+    text-align: left;
+}
+
+.stats-distribution-table td:first-child {
+    overflow: hidden;
+    font-weight: 650;
+    text-overflow: ellipsis;
+}
+
+.stats-distribution-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.distribution-actual { color: #25805d; }
+.distribution-account { color: #b66a1f; }
+.distribution-standard { color: var(--muted); }
+
+.stats-distribution-empty {
+    display: grid;
+    min-height: 150px;
+    place-items: center;
+    color: var(--muted);
+    font-size: .82rem;
+}
+
+@media (max-width: 760px) {
+    .stats-distribution-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .stats-distribution-chart {
+        max-width: 260px;
+        margin: 0 auto;
+    }
+}

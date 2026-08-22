@@ -115,6 +115,18 @@ public sealed class AdminSettingsParityTests
         Assert.Contains("上游账号配额提醒", notifications, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("SecurityAdvancedSettings.razor.css", ".security-advanced-card > header h2")]
+    [InlineData("UserDefaultsSettings.razor.css", ".user-defaults-card > header h2")]
+    [InlineData("NotificationSettings.razor.css", ".notification-card > header h2")]
+    public void NestedSettingsCardHeadingsMatchAdminTypography(string fileName, string selector)
+    {
+        var css = ReadSource("Components", fileName).ReplaceLineEndings("\n");
+        var expected = $"{selector} {{\n    margin: 0;\n    color: var(--text);\n    font-size: .98rem;\n}}";
+
+        Assert.Contains(expected, css, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void BackupPageUsesImageStorageAndPollsBackupAndRestoreStatus()
     {

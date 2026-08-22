@@ -133,7 +133,7 @@ public sealed class GroupsPageParityTests
         Assert.Contains(".name-cell strong { display: block; color: var(--ink); font-size: .88rem; }", css, StringComparison.Ordinal);
         Assert.Contains("font-size: .75rem;", css, StringComparison.Ordinal);
         Assert.Contains("font-size: .69rem;", css, StringComparison.Ordinal);
-        Assert.Contains("ParaGateway.Frontend.styles.css?v=20260819-dark-theme-audit", index, StringComparison.Ordinal);
+        Assert.Contains("ParaGateway.Frontend.styles.css?v=20260821-settings-heading-a", index, StringComparison.Ordinal);
     }
 
     private static string ReadSource(params string[] parts)

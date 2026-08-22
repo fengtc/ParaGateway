@@ -55,79 +55,6 @@
     text-decoration: none;
 }
 
-.version-badge {
-    display: inline-flex;
-    min-height: 21px;
-    padding: 1px 5px;
-    align-items: center;
-    gap: 4px;
-    color: var(--primary);
-    background: var(--primary-soft);
-    border: 0;
-    border-radius: 999px;
-    font-size: .58rem;
-    font-weight: 750;
-}
-
-.version-badge:hover { background: var(--sidebar-hover); }
-.version-badge.has-update { color: #b36b00; background: #fff1d6; }
-.version-dot { width: 6px; height: 6px; background: #e69a16; border-radius: 50%; }
-
-.version-popover {
-    position: absolute;
-    z-index: 80;
-    top: 30px;
-    left: 0;
-    width: 242px;
-    overflow: hidden;
-    color: var(--ink);
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    box-shadow: 0 14px 36px rgba(0, 0, 0, .22);
-}
-
-.version-popover-header {
-    display: flex;
-    padding: 10px 12px;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--line);
-    font-size: .72rem;
-}
-
-.version-refresh {
-    display: inline-flex;
-    width: 28px;
-    height: 28px;
-    align-items: center;
-    justify-content: center;
-    color: var(--muted);
-    background: transparent;
-    border: 0;
-    border-radius: 7px;
-}
-
-.version-refresh:hover { color: var(--ink); background: var(--sidebar-hover); }
-.version-current { padding: 16px 12px 4px; font-size: 1.25rem; font-weight: 760; text-align: center; }
-.version-state,
-.version-ok,
-.version-update,
-.version-error { padding: 5px 12px 14px; color: var(--muted); font-size: .68rem; text-align: center; white-space: normal; }
-.version-update { color: #b36b00; }
-.version-error { color: var(--danger); }
-.version-manage {
-    display: flex;
-    padding: 9px 12px;
-    align-items: center;
-    justify-content: space-between;
-    color: var(--primary);
-    border-top: 1px solid var(--line);
-    font-size: .7rem;
-    font-weight: 650;
-    text-decoration: none;
-}
-
 .side-nav {
     flex: 1 1 auto;
     min-height: 0;
@@ -240,8 +167,6 @@
     padding: 6px 9px;
     font-size: .72rem;
 }
-
-.extension-children { max-height: 330px; overflow-y: auto; }
 
 .sidebar-bottom {
     display: grid;

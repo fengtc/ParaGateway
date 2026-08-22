@@ -1,66 +1,16 @@
 package middleware
 
 import (
-	"net/http"
-	"os"
-	"strings"
-
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
 
-func AdminComplianceGuard(settingService *service.SettingService) gin.HandlerFunc {
+// AdminComplianceGuard is intentionally kept as a no-op compatibility
+// middleware. Older route registrations still call it, but ParaGateway never
+// blocks an administrator behind the upstream first-run acknowledgement.
+func AdminComplianceGuard(_ *service.SettingService) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// ParaGateway's standalone deployment can opt out of the upstream
-		// acknowledgement gate. Keep the upstream behaviour when the switch is
-		// absent or false so this remains an explicit deployment choice.
-		if settingService == nil || adminComplianceDisabled() || isAdminComplianceBypassPath(c.Request.URL.Path) {
-			c.Next()
-			return
-		}
-
-		subject, ok := GetAuthSubjectFromContext(c)
-		if !ok {
-			AbortWithError(c, http.StatusUnauthorized, "UNAUTHORIZED", "Authorization required")
-			return
-		}
-
-		acknowledged, err := settingService.IsAdminComplianceAcknowledged(c.Request.Context(), subject.UserID)
-		if err != nil {
-			AbortWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
-			return
-		}
-		if acknowledged {
-			c.Next()
-			return
-		}
-
-		c.JSON(http.StatusLocked, gin.H{
-			"code":    "ADMIN_COMPLIANCE_ACK_REQUIRED",
-			"message": "administrator compliance acknowledgement is required",
-			"metadata": gin.H{
-				"version":          service.AdminComplianceVersion,
-				"document_path_zh": service.AdminComplianceDocumentPathZH,
-				"document_path_en": service.AdminComplianceDocumentPathEN,
-				"document_url_zh":  service.AdminComplianceDocumentURLZH,
-				"document_url_en":  service.AdminComplianceDocumentURLEN,
-			},
-		})
-		c.Abort()
+		c.Next()
 	}
-}
-
-func adminComplianceDisabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("PARAGATEWAY_DISABLE_ADMIN_COMPLIANCE"))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
-func isAdminComplianceBypassPath(path string) bool {
-	path = strings.TrimSpace(path)
-	return path == "/api/v1/admin/compliance" || strings.HasPrefix(path, "/api/v1/admin/compliance/")
 }

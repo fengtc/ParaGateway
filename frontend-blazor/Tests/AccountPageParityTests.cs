@@ -39,15 +39,57 @@ public sealed class AccountPageParityTests
     }
 
     [Fact]
+    public void AccountToolbarAndSchedulingControlsStayAligned()
+    {
+        var markup = Read("Pages", "Providers.razor");
+        var css = Read("Pages", "Providers.razor.css");
+
+        Assert.Contains("class=\"search-box account-search\"", markup, StringComparison.Ordinal);
+        Assert.Contains("class=\"schedule-column\"", markup, StringComparison.Ordinal);
+        Assert.Contains(".schedule-column .table-sort", css, StringComparison.Ordinal);
+        Assert.Contains(".schedule-switch::after", css, StringComparison.Ordinal);
+        Assert.Contains("top: 3px; left: 3px; width: 16px; height: 16px", css, StringComparison.Ordinal);
+        Assert.Contains(".schedule-switch.on::after { transform: translateX(16px); }", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".schedule-switch span", css, StringComparison.Ordinal);
+        Assert.Contains("row.Schedulable = requested;", markup, StringComparison.Ordinal);
+        Assert.Contains("var saved = await Api.SetAccountSchedulableAsync(row.Id, requested);", markup, StringComparison.Ordinal);
+        Assert.Contains("row.Schedulable = saved.Schedulable;", markup, StringComparison.Ordinal);
+        Assert.Contains("row.Schedulable = previous;", markup, StringComparison.Ordinal);
+        Assert.Contains("margin: 0 auto", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(":deep(", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AccountRowActionMenuUsesViewportOverlayInsteadOfTableOverflow()
+    {
+        var markup = Read("Pages", "Providers.razor");
+        var css = Read("Pages", "Providers.razor.css");
+        var script = Read("wwwroot", "js", "paragateway.js");
+
+        Assert.Contains("class=\"row-action-menu-backdrop\"", markup, StringComparison.Ordinal);
+        Assert.Contains("ToggleRowMenuAsync(row, e)", markup, StringComparison.Ordinal);
+        Assert.Contains("paraGateway.positionFloatingMenu", markup, StringComparison.Ordinal);
+        Assert.Contains(".row-action-menu { display: grid; position: fixed;", css, StringComparison.Ordinal);
+        Assert.Contains("max-height: calc(100dvh - 16px)", css, StringComparison.Ordinal);
+        Assert.Contains("gateway.positionFloatingMenu", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("rowMenuId == row.Id) { <div class=\"row-action-menu\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AccountPageConnectsOfficialDataAndRowActions()
     {
         var markup = Read("Pages", "Providers.razor");
+        var statsModal = Read("Components", "AccountStatsModal.razor");
 
-        foreach (var method in new[] { "DuplicateAccountAsync", "RecoverAccountStateAsync", "ResetAccountQuotaAsync", "ClearAccountRateLimitAsync", "GetAccountStatsAsync", "GetAccountsDataAsync", "ImportAccountsDataAsync", "PreviewAccountsFromCrsAsync", "SyncAccountsFromCrsAsync" })
+        foreach (var method in new[] { "DuplicateAccountAsync", "RecoverAccountStateAsync", "ResetAccountQuotaAsync", "ClearAccountRateLimitAsync", "GetAccountsDataAsync", "ImportAccountsDataAsync", "PreviewAccountsFromCrsAsync", "SyncAccountsFromCrsAsync" })
         {
             Assert.Contains($"Api.{method}", markup, StringComparison.Ordinal);
         }
-        Assert.Contains("href=\"/provider-oauth\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Api.GetAccountStatsAsync", statsModal, StringComparison.Ordinal);
+        Assert.Contains("<AccountStatsModal", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("statsJson", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("<pre class=\"json-preview\">", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"/provider-oauth\"", markup, StringComparison.Ordinal);
         Assert.Contains("href=\"/admin/error-passthrough\"", markup, StringComparison.Ordinal);
         Assert.Contains("href=\"/admin/tls-fingerprints\"", markup, StringComparison.Ordinal);
         Assert.Contains("Api.PreviewAccountModelsAsync", markup, StringComparison.Ordinal);
@@ -137,14 +179,34 @@ public sealed class AccountPageParityTests
         Assert.Contains("https://api.kimi.com/coding/v1", createModal, StringComparison.Ordinal);
         Assert.Contains("https://open.bigmodel.cn/api/coding/paas/v4", createModal, StringComparison.Ordinal);
         Assert.Contains("https://api.deepseek.com/anthropic", createModal, StringComparison.Ordinal);
-        Assert.Contains("<AccountQuotaUsageCell Account=\"row\" />", page, StringComparison.Ordinal);
+        Assert.Contains("<AccountQuotaUsageCell Account=\"row\"", page, StringComparison.Ordinal);
+        Assert.Contains("GetAccountUsageBatchAsync", page, StringComparison.Ordinal);
+        Assert.Contains("usageByAccountId", page, StringComparison.Ordinal);
         Assert.Contains("GetCNProviderQuotaAsync", quotaCell, StringComparison.Ordinal);
         Assert.Contains("GetCNProviderBalanceAsync", quotaCell, StringComparison.Ordinal);
         Assert.Contains("RefreshOllamaCloudUsageAsync", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("GetAccountUsageAsync", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("RefreshOpenAIQuotaAsync", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("ResetOpenAIQuotaAsync", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("five_hour", Read("Models", "Dtos.cs"), StringComparison.Ordinal);
+        Assert.Contains("seven_day", Read("Models", "Dtos.cs"), StringComparison.Ordinal);
+        Assert.Contains("window_stats", Read("Models", "Dtos.cs"), StringComparison.Ordinal);
         Assert.Contains("openai_long_context_billing_enabled", page, StringComparison.Ordinal);
         Assert.Contains("openai_capabilities", page, StringComparison.Ordinal);
         Assert.Contains("openai_responses_mode", page, StringComparison.Ordinal);
         Assert.Contains("LongContextInheritedCount", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CopilotAccountsUseCredentialLabelAndRedactedStatus()
+    {
+        var markup = Read("Pages", "Providers.razor");
+
+        Assert.Contains("string.Equals(row.Platform, \"copilot\"", markup, StringComparison.Ordinal);
+        Assert.Contains("if (IsCopilot(row)) return \"GitHub Copilot 凭据\";", markup, StringComparison.Ordinal);
+        Assert.Contains("row.CredentialsStatus?.Values.Any(value => value) == true", markup, StringComparison.Ordinal);
+        Assert.Contains("CredentialConfigured(row) ? \"凭据已配置\" : \"凭据待补充\"", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("if (profile == \"github_copilot\") return \"GitHub Device OAuth\";", markup, StringComparison.Ordinal);
     }
 
     private static string Read(params string[] segments)

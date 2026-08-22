@@ -378,10 +378,10 @@
 .quick-action small { font-size: .8rem; }
 .filter-label,
 .granularity-filter select,
-.compact-dashboard-table { font-size: .88rem; }
-.compact-dashboard-table th { font-size: .8rem; }
+.compact-dashboard-table { font-size: .83rem; }
+.compact-dashboard-table th { font-size: .76rem; }
 .model-breakdown-state,
-.model-breakdown-table { font-size: .8rem; }
+.model-breakdown-table { font-size: .83rem; }
 .dashboard-empty { font-size: .88rem; }
 :deep(.dxbl-chart) { font-size: .8rem; }
 

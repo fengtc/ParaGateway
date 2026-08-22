@@ -1,0 +1,265 @@
+.account-stats-modal {
+    display: grid;
+    gap: 16px;
+    color: var(--ink);
+}
+
+.account-stats-identity {
+    display: flex;
+    min-height: 64px;
+    padding: 10px 12px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    background: var(--primary-soft);
+    border: 1px solid rgba(47, 125, 93, .28);
+    border-radius: 7px;
+}
+
+.account-stats-identity-main {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 11px;
+}
+
+.account-stats-identity-main > div {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+.account-stats-identity-main strong {
+    overflow: hidden;
+    font-size: .92rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.account-stats-identity-main span:not(.account-stats-identity-icon) {
+    color: var(--muted);
+    font-size: .76rem;
+}
+
+.account-stats-identity-icon {
+    display: inline-flex;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    background: var(--primary);
+    border-radius: 7px;
+}
+
+.account-stats-status {
+    display: inline-flex;
+    padding: 5px 9px;
+    color: var(--muted);
+    background: var(--surface-muted);
+    border-radius: 999px;
+    font-size: .76rem;
+    font-weight: 700;
+}
+
+.account-stats-status.active {
+    color: #247052;
+    background: rgba(47, 125, 93, .14);
+}
+
+.account-stats-primary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.stats-primary-card {
+    display: grid;
+    min-height: 132px;
+    padding: 14px;
+    align-content: start;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left-width: 3px;
+    border-radius: 7px;
+}
+
+.stats-primary-card.cost { border-left-color: #2f8c67; }
+.stats-primary-card.requests { border-left-color: #347eb8; }
+.stats-primary-card.average-cost { border-left-color: #c48529; }
+.stats-primary-card.average-requests { border-left-color: #7669b5; }
+
+.stats-primary-card header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--muted);
+    font-size: .77rem;
+    font-weight: 650;
+}
+
+.stats-primary-card header i,
+.stats-detail-card header i {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-muted);
+    border-radius: 6px;
+    font-style: normal;
+}
+
+.stats-primary-card header i {
+    width: 30px;
+    height: 30px;
+}
+
+.stats-primary-card.cost header i { color: #2f8c67; }
+.stats-primary-card.requests header i { color: #347eb8; }
+.stats-primary-card.average-cost header i { color: #c48529; }
+.stats-primary-card.average-requests header i { color: #7669b5; }
+
+.stats-primary-card > strong {
+    font-size: 1.35rem;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+}
+
+.stats-primary-card > small {
+    color: var(--muted);
+    font-size: .72rem;
+    line-height: 1.5;
+}
+
+.account-stats-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.stats-detail-card {
+    min-width: 0;
+    padding: 14px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+}
+
+.stats-detail-card > header {
+    display: flex;
+    margin-bottom: 11px;
+    align-items: center;
+    gap: 8px;
+}
+
+.stats-detail-card header i {
+    width: 28px;
+    height: 28px;
+}
+
+.stats-detail-card header i.cyan { color: #278195; }
+.stats-detail-card header i.orange { color: #bc6b24; }
+.stats-detail-card header i.indigo { color: #625bb0; }
+.stats-detail-card header i.teal { color: #288a7d; }
+.stats-detail-card header i.rose { color: #b55268; }
+.stats-detail-card header i.lime { color: #657f2d; }
+
+.stats-detail-card h3 {
+    margin: 0;
+    font-size: .84rem;
+    font-weight: 700;
+}
+
+.stats-detail-card dl {
+    display: grid;
+    margin: 0;
+    gap: 7px;
+}
+
+.stats-detail-card dl > div {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.stats-detail-card dt,
+.stats-detail-card dd {
+    margin: 0;
+    font-size: .77rem;
+}
+
+.stats-detail-card dt { color: var(--muted); }
+.stats-detail-card dd { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.stats-detail-card dd.accent-orange { color: #bc6b24; }
+.stats-detail-card dd.accent-indigo { color: #625bb0; }
+
+.account-stats-trend-panel {
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+}
+
+.account-stats-trend-panel > header {
+    display: flex;
+    margin-bottom: 10px;
+    align-items: baseline;
+    gap: 9px;
+}
+
+.account-stats-trend-panel h3,
+.account-stats-trend-panel span {
+    margin: 0;
+}
+
+.account-stats-trend-panel h3 { font-size: .9rem; font-weight: 700; }
+.account-stats-trend-panel span { color: var(--muted); font-size: .74rem; }
+
+.account-stats-chart-empty,
+.account-stats-no-data {
+    display: grid;
+    min-height: 190px;
+    place-items: center;
+    align-content: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: .82rem;
+}
+
+.account-stats-error {
+    display: grid;
+    min-height: 150px;
+    padding: 18px;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    color: var(--danger);
+    background: rgba(197, 62, 62, .08);
+    border: 1px solid rgba(197, 62, 62, .22);
+    border-radius: 7px;
+}
+
+.account-stats-error > div { display: grid; gap: 3px; }
+.account-stats-error strong { font-size: .86rem; }
+.account-stats-error span { color: var(--muted); font-size: .78rem; }
+
+@media (max-width: 960px) {
+    .account-stats-primary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+    .account-stats-detail-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 520px) {
+    .account-stats-primary-grid { grid-template-columns: 1fr; }
+    .account-stats-identity { align-items: flex-start; }
+    .account-stats-status { flex: 0 0 auto; }
+    .account-stats-error { grid-template-columns: auto minmax(0, 1fr); }
+    .account-stats-error .button { grid-column: 1 / -1; }
+    .account-stats-trend-panel > header { align-items: flex-start; flex-direction: column; }
+}

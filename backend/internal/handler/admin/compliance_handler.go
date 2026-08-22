@@ -20,7 +20,7 @@ func NewComplianceHandler(settingService *service.SettingService) *ComplianceHan
 }
 
 type AcceptAdminComplianceRequest struct {
-	Phrase   string `json:"phrase" binding:"required"`
+	Phrase   string `json:"phrase"`
 	Language string `json:"language"`
 }
 

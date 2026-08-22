@@ -95,7 +95,7 @@ public sealed class SegmentedControlParityTests
     {
         var index = Read("wwwroot", "index.html");
 
-        Assert.Contains("css/app.css?v=20260819-dark-theme-audit", index);
+        Assert.Contains("css/app.css?v=20260820-official-nav-parity-a", index);
     }
 
     private static string Read(params string[] segments)

@@ -33,7 +33,7 @@
                 }
             </div>
             <button type="button" class="button secondary" @onclick="OpenSortAsync"><Icon Name="chevrons-up-down" Size="16" /> 排序</button>
-            <button type="button" class="button primary" data-tour="groups-create-btn" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 创建分组</button>
+            <button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 创建分组</button>
         </div>
     </div>
 
@@ -143,6 +143,7 @@
             </div></div>
 
             <div class="editor-section"><h3>计费与订阅</h3><div class="form-grid">
+                <label class="toggle-row full"><InputCheckbox @bind-Value="form.LongContextPricingEnabled" /><span><strong>长上下文加价</strong><small>启用后，OpenAI 请求上下文超过 272k 时按上游规则对输入和输出计费。</small></span></label>
                 <div class="form-field full"><label for="group-subscription">计费类型</label><InputSelect id="group-subscription" @bind-Value="form.SubscriptionType" disabled="@(editingId is not null)"><option value="standard">标准（余额）</option><option value="subscription">订阅（配额）</option></InputSelect>@if (editingId is not null) { <small>计费类型创建后不可修改。</small> }</div>
                 @if (form.SubscriptionType == "subscription")
                 {
@@ -279,7 +280,7 @@
     private async Task SaveColumnPreferencesAsync() { try { await JS.InvokeVoidAsync("localStorage.setItem", HiddenColumnsKey, JsonSerializer.Serialize(hiddenColumns, PreferenceJson)); } catch (JSException) { } }
 
     private void OpenCreate() { editingId = null; form = new GroupInput(); formActive = true; modalError = null; editorOpen = true; showColumnMenu = false; }
-    private void OpenEdit(GroupDto group) { editingId = group.Id; form = new GroupInput { Name = group.Name, Description = group.Description, Platform = group.Platform, RateMultiplier = group.RateMultiplier, IsExclusive = group.IsExclusive, SubscriptionType = group.SubscriptionType, DailyLimitUsd = group.DailyLimitUsd, WeeklyLimitUsd = group.WeeklyLimitUsd, MonthlyLimitUsd = group.MonthlyLimitUsd, RpmLimit = group.RpmLimit, AdvancedJson = group.AdvancedJson }; formActive = group.Status == "active"; modalError = null; editorOpen = true; }
+    private void OpenEdit(GroupDto group) { editingId = group.Id; form = new GroupInput { Name = group.Name, Description = group.Description, Platform = group.Platform, RateMultiplier = group.RateMultiplier, IsExclusive = group.IsExclusive, SubscriptionType = group.SubscriptionType, DailyLimitUsd = group.DailyLimitUsd, WeeklyLimitUsd = group.WeeklyLimitUsd, MonthlyLimitUsd = group.MonthlyLimitUsd, RpmLimit = group.RpmLimit, LongContextPricingEnabled = group.LongContextPricingEnabled, AdvancedJson = group.AdvancedJson }; formActive = group.Status == "active"; modalError = null; editorOpen = true; }
     private void StatusFormChanged(ChangeEventArgs e) => formActive = e.Value?.ToString() != "inactive";
     private void CloseEditor() => editorOpen = false;
     private async Task SaveAsync() { saving = true; modalError = null; try { if (editingId is null) await Api.CreateGroupAsync(form); else await Api.UpdateGroupAsync(editingId, form, formActive); editorOpen = false; Toasts.Success(editingId is null ? "分组已创建" : "分组已更新"); await LoadAsync(); } catch (ApiException ex) { modalError = ex.Message; } finally { saving = false; } }

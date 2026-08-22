@@ -139,6 +139,7 @@ func (s *adminServiceImpl) CreateUser(ctx context.Context, input *CreateUserInpu
 		Balance:       balance,
 		Concurrency:   input.Concurrency,
 		RPMLimit:      input.RPMLimit,
+		TPMLimit:      input.TPMLimit,
 		Status:        StatusActive,
 		AllowedGroups: input.AllowedGroups,
 	}
@@ -216,6 +217,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	oldStatus := user.Status
 	oldRole := user.Role
 	oldRPMLimit := user.RPMLimit
+	oldTPMLimit := user.TPMLimit
 	oldAllowedGroups := append([]int64(nil), user.AllowedGroups...)
 
 	// fields 与下面的 input.X 判空条件一一对应：管理员没提交的列不写回，
@@ -273,6 +275,10 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 		user.RPMLimit = *input.RPMLimit
 		fields.RPMLimit = true
 	}
+	if input.TPMLimit != nil {
+		user.TPMLimit = *input.TPMLimit
+		fields.TPMLimit = true
+	}
 
 	if input.AllowedGroups != nil {
 		user.AllowedGroups = *input.AllowedGroups
@@ -299,7 +305,7 @@ func (s *adminServiceImpl) UpdateUser(ctx context.Context, id int64, input *Upda
 	if s.authCacheInvalidator != nil {
 		// RPMLimit 直接参与 billing_cache_service.checkRPM 的三级级联，
 		// allowed_groups 参与 API Key 专属分组授权判断；不失效缓存会让修改在一个 L2 TTL 内失去效果。
-		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
+		if user.Concurrency != oldConcurrency || user.Status != oldStatus || user.Role != oldRole || user.RPMLimit != oldRPMLimit || user.TPMLimit != oldTPMLimit || !sameInt64Set(user.AllowedGroups, oldAllowedGroups) {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, user.ID)
 		}
 	}
@@ -593,6 +599,22 @@ func (s *adminServiceImpl) tryAccrueAffiliateRebateForAdminRecharge(ctx context.
 	}
 }
 
+// BatchUpdateTPMLimit updates the user-global TPM limit without changing existing RPM/concurrency APIs.
+func (s *adminServiceImpl) BatchUpdateTPMLimit(ctx context.Context, userIDs []int64, value int) (int, error) {
+	if repo, ok := s.userRepo.(interface {
+		BatchUpdateTPMLimit(context.Context, []int64, int) (int, error)
+	}); ok {
+		affected, err := repo.BatchUpdateTPMLimit(ctx, userIDs, value)
+		if err == nil && s.authCacheInvalidator != nil {
+			for _, id := range userIDs {
+				s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, id)
+			}
+		}
+		return affected, err
+	}
+	return 0, fmt.Errorf("user TPM batch update is unavailable")
+}
+
 func (s *adminServiceImpl) GetUserAPIKeys(ctx context.Context, userID int64, page, pageSize int, sortBy, sortOrder string) ([]APIKey, int64, error) {
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
 	keys, result, err := s.apiKeyRepo.ListByUserID(ctx, userID, params, APIKeyListFilters{})
@@ -615,6 +637,15 @@ func (s *adminServiceImpl) GetUserRPMStatus(ctx context.Context, userID int64) (
 	userRPMUsed, err := s.userRPMCache.GetUserRPM(ctx, userID)
 	if err != nil {
 		logger.LegacyPrintf("service.admin", "failed to get user rpm: user_id=%d err=%v", userID, err)
+	}
+
+	userTPMUsed := 0
+	if tpmCache, ok := s.userRPMCache.(UserTPMCache); ok {
+		if used, tpmErr := tpmCache.GetUserTPM(ctx, userID); tpmErr == nil {
+			userTPMUsed = used
+		} else {
+			logger.LegacyPrintf("service.admin", "failed to get user tpm: user_id=%d err=%v", userID, tpmErr)
+		}
 	}
 
 	keys, _, err := s.GetUserAPIKeys(ctx, userID, 1, 1000, "", "")
@@ -671,10 +702,25 @@ func (s *adminServiceImpl) GetUserRPMStatus(ctx context.Context, userID int64) (
 	}
 
 	return &UserRPMStatus{
-		UserRPMUsed:  userRPMUsed,
-		UserRPMLimit: user.RPMLimit,
-		PerGroup:     perGroup,
+		UserRPMUsed:          userRPMUsed,
+		UserRPMLimit:         user.RPMLimit,
+		UserTPMUsed:          userTPMUsed,
+		UserTPMLimit:         user.TPMLimit,
+		TPMRetryAfterSeconds: tpmRetryAfterSeconds(user.TPMLimit, userTPMUsed),
+		PerGroup:             perGroup,
 	}, nil
+}
+
+func tpmRetryAfterSeconds(limit, used int) int {
+	if limit <= 0 || used < limit {
+		return 0
+	}
+
+	remaining := 60 - time.Now().Second()
+	if remaining < 1 {
+		return 1
+	}
+	return remaining
 }
 
 func (s *adminServiceImpl) GetUserUsageStats(ctx context.Context, userID int64, period string) (any, error) {

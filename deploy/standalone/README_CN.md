@@ -51,13 +51,13 @@ cp .env.example .env
 docker compose up -d
 ```
 
-浏览器访问 `http://服务器地址:8080`（可通过 `SERVER_PORT` 修改）。Caddy 会把官方 Go 网关的 `/api`、`/v1`、`/v1beta`、`/backend-api`、`/antigravity`、`/responses`、`/messages`、`/chat`、`/images`、`/videos`、`/realtime`、`/live`、`/alpha` 等路径原样转发，Nginx/Caddy 均关闭 SSE 缓冲并保留 WebSocket Upgrade；其它路径由 Blazor WASM 的 SPA 回退处理。首次启动由 `AUTO_SETUP=true` 自动执行数据库迁移和管理员初始化。
+浏览器访问 `http://服务器地址:8080`（可通过 `SERVER_PORT` 修改）。Caddy 会把官方 Go 网关的 `/api`、`/v1`、`/v1beta`、`/backend-api`、`/antigravity`、`/responses`、`/messages`、`/chat`、`/images`、`/videos`、`/realtime`、`/live`、`/alpha` 等路径原样转发，默认上游为 Compose 内的 `backend:8080`；需要使用独立后端时，通过 `.env` 中的 `BACKEND_UPSTREAM=https://后端域名` 配置。Nginx/Caddy 均关闭 SSE 缓冲并保留 WebSocket Upgrade；其它路径由 Blazor WASM 的 SPA 回退处理。首次启动由 `AUTO_SETUP=true` 自动执行数据库迁移和管理员初始化。
 
 前端发行版不包含支付页面、支付导航或支付 API 调用；后端上游支付代码未删除，以便后续同步官方版本。兑换码、订阅状态、配额和管理员订阅管理仍然保留，它们不等同于在线支付。
 
 ## ParaGateway 品牌与首次登录
 
-前端页面、页面标题、favicon 和导航 Logo 使用 ParaGateway 品牌。默认 Compose 配置设置 `PARAGATEWAY_DISABLE_ADMIN_COMPLIANCE=true`，因此首次进入后台不会显示上游的管理员合规确认弹窗，也不会因未写入确认记录而阻断管理员 API。该开关只影响合规确认中间件；设为 `false` 后可恢复上游 API 的强制确认拦截（ParaGateway 前端不再挂载该弹窗，需由自定义客户端处理确认接口）。系统不会代替管理员提交确认记录。
+前端页面、页面标题、favicon 和导航 Logo 使用 ParaGateway 品牌。首次进入后台的管理员合规确认已在代码中永久关闭：管理 API 不再返回确认拦截，兼容状态接口始终返回 `required=false`，前端也不包含合规弹窗或首次使用引导。该行为不依赖环境变量，重新部署或遗漏配置都不会恢复弹窗。
 
 ## 登录验证码
 

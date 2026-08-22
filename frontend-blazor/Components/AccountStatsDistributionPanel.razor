@@ -1,0 +1,93 @@
+@using System.Globalization
+
+<section class="stats-distribution-panel" aria-label="@Title">
+    <header class="stats-distribution-heading">
+        <div>
+            <h3>@Title</h3>
+            <p>按 Token 用量统计</p>
+        </div>
+    </header>
+
+    @if (Rows.Count == 0)
+    {
+        <div class="stats-distribution-empty">暂无数据</div>
+    }
+    else
+    {
+        <div class="stats-distribution-layout">
+            <div class="stats-distribution-chart">
+                <DxPieChart Data="@Rows" InnerDiameter="0.55" Width="100%" Height="210px">
+                    <DxPieChartSeries T="AccountStatsDistributionItemDto"
+                                      TArgument="string"
+                                      TValue="long"
+                                      ArgumentField="item => item.Name"
+                                      ValueField="item => item.TotalTokens" />
+                    <DxChartTooltip Enabled="true" />
+                </DxPieChart>
+            </div>
+            <div class="stats-distribution-table-wrap">
+                <table class="stats-distribution-table">
+                    <thead>
+                        <tr>
+                            <th>@NameLabel</th>
+                            <th>请求</th>
+                            <th>Token</th>
+                            <th>用户计费</th>
+                            @if (ShowAccountCost)
+                            {
+                                <th>账号成本</th>
+                            }
+                            <th>标准费用</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in Rows)
+                        {
+                            <tr>
+                                <td title="@item.Name">@item.Name</td>
+                                <td>@FormatNumber(item.Requests)</td>
+                                <td>@FormatTokens(item.TotalTokens)</td>
+                                <td class="distribution-actual">$@FormatCost(item.ActualCost)</td>
+                                @if (ShowAccountCost)
+                                {
+                                    <td class="distribution-account">$@FormatCost(item.AccountCost ?? 0)</td>
+                                }
+                                <td class="distribution-standard">$@FormatCost(item.Cost)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string NameLabel { get; set; } = "名称";
+    [Parameter] public IReadOnlyList<AccountStatsDistributionItemDto> Items { get; set; } = [];
+    [Parameter] public bool ShowAccountCost { get; set; }
+
+    private IReadOnlyList<AccountStatsDistributionItemDto> Rows => Items
+        .OrderByDescending(item => item.TotalTokens)
+        .ThenByDescending(item => item.Requests)
+        .ToList();
+
+    private static string FormatNumber(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private static string FormatTokens(long value) => value switch
+    {
+        >= 1_000_000_000 => $"{value / 1_000_000_000d:0.##}B",
+        >= 1_000_000 => $"{value / 1_000_000d:0.##}M",
+        >= 1_000 => $"{value / 1_000d:0.##}K",
+        _ => value.ToString("N0", CultureInfo.InvariantCulture)
+    };
+
+    private static string FormatCost(double value) => value switch
+    {
+        >= 1000 => $"{value / 1000:0.00}K",
+        >= 1 => value.ToString("0.00", CultureInfo.InvariantCulture),
+        >= 0.01 => value.ToString("0.000", CultureInfo.InvariantCulture),
+        _ => value.ToString("0.0000", CultureInfo.InvariantCulture)
+    };
+}

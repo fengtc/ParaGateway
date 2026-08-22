@@ -49,9 +49,6 @@ services:
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      # ParaGateway does not show the upstream first-login acknowledgement
-      # dialog. Set this to false to restore the upstream gate if required.
-      PARAGATEWAY_DISABLE_ADMIN_COMPLIANCE: ${PARAGATEWAY_DISABLE_ADMIN_COMPLIANCE:-true}
     volumes:
       # Keep the official server's setup lock, config, pricing cache and logs
       # across container replacement.
@@ -82,12 +79,12 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-    depends_on:
-      - backend
 
   gateway:
     image: caddy:2.10-alpine
     restart: unless-stopped
+    environment:
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-backend:8080}
     ports:
       - "${SERVER_PORT:-8080}:80"
     volumes:
@@ -96,4 +93,3 @@ services:
       - ./data/caddy-config:/config
     depends_on:
       - frontend
-      - backend

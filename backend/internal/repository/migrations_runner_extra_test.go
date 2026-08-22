@@ -11,6 +11,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/migrations"
+
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
@@ -57,6 +59,21 @@ func TestLatestMigrationBaseline(t *testing.T) {
 		require.Equal(t, "010_final", version)
 		require.Equal(t, "010_final", description)
 		require.Len(t, hash, 64)
+	})
+
+	t.Run("hash_is_stable_across_line_endings", func(t *testing.T) {
+		lfFS := fstest.MapFS{
+			"001_init.sql": &fstest.MapFile{Data: []byte("CREATE TABLE t1 (\n  id int\n);\n")},
+		}
+		crlfFS := fstest.MapFS{
+			"001_init.sql": &fstest.MapFile{Data: []byte("CREATE TABLE t1 (\r\n  id int\r\n);\r\n")},
+		}
+
+		_, _, lfHash, err := latestMigrationBaseline(lfFS)
+		require.NoError(t, err)
+		_, _, crlfHash, err := latestMigrationBaseline(crlfFS)
+		require.NoError(t, err)
+		require.Equal(t, lfHash, crlfHash)
 	})
 
 	t.Run("read_file_error", func(t *testing.T) {
@@ -109,6 +126,14 @@ func TestMigrationChecksumCompatibilityRules_CoverEditedUpgradeCompatibilityMigr
 		require.Truef(t, ok, "missing compatibility rule for %s", name)
 		require.NotEmpty(t, rule.fileChecksum)
 		require.NotEmpty(t, rule.acceptedDBChecksum)
+	}
+}
+
+func TestMigrationChecksumCompatibilityRules_MatchCanonicalCurrentFiles(t *testing.T) {
+	for name, rule := range migrationChecksumCompatibilityRules {
+		content, err := fs.ReadFile(migrations.FS, name)
+		require.NoErrorf(t, err, "read migration %s", name)
+		require.Equalf(t, rule.fileChecksum, migrationChecksum(string(content)), "canonical checksum for %s", name)
 	}
 }
 
@@ -259,6 +284,29 @@ func TestApplyMigrationsFS_ChecksumMismatchRejected(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestApplyMigrationsFS_AcceptsAppliedChecksumAcrossLineEndings(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	prepareMigrationsBootstrapExpectations(mock)
+	lfSQL := "CREATE TABLE t (\n  id int\n);\n"
+	crlfSQL := strings.ReplaceAll(lfSQL, "\n", "\r\n")
+	mock.ExpectQuery("SELECT checksum FROM schema_migrations WHERE filename = \\$1").
+		WithArgs("001_init.sql").
+		WillReturnRows(sqlmock.NewRows([]string{"checksum"}).AddRow(migrationChecksum(lfSQL)))
+	mock.ExpectExec("SELECT pg_advisory_unlock\\(\\$1\\)").
+		WithArgs(migrationsAdvisoryLockID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	fsys := fstest.MapFS{
+		"001_init.sql": &fstest.MapFile{Data: []byte(crlfSQL)},
+	}
+	err = applyMigrationsFS(context.Background(), db, fsys)
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestApplyMigrationsFS_CheckMigrationQueryError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
@@ -381,6 +429,6 @@ func TestPgAdvisoryLockAndUnlock_ErrorBranches(t *testing.T) {
 }
 
 func migrationChecksum(content string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(content)))
+	sum := sha256.Sum256([]byte(normalizeMigrationContent(content)))
 	return hex.EncodeToString(sum[:])
 }

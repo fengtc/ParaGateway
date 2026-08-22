@@ -46,6 +46,21 @@ public sealed class UsersPageParityTests
     }
 
     [Fact]
+    public void MoreActionsMenuFloatsOutsideTheScrollableTable()
+    {
+        var markup = ReadSource("Pages", "Users.razor");
+        var css = ReadSource("Pages", "Users.razor.css");
+        var tableScrollEnd = markup.IndexOf("<div class=\"table-pagination\">", StringComparison.Ordinal);
+        var floatingMenu = markup.IndexOf("class=\"row-action-menu\"", StringComparison.Ordinal);
+
+        Assert.Contains("class=\"row-action-menu-backdrop\"", markup, StringComparison.Ordinal);
+        Assert.Contains("paraGateway.positionFloatingMenu", markup, StringComparison.Ordinal);
+        Assert.True(tableScrollEnd >= 0 && floatingMenu > tableScrollEnd);
+        Assert.Contains(".row-action-menu { display: grid; position: fixed;", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("row-menu-anchor", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UsersPageConnectsEveryOfficialAdminEndpoint()
     {
         var client = ReadSource("Services", "ApiClient.cs");
@@ -60,6 +75,27 @@ public sealed class UsersPageParityTests
         Assert.Contains("/admin/dashboard/users-usage", client, StringComparison.Ordinal);
         Assert.Contains("/admin/user-attributes/batch", client, StringComparison.Ordinal);
         Assert.Contains("/admin/groups/all", client, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DepartmentAttributeIsSharedByCreateAndEditInTheRequestedOrder()
+    {
+        var markup = ReadSource("Pages", "Users.razor");
+
+        var usernameIndex = markup.IndexOf("id=\"user-name\"", StringComparison.Ordinal);
+        var departmentIndex = markup.IndexOf("id=\"user-department\"", StringComparison.Ordinal);
+        var roleIndex = markup.IndexOf("id=\"user-role\"", StringComparison.Ordinal);
+        var editorEndIndex = markup.IndexOf("<AppModal Open=\"bulkOpen\"", roleIndex, StringComparison.Ordinal);
+
+        Assert.True(usernameIndex >= 0 && usernameIndex < departmentIndex);
+        Assert.True(departmentIndex < roleIndex);
+        Assert.True(roleIndex < editorEndIndex);
+        Assert.Contains("DepartmentAttributeKey = \"department\"", markup, StringComparison.Ordinal);
+        Assert.Contains("@if (DepartmentAttribute is { } departmentAttribute)", markup, StringComparison.Ordinal);
+        Assert.Contains("@foreach (var definition in OtherEditorAttributes)", markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("@foreach (var definition in EnabledAttributes)", markup[usernameIndex..editorEndIndex], StringComparison.Ordinal);
+        Assert.Contains("var created = await Api.CreateAdminUserAsync(payload);", markup, StringComparison.Ordinal);
+        Assert.Contains("UpdateUserAttributeValuesAsync(created.Id.ToString(), editorAttributes)", markup, StringComparison.Ordinal);
     }
 
     [Fact]

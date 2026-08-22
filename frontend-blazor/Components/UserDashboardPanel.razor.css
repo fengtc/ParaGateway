@@ -587,8 +587,8 @@
 .quota-window small { font-size: .75rem; }
 .filter-label,
 .granularity-filter select { font-size: .85rem; }
-.compact-dashboard-table { font-size: .88rem; }
-.compact-dashboard-table th { font-size: .8rem; }
+.compact-dashboard-table { font-size: .83rem; }
+.compact-dashboard-table th { font-size: .76rem; }
 .dashboard-loading,
 .dashboard-empty { font-size: .88rem; }
 .range-badge { font-size: .78rem !important; }

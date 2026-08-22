@@ -145,6 +145,7 @@
                                 <div class="native-field">
                                     <label for="native-cn-api-protocol">API 协议</label>
                                     <select id="native-cn-api-protocol" value="@form.ApiProtocol" @onchange="SetCNApiProtocol">
+                                        <option value="adaptive">自适应（按入站协议）</option>
                                         <option value="chat_completions">Chat Completions</option>
                                         <option value="anthropic">Anthropic Messages</option>
                                         @if (platform == "deepseek")
@@ -153,6 +154,23 @@
                                         }
                                     </select>
                                 </div>
+                                @if (form.ApiProtocol == "adaptive")
+                                {
+                                    <div class="native-credentials-grid native-adaptive-urls">
+                                        <div class="native-field">
+                                            <label for="native-cn-chat-base-url">Chat Completions Base URL</label>
+                                            <input id="native-cn-chat-base-url" type="url" @bind="form.AdaptiveChatCompletionsBaseUrl" />
+                                        </div>
+                                        <div class="native-field">
+                                            <label for="native-cn-anthropic-base-url">Anthropic Base URL</label>
+                                            <input id="native-cn-anthropic-base-url" type="url" @bind="form.AdaptiveAnthropicBaseUrl" />
+                                        </div>
+                                        @if (platform == "deepseek")
+                                        {
+                                            <div class="native-field"><label for="native-cn-responses-base-url">Responses Base URL</label><input id="native-cn-responses-base-url" type="url" @bind="form.AdaptiveResponsesBaseUrl" /></div>
+                                        }
+                                    </div>
+                                }
                             </div>
                         }
 
@@ -172,10 +190,13 @@
                             @if (accountCategory == "apikey")
                             {
                                 <div class="native-credentials-grid">
-                                    <div class="native-field">
-                                        <label for="native-base-url">@(platform == "antigravity" || IsCNPlatform ? "Base URL" : "Base URL（可选）")</label>
-                                        <input id="native-base-url" value="@form.BaseUrl" @oninput="SetBaseUrl" placeholder="@PlatformBaseUrl" autocomplete="url" required="@(platform == "antigravity")" />
-                                    </div>
+                                    @if (!IsCNPlatform || form.ApiProtocol != "adaptive")
+                                    {
+                                        <div class="native-field">
+                                            <label for="native-base-url">@(platform == "antigravity" || IsCNPlatform ? "Base URL" : "Base URL（可选）")</label>
+                                            <input id="native-base-url" value="@form.BaseUrl" @oninput="SetBaseUrl" placeholder="@PlatformBaseUrl" autocomplete="url" required="@(platform == "antigravity")" />
+                                        </div>
+                                    }
                                     <div class="native-field">
                                         <label for="native-api-key">API Key</label>
                                         <input id="native-api-key" type="password" value="@form.ApiKey" @oninput="SetApiKey" autocomplete="new-password" placeholder="@PlatformApiKeyPlaceholder" />
@@ -191,6 +212,8 @@
                                 </div>
                             }
                         }
+
+                        <AccountModelRestrictionEditor Model="form" />
 
                         @if (ShouldShowOptions)
                         {
@@ -612,6 +635,7 @@
         accountCategory = CurrentCategories.First().Value;
         addMethod = "oauth";
         SyncType();
+        ResetModelRestrictions();
         step = 1;
         oauthStart = null;
         copilotFlow = null;
@@ -622,8 +646,8 @@
         if (IsCNPlatform)
         {
             form.AccountMode = "payg";
-            form.ApiProtocol = "chat_completions";
-            form.BaseUrl = DefaultCNBaseUrl(platform, form.AccountMode, form.ApiProtocol);
+            form.ApiProtocol = "adaptive";
+            EnsureAdaptiveBaseUrls(form, force: true);
         }
         error = null;
         StopCopilotPolling();
@@ -633,6 +657,7 @@
     {
         accountCategory = value;
         SyncType();
+        ResetModelRestrictions();
         error = null;
     }
 
@@ -640,6 +665,7 @@
     {
         addMethod = value;
         SyncType();
+        ResetModelRestrictions();
     }
 
     private void SyncType()
@@ -653,6 +679,13 @@
             "service_account" => "service_account",
             _ => platform == "anthropic" && addMethod == "setup-token" ? "setup-token" : "oauth"
         };
+    }
+
+    private void ResetModelRestrictions()
+    {
+        form.ModelRestrictionMode = AccountModelRestrictions.SupportsWhitelist(platform) ? "whitelist" : "mapping";
+        form.AllowedModels.Clear();
+        form.ModelMappings.Clear();
     }
 
     private async Task NextAsync()
@@ -681,7 +714,16 @@
 
     private async Task CreateDirectAsync()
     {
-        if ((platform == "antigravity" || IsCNPlatform) && accountCategory == "apikey" && string.IsNullOrWhiteSpace(form.BaseUrl))
+        if (IsCNPlatform && accountCategory == "apikey" && form.ApiProtocol == "adaptive")
+        {
+            var adaptiveError = ValidateAdaptiveBaseUrls();
+            if (adaptiveError is not null)
+            {
+                error = adaptiveError;
+                return;
+            }
+        }
+        else if ((platform == "antigravity" || IsCNPlatform) && accountCategory == "apikey" && string.IsNullOrWhiteSpace(form.BaseUrl))
         {
             error = "请输入 Base URL";
             return;
@@ -815,6 +857,9 @@
             BaseUrl = form.BaseUrl.Trim(),
             AccountMode = form.AccountMode,
             ApiProtocol = form.ApiProtocol,
+            AdaptiveChatCompletionsBaseUrl = form.AdaptiveChatCompletionsBaseUrl.Trim(),
+            AdaptiveAnthropicBaseUrl = form.AdaptiveAnthropicBaseUrl.Trim(),
+            AdaptiveResponsesBaseUrl = form.AdaptiveResponsesBaseUrl.Trim(),
             CredentialsJson = credentialsJson ?? form.CredentialsJson,
             ExtraJson = string.IsNullOrWhiteSpace(form.ExtraJson) ? "{}" : form.ExtraJson,
             ProxyId = form.ProxyId,
@@ -824,7 +869,12 @@
             RateMultiplier = form.RateMultiplier,
             ExpiresAt = form.ExpiresAt,
             AutoPauseOnExpired = autoPauseOnExpired,
-            GroupIds = [.. form.GroupIds]
+            GroupIds = [.. form.GroupIds],
+            ModelRestrictionMode = form.ModelRestrictionMode,
+            AllowedModels = [.. form.AllowedModels],
+            ModelMappings = form.ModelMappings
+                .Select(mapping => new ModelMappingInput { From = mapping.From, To = mapping.To })
+                .ToList()
         };
         input.ProbeEnabled = form.ProbeEnabled;
         input.RateSyncEnabled = form.RateSyncEnabled;
@@ -1069,15 +1119,18 @@
 
     private void SetCNAccountMode(ChangeEventArgs e)
     {
+        var previousMode = form.AccountMode;
         form.AccountMode = platform == "deepseek" ? "payg" : e.Value?.ToString() == "coding" ? "coding" : "payg";
-        form.BaseUrl = DefaultCNBaseUrl(platform, form.AccountMode, form.ApiProtocol);
+        if (form.ApiProtocol == "adaptive") EnsureAdaptiveBaseUrls(form, previousMode);
+        else form.BaseUrl = DefaultCNBaseUrl(platform, form.AccountMode, form.ApiProtocol);
     }
 
     private void SetCNApiProtocol(ChangeEventArgs e)
     {
         var requested = e.Value?.ToString() ?? "chat_completions";
         form.ApiProtocol = requested == "responses" && platform != "deepseek" ? "chat_completions" : requested;
-        form.BaseUrl = DefaultCNBaseUrl(platform, form.AccountMode, form.ApiProtocol);
+        if (form.ApiProtocol == "adaptive") EnsureAdaptiveBaseUrls(form);
+        else form.BaseUrl = DefaultCNBaseUrl(platform, form.AccountMode, form.ApiProtocol);
     }
 
     internal static string DefaultCNBaseUrl(string provider, string mode, string protocol)
@@ -1099,6 +1152,53 @@
             "deepseek" => "https://api.deepseek.com",
             _ => string.Empty
         };
+    }
+
+    private void EnsureAdaptiveBaseUrls(AccountInput input, string? previousMode = null, bool force = false)
+    {
+        var previousChat = previousMode is null ? string.Empty : DefaultCNBaseUrl(platform, previousMode, "chat_completions");
+        var previousAnthropic = previousMode is null ? string.Empty : DefaultCNBaseUrl(platform, previousMode, "anthropic");
+        var previousResponses = previousMode is null ? string.Empty : DefaultCNBaseUrl(platform, previousMode, "responses");
+        input.AdaptiveChatCompletionsBaseUrl = RebaseAdaptiveUrl(
+            input.AdaptiveChatCompletionsBaseUrl,
+            previousChat,
+            DefaultCNBaseUrl(platform, input.AccountMode, "chat_completions"),
+            force);
+        input.AdaptiveAnthropicBaseUrl = RebaseAdaptiveUrl(
+            input.AdaptiveAnthropicBaseUrl,
+            previousAnthropic,
+            DefaultCNBaseUrl(platform, input.AccountMode, "anthropic"),
+            force);
+        input.AdaptiveResponsesBaseUrl = platform == "deepseek"
+            ? RebaseAdaptiveUrl(
+                input.AdaptiveResponsesBaseUrl,
+                previousResponses,
+                DefaultCNBaseUrl(platform, input.AccountMode, "responses"),
+                force)
+            : string.Empty;
+        input.BaseUrl = input.AdaptiveChatCompletionsBaseUrl;
+    }
+
+    private static string RebaseAdaptiveUrl(string current, string previousDefault, string nextDefault, bool force)
+    {
+        if (force || string.IsNullOrWhiteSpace(current)
+            || (!string.IsNullOrWhiteSpace(previousDefault)
+                && string.Equals(current.Trim(), previousDefault, StringComparison.OrdinalIgnoreCase)))
+        {
+            return nextDefault;
+        }
+        return current.Trim();
+    }
+
+    private string? ValidateAdaptiveBaseUrls()
+    {
+        if (string.IsNullOrWhiteSpace(form.AdaptiveChatCompletionsBaseUrl))
+            return "请输入 Chat Completions Base URL";
+        if (string.IsNullOrWhiteSpace(form.AdaptiveAnthropicBaseUrl))
+            return "请输入 Anthropic Base URL";
+        if (platform == "deepseek" && string.IsNullOrWhiteSpace(form.AdaptiveResponsesBaseUrl))
+            return "请输入 Responses Base URL";
+        return null;
     }
 
     private void SetBaseUrl(ChangeEventArgs e) => form.BaseUrl = e.Value?.ToString() ?? string.Empty;

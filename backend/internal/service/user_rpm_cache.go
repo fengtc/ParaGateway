@@ -23,3 +23,10 @@ type UserRPMCache interface {
 	// GetUserRPM 获取用户当前分钟已用 RPM（只读，不递增）。
 	GetUserRPM(ctx context.Context, userID int64) (count int, err error)
 }
+
+// UserTPMCache is an optional extension implemented by the Redis user limiter.
+// Keeping it separate preserves compatibility with existing RPM test doubles.
+type UserTPMCache interface {
+	IncrementUserTPM(ctx context.Context, userID int64, tokens int) (count int, err error)
+	GetUserTPM(ctx context.Context, userID int64) (count int, err error)
+}

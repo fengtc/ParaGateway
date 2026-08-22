@@ -23,7 +23,7 @@ Blazor Server 仍适合必须把密钥和业务逻辑留在服务器端的内部
 - `deploy/standalone`：PostgreSQL、Redis、Go、Nginx、Caddy 的独立部署编排。
 - `deploy/standalone/data/frontend`：最新 Release 的完整发布目录；Nginx 挂载其中的 `wwwroot`。
 
-`backend` 以 `reference_sub2api/backend` 的官方 Go 实现为基础；ParaGateway 仅增加了可选的 `PARAGATEWAY_DISABLE_ADMIN_COMPLIANCE` 部署开关，用于在独立主机部署中关闭首次进入后台的强制确认拦截，其他 API、数据库和网关协议保持兼容。
+`backend` 以 `reference_sub2api/backend` 的官方 Go 实现为基础；ParaGateway 在代码中永久关闭首次进入后台的强制确认拦截，同时保留无害的兼容状态接口，其他 API、数据库和网关协议保持兼容。
 
 ## 功能边界
 
@@ -36,6 +36,20 @@ Blazor Server 仍适合必须把密钥和业务逻辑留在服务器端的内部
 ## DevExpress 版本
 
 用户描述的 `6.1.3` 不是当前可解析的 Blazor 包版本；本机可用且已验证的是 `DevExpress.Blazor` 和 `DevExpress.Blazor.Themes` `26.1.3`。生产构建必须使用合法 DevExpress 许可证，不能把许可证文件、私有 NuGet 源或凭据提交到仓库。
+
+## v0.1.179 选择性升级
+
+当前后端版本为 `0.1.179`。本次在保留 ParaGateway 合规、OAuth、日志、迁移和 Blazor 定制的前提下，选择性回移了官方 v0.1.179 的 adaptive 国产模型协议、Composite 路由扩展、渠道计费倍率、代理探测、Responses input-token 预检、Responses/WebSocket/failover 修复及相关协议兼容改动。
+
+官方迁移编号 226-228 与 ParaGateway 现有迁移冲突，因此保持官方 SQL 内容不变并重编号：
+
+- 官方 `226_add_usage_log_effective_model_indexes_notx.sql` -> 本地 `229_add_usage_log_effective_model_indexes_notx.sql`
+- 官方 `227_composite_routes_add_cn_providers.sql` -> 本地 `230_composite_routes_add_cn_providers.sql`
+- 官方 `228_channel_pricing_multipliers.sql` -> 本地 `231_channel_pricing_multipliers.sql`
+
+不要再把官方 226-228 原编号文件复制到本仓库，否则会与已登记迁移发生编号或 checksum 冲突。
+
+v0.1.179 将 OpenAI 长上下文计费门控从“分组 AND 账号”改为“分组 OR 账号”。生产升级前必须同时审计分组和账号的 `long_context_pricing_enabled`；任一侧启用后，超过 272k 上下文的请求可能按输入 2 倍、输出 1.5 倍计费。
 
 ## 验证与发布
 
@@ -61,4 +75,14 @@ docker compose up -d
 
 默认入口是 `http://服务器地址:8080`。Caddy 将 `/api`、`/v1`、`/v1beta`、模型网关、SSE、WebSocket 和 setup API 转发到 Go 服务，其余路径交给 Nginx 的 Blazor SPA 回退。正式环境应在 Caddy 配置 HTTPS，并限制反向代理信任范围。
 
-本次本机验证结果：前端 Release 测试程序集通过 69 项契约测试；Docker Compose 已成功重建并启动 PostgreSQL、Redis、Go、Nginx、Caddy 五个容器；后端 `internal/server/middleware` 测试包通过，入口首页、`/health`、`/setup/status`、管理员登录和管理员统计 API 均已实测通过。当前环境没有宿主机 Go CLI，因此 Go 测试在后端 Docker 容器中执行；真实模型上游、OAuth、SSE 和 WebSocket 仍需在配置上游凭据后单独联调。首次构建测试若遇到 Windows `obj`/临时目录权限错误，应将 `TEMP`、`TMP` 和项目输出目录指向可写路径。
+本次 v0.1.179 本机验证结果：
+
+- `dotnet test`：295 通过、0 失败、0 跳过。
+- `go test ./... -count=1`：Go 全仓全部包通过。
+- Blazor Release 发布成功；仅有既有 DevExpress WASM P/Invoke 裁剪警告。
+- PostgreSQL 17 隔离集成验证通过：全量迁移、重复执行、两个实例并发迁移锁、229 无效并发索引恢复，以及 229-231 的迁移记录、有效索引、Composite 约束、六个倍率列和六个正数约束均已核实。
+- 后端 Dockerfile 已改为 Go builder + Alpine runtime 多阶段构建，生产镜像不再包含 Go 工具链、模块缓存和源码。
+- `linux/amd64` 最终候选 `paragateway-backend:v0.1.179-amd64` 为 116,867,727 字节，镜像 ID `sha256:017af76e6a5241b3de8fb902ee59b37f09dcfe470ce55b82b2c65717ee960510`；容器内 `./main --version` 返回 `ParaGateway 0.1.179`。
+- Browser 插件不可用，改用本机 Playwright 1.60.0 + Chrome 验证登录、账号管理、Kimi/智谱/DeepSeek adaptive 地址、账号模式切换、分组长上下文开关和 390x844 移动视口；目标页面控制台错误、页面异常和请求失败均为 0。
+
+真实模型上游、OAuth、SSE 和 WebSocket 仍需使用生产凭据做部署后冒烟，凭据不得写入仓库、聊天或前端发布目录。首次构建测试若遇到 Windows `obj`/临时目录权限错误，应将 `TEMP`、`TMP` 和项目输出目录指向可写路径。

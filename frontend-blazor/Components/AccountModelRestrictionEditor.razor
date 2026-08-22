@@ -1,0 +1,210 @@
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+@if (AccountModelRestrictions.ShouldShow(Model.Platform, Model.Type))
+{
+    <section class="model-restriction-editor" data-testid="model-restriction-editor">
+        <div class="model-restriction-heading">
+            <div>
+                <strong>模型限制（可选）</strong>
+                <small>留空表示支持该账号的全部模型。</small>
+            </div>
+        </div>
+
+        @if (AccountModelRestrictions.SupportsWhitelist(Model.Platform))
+        {
+            <div class="model-mode-tabs" role="tablist" aria-label="模型限制方式">
+                <button type="button" role="tab" aria-selected="@(Model.ModelRestrictionMode == "whitelist")" class="@(Model.ModelRestrictionMode == "whitelist" ? "selected" : string.Empty)" @onclick='() => SelectMode("whitelist")'>
+                    <Icon Name="check" Size="16" /> 模型白名单
+                </button>
+                <button type="button" role="tab" aria-selected="@(Model.ModelRestrictionMode == "mapping")" class="mapping @(Model.ModelRestrictionMode == "mapping" ? "selected" : string.Empty)" @onclick='() => SelectMode("mapping")'>
+                    <Icon Name="arrow-right" Size="16" /> 模型映射
+                </button>
+            </div>
+        }
+
+        @if (Model.ModelRestrictionMode == "whitelist" && AccountModelRestrictions.SupportsWhitelist(Model.Platform))
+        {
+            <div class="model-selector" role="button" tabindex="0" aria-expanded="@modelsOpen" @onclick="ToggleModels" @onkeydown="SelectorKeyDown">
+                @if (Model.AllowedModels.Count == 0)
+                {
+                    <span class="model-selector-empty">未选择模型，默认支持全部模型</span>
+                }
+                else
+                {
+                    <div class="selected-model-grid">
+                        @foreach (var model in Model.AllowedModels)
+                        {
+                            <span class="selected-model" @key="model">
+                                <span title="@model">@model</span>
+                                <button type="button" title="移除 @model" aria-label="移除 @model" @onclick="() => RemoveModel(model)" @onclick:stopPropagation><Icon Name="x" Size="14" /></button>
+                            </span>
+                        }
+                    </div>
+                }
+                <div class="model-selector-footer"><span>@Model.AllowedModels.Count 个模型</span><Icon Name="@(modelsOpen ? "chevron-up" : "chevron-down")" Size="18" /></div>
+            </div>
+
+            @if (modelsOpen)
+            {
+                <div class="model-options" data-testid="model-options">
+                    <div class="model-search"><Icon Name="search" Size="16" /><input value="@search" @oninput="SearchChanged" placeholder="搜索模型" /></div>
+                    <div class="model-options-list">
+                        @foreach (var model in FilteredModels)
+                        {
+                            <div class="model-option" @key="model">
+                                <button type="button" class="model-option-select" @onclick="() => ToggleModel(model)">
+                                    <span class="model-checkbox @(Model.AllowedModels.Contains(model, StringComparer.Ordinal) ? "checked" : string.Empty)">@if (Model.AllowedModels.Contains(model, StringComparer.Ordinal)) { <Icon Name="check" Size="12" /> }</span>
+                                    <span>@model</span>
+                                </button>
+                                <button type="button" class="model-copy" title="复制 @model" aria-label="复制 @model" @onclick="() => CopyModelAsync(model)"><Icon Name="copy" Size="15" /></button>
+                            </div>
+                        }
+                        @if (!FilteredModels.Any())
+                        {
+                            <div class="model-options-empty">没有匹配的模型</div>
+                        }
+                    </div>
+                </div>
+            }
+
+            <div class="model-actions">
+                <button type="button" class="model-action" @onclick="FillRelated"><Icon Name="plus" Size="15" /> 填入相关模型</button>
+                <button type="button" class="model-action sync" disabled="@(!CanSync || syncing)" title="@SyncTitle" @onclick="SyncModelsAsync"><Icon Name="refresh" Size="15" /> @(syncing ? "同步中…" : "同步最新支持模型")</button>
+                <button type="button" class="model-action clear" disabled="@(Model.AllowedModels.Count == 0)" @onclick="ClearWhitelist"><Icon Name="trash" Size="15" /> 清除所有模型</button>
+            </div>
+
+            <div class="custom-model">
+                <label for="custom-model-name">自定义模型名称</label>
+                <div><input id="custom-model-name" @bind="customModel" @bind:event="oninput" @onkeydown="CustomModelKeyDown" placeholder="输入自定义模型名称" /><button type="button" disabled="@(string.IsNullOrWhiteSpace(customModel))" @onclick="AddCustomModel">填入</button></div>
+            </div>
+            <p class="selected-count">已选择 @Model.AllowedModels.Count 个模型</p>
+        }
+        else
+        {
+            <div class="mapping-help"><Icon Name="info" Size="16" /><span>将请求模型映射到该账号实际支持的上游模型；请求模型支持末尾通配符。</span></div>
+            <div class="mapping-list">
+                @foreach (var mapping in Model.ModelMappings)
+                {
+                    <div class="mapping-row" @key="mapping">
+                        <input @bind="mapping.From" @bind:event="oninput" placeholder="请求模型" aria-label="请求模型" />
+                        <Icon Name="arrow-right" Size="17" />
+                        <input @bind="mapping.To" @bind:event="oninput" placeholder="实际模型" aria-label="实际模型" />
+                        <button type="button" class="mapping-remove" title="删除映射" aria-label="删除映射" @onclick="() => RemoveMapping(mapping)"><Icon Name="trash" Size="16" /></button>
+                    </div>
+                }
+            </div>
+            <button type="button" class="add-mapping" @onclick="AddMapping"><Icon Name="plus" Size="16" /> 添加模型映射</button>
+            @if (Presets.Count > 0)
+            {
+                <div class="mapping-presets" aria-label="常用映射">
+                    @foreach (var preset in Presets)
+                    {
+                        <button type="button" title="@preset.From → @preset.To" @onclick="() => AddPreset(preset)">+ @preset.Label</button>
+                    }
+                </div>
+            }
+            <div class="mapping-footer"><span>已配置 @CompleteMappingCount 条映射</span><button type="button" disabled="@(Model.ModelMappings.Count == 0)" @onclick="ClearMappings"><Icon Name="trash" Size="15" /> 清除所有映射</button></div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public AccountInput Model { get; set; } = new();
+    [Parameter] public string? AccountId { get; set; }
+
+    private bool modelsOpen;
+    private bool syncing;
+    private string search = string.Empty;
+    private string customModel = string.Empty;
+    private IReadOnlyList<ModelMappingPreset> Presets => AccountModelRestrictions.PresetsFor(Model.Platform, Model.Type);
+    private IEnumerable<string> FilteredModels => AccountModelRestrictions.ModelsFor(Model.Platform, Model.Type)
+        .Where(model => string.IsNullOrWhiteSpace(search) || model.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase));
+    private bool CanSync => !string.IsNullOrWhiteSpace(AccountId)
+        || (string.Equals(Model.Type, "apikey", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(Model.ApiKey));
+    private string SyncTitle => CanSync ? "从上游读取当前支持的模型" : "新建 API Key 账号需要先填写 API Key；OAuth 账号保存后可同步";
+    private int CompleteMappingCount => Model.ModelMappings.Count(item => !string.IsNullOrWhiteSpace(item.From) && !string.IsNullOrWhiteSpace(item.To));
+
+    private void SelectMode(string mode)
+    {
+        Model.ModelRestrictionMode = mode == "mapping" ? "mapping" : "whitelist";
+        modelsOpen = false;
+    }
+
+    private void ToggleModels() => modelsOpen = !modelsOpen;
+    private void SelectorKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter" or " ") ToggleModels();
+    }
+    private void SearchChanged(ChangeEventArgs e) => search = e.Value?.ToString() ?? string.Empty;
+
+    private void ToggleModel(string model)
+    {
+        if (Model.AllowedModels.Contains(model, StringComparer.Ordinal)) RemoveModel(model);
+        else Model.AllowedModels.Add(model);
+    }
+
+    private void RemoveModel(string model) => Model.AllowedModels.RemoveAll(value => string.Equals(value, model, StringComparison.Ordinal));
+
+    private void FillRelated()
+    {
+        AddModels(AccountModelRestrictions.ModelsFor(Model.Platform, Model.Type));
+        Toasts.Success($"已填入 {Model.AllowedModels.Count} 个相关模型");
+    }
+
+    private async Task SyncModelsAsync()
+    {
+        if (!CanSync || syncing) return;
+        syncing = true;
+        try
+        {
+            IEnumerable<string> models = !string.IsNullOrWhiteSpace(AccountId)
+                ? (await Api.SyncAccountModelsAsync(AccountId)).Select(item => item.Id)
+                : await Api.PreviewAccountModelsAsync(Model);
+            var before = Model.AllowedModels.Count;
+            AddModels(models);
+            Toasts.Success($"上游返回 {Model.AllowedModels.Count - before} 个新模型，当前共 {Model.AllowedModels.Count} 个");
+        }
+        catch (ApiException ex) { Toasts.Error(ex.Message); }
+        finally { syncing = false; }
+    }
+
+    private void AddModels(IEnumerable<string> models)
+    {
+        foreach (var model in models.Select(value => value.Trim()).Where(value => value.Length > 0).Distinct(StringComparer.Ordinal))
+        {
+            if (!Model.AllowedModels.Contains(model, StringComparer.Ordinal)) Model.AllowedModels.Add(model);
+        }
+    }
+
+    private void ClearWhitelist() => Model.AllowedModels.Clear();
+    private void CustomModelKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") AddCustomModel();
+    }
+    private void AddCustomModel()
+    {
+        var value = customModel.Trim();
+        if (value.Length == 0) return;
+        if (!Model.AllowedModels.Contains(value, StringComparer.Ordinal)) Model.AllowedModels.Add(value);
+        customModel = string.Empty;
+    }
+
+    private void AddMapping() => Model.ModelMappings.Add(new ModelMappingInput());
+    private void RemoveMapping(ModelMappingInput mapping) => Model.ModelMappings.Remove(mapping);
+    private void ClearMappings() => Model.ModelMappings.Clear();
+    private void AddPreset(ModelMappingPreset preset)
+    {
+        var existing = Model.ModelMappings.FirstOrDefault(item => string.Equals(item.From.Trim(), preset.From, StringComparison.Ordinal));
+        if (existing is null) Model.ModelMappings.Add(new ModelMappingInput { From = preset.From, To = preset.To });
+        else existing.To = preset.To;
+    }
+
+    private async Task CopyModelAsync(string model)
+    {
+        var copied = await JS.InvokeAsync<bool>("paraGateway.copyText", model);
+        if (copied) Toasts.Success("模型名称已复制");
+        else Toasts.Error("复制失败，请手动选择模型名称");
+    }
+}

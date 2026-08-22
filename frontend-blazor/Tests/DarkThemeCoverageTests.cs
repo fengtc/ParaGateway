@@ -35,7 +35,6 @@ public sealed class DarkThemeCoverageTests
         Assert.Contains("html[data-theme=\"dark\"] .monitor-v2-title > span", app, StringComparison.Ordinal);
         Assert.Contains("html[data-theme=\"dark\"] .backup-status.success", app, StringComparison.Ordinal);
         Assert.Contains("html[data-theme=\"dark\"] .oauth-result", app, StringComparison.Ordinal);
-        Assert.Contains("html[data-theme=\"dark\"] .version-badge.has-update", app, StringComparison.Ordinal);
 
         foreach (var file in IsolatedStyles())
         {

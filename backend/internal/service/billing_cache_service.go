@@ -28,6 +28,7 @@ var (
 	// RPM 超限错误。gateway_handler 负责映射为 HTTP 429。
 	ErrGroupRPMExceeded = infraerrors.TooManyRequests("GROUP_RPM_EXCEEDED", "group requests-per-minute limit exceeded")
 	ErrUserRPMExceeded  = infraerrors.TooManyRequests("USER_RPM_EXCEEDED", "user requests-per-minute limit exceeded")
+	ErrUserTPMExceeded  = infraerrors.TooManyRequests("USER_TPM_EXCEEDED", "user tokens-per-minute limit exceeded")
 
 	// user × platform quota（HTTP 429 Too Many Requests + Retry-After header）。
 	// 选用 429 而非 403：限额耗尽属于"暂时性资源用尽，重试可恢复"的场景（RFC 6585），
@@ -772,6 +773,9 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 	if err := s.checkRPM(ctx, user, group); err != nil {
 		return err
 	}
+	if err := s.checkTPM(ctx, user); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -785,6 +789,48 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 //
 // 与旧版"级联互斥"设计不同，新版确保 user.rpm_limit 作为全局天花板不会被 group 或 override 覆盖。
 // Redis 故障一律 fail-open（打 warning，不阻塞业务）。
+// RecordUserTPM adds actual completed-request tokens to the user's current Redis minute.
+// It is deliberately best-effort: Redis outages must not turn a successful
+// upstream response into a gateway failure.
+func (s *BillingCacheService) RecordUserTPM(ctx context.Context, userID int64, tokens int) {
+	if s == nil || userID <= 0 || tokens <= 0 || s.userRPMCache == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cache, ok := s.userRPMCache.(UserTPMCache)
+	if !ok {
+		return
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cacheWriteTimeout)
+	defer cancel()
+	if _, err := cache.IncrementUserTPM(writeCtx, userID, tokens); err != nil {
+		logger.LegacyPrintf("service.billing_cache", "Warning: tpm increment failed for user=%d tokens=%d: %v", userID, tokens, err)
+	}
+}
+
+// checkTPM checks the user-global current-minute token total. Actual tokens are
+// charged after a completed request; Redis failures fail open like RPM.
+func (s *BillingCacheService) checkTPM(ctx context.Context, user *User) error {
+	if s == nil || user == nil || user.TPMLimit <= 0 || s.userRPMCache == nil {
+		return nil
+	}
+	cache, ok := s.userRPMCache.(UserTPMCache)
+	if !ok {
+		return nil
+	}
+	used, err := cache.GetUserTPM(ctx, user.ID)
+	if err != nil {
+		logger.LegacyPrintf("service.billing_cache", "Warning: tpm lookup failed for user=%d: %v", user.ID, err)
+		return nil
+	}
+	if used >= user.TPMLimit {
+		return ErrUserTPMExceeded
+	}
+	return nil
+}
+
 func (s *BillingCacheService) checkRPM(ctx context.Context, user *User, group *Group) error {
 	if s == nil || s.userRPMCache == nil || user == nil {
 		return nil

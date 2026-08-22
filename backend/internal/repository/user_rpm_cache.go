@@ -22,6 +22,7 @@ const (
 	userRPMKeyPrefix      = "rpm:u:"
 
 	userRPMKeyTTL = 120 * time.Second
+	userTPMKeyTTL = 120 * time.Second
 )
 
 type userRPMCacheImpl struct {
@@ -103,6 +104,40 @@ func (c *userRPMCacheImpl) GetUserRPM(ctx context.Context, userID int64) (int, e
 	}
 	if err != nil {
 		return 0, fmt.Errorf("user rpm get: %w", err)
+	}
+	return val, nil
+}
+
+func (c *userRPMCacheImpl) IncrementUserTPM(ctx context.Context, userID int64, tokens int) (int, error) {
+	if tokens <= 0 {
+		return c.GetUserTPM(ctx, userID)
+	}
+	minute, err := c.minuteTS(ctx)
+	if err != nil {
+		return 0, err
+	}
+	key := fmt.Sprintf("tpm:u:%d:%d", userID, minute)
+	pipe := c.rdb.TxPipeline()
+	incr := pipe.IncrBy(ctx, key, int64(tokens))
+	pipe.Expire(ctx, key, userTPMKeyTTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, fmt.Errorf("user tpm increment: %w", err)
+	}
+	return int(incr.Val()), nil
+}
+
+func (c *userRPMCacheImpl) GetUserTPM(ctx context.Context, userID int64) (int, error) {
+	minute, err := c.minuteTS(ctx)
+	if err != nil {
+		return 0, err
+	}
+	key := fmt.Sprintf("tpm:u:%d:%d", userID, minute)
+	val, err := c.rdb.Get(ctx, key).Int()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("user tpm get: %w", err)
 	}
 	return val, nil
 }

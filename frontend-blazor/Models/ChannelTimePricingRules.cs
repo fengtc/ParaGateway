@@ -33,6 +33,37 @@ public static partial class ChannelTimePricingRules
                 entryIndex++;
                 if (entry.ValueKind != JsonValueKind.Object)
                     return $"模型定价第 {entryIndex} 项必须是 JSON 对象。";
+                foreach (var property in new[] { "fast_multiplier", "flex_multiplier" })
+                {
+                    var multiplierError = ValidatePositiveMultiplier(entry, property);
+                    if (multiplierError is not null)
+                        return $"模型定价第 {entryIndex} 项的 {multiplierError}";
+                }
+
+                if (entry.TryGetProperty("intervals", out var intervals)
+                    && intervals.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+                {
+                    if (intervals.ValueKind != JsonValueKind.Array)
+                        return $"模型定价第 {entryIndex} 项的 intervals 必须是数组。";
+                    var intervalIndex = 0;
+                    foreach (var interval in intervals.EnumerateArray())
+                    {
+                        intervalIndex++;
+                        if (interval.ValueKind != JsonValueKind.Object)
+                            return $"模型定价第 {entryIndex} 项的第 {intervalIndex} 个 interval 必须是对象。";
+                        foreach (var property in new[]
+                        {
+                            "input_multiplier", "output_multiplier",
+                            "cache_write_multiplier", "cache_read_multiplier"
+                        })
+                        {
+                            var multiplierError = ValidatePositiveMultiplier(interval, property);
+                            if (multiplierError is not null)
+                                return $"模型定价第 {entryIndex} 项的第 {intervalIndex} 个 interval 的 {multiplierError}";
+                        }
+                    }
+                }
+
                 if (!entry.TryGetProperty("time_pricing", out var timePricing)
                     || timePricing.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
                     continue;
@@ -93,6 +124,19 @@ public static partial class ChannelTimePricingRules
         }
 
         return null;
+    }
+
+    private static string? ValidatePositiveMultiplier(JsonElement owner, string property)
+    {
+        if (!owner.TryGetProperty(property, out var value)
+            || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return null;
+        if (value.ValueKind == JsonValueKind.Number
+            && value.TryGetDouble(out var multiplier)
+            && double.IsFinite(multiplier)
+            && multiplier > 0)
+            return null;
+        return $"{property} 必须是大于 0 的有限数值。";
     }
 
     public static bool IsValidTimezone(string timezone)

@@ -16,7 +16,6 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
     private readonly SemaphoreSlim tokenRefreshLock = new(1, 1);
 
     public event Action? Unauthorized;
-    public event Action? ComplianceRequired;
 
     private async Task<string?> GetTokenAsync(string key) =>
         await js.InvokeAsync<string?>("localStorage.getItem", key);
@@ -333,12 +332,6 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         return ProfileDto.From(user);
     }
 
-    public Task<AdminComplianceStatusDto> GetAdminComplianceStatusAsync() =>
-        SendAsync<AdminComplianceStatusDto>(HttpMethod.Get, $"{ApiPrefix}/admin/compliance");
-
-    public Task<AdminComplianceStatusDto> AcceptAdminComplianceAsync(string phrase, string language = "zh") =>
-        SendAsync<AdminComplianceStatusDto>(HttpMethod.Post, $"{ApiPrefix}/admin/compliance/accept", new { phrase, language });
-
     public Task<List<UserAttributeDefinitionDto>> GetUserAttributeDefinitionsAsync() =>
         SendAsync<List<UserAttributeDefinitionDto>>(HttpMethod.Get, $"{ApiPrefix}/admin/user-attributes");
 
@@ -540,13 +533,15 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
     public Task<AdminBatchUpdateResultDto> BatchUpdateAdminUserLimitsAsync(
         IEnumerable<long> userIds,
         int? concurrency,
-        int? rpmLimit) =>
+        int? rpmLimit,
+        int? tpmLimit = null) =>
         SendAsync<AdminBatchUpdateResultDto>(HttpMethod.Post, $"{ApiPrefix}/admin/users/batch-limits", new
         {
             user_ids = userIds.Distinct().ToArray(),
             all = false,
             concurrency,
-            rpm_limit = rpmLimit
+            rpm_limit = rpmLimit,
+            tpm_limit = tpmLimit
         });
 
     public Task<AdminBalanceHistoryResponseDto> GetAdminUserBalanceHistoryAsync(
@@ -974,11 +969,24 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         return AccountDto.From(account);
     }
 
-    public Task<JsonElement> GetAccountStatsAsync(string id, int days = 7) =>
-        SendAsync<JsonElement>(HttpMethod.Get, $"{ApiPrefix}/admin/accounts/{Uri.EscapeDataString(id)}/stats?days={Math.Clamp(days, 1, 90)}");
+    public Task<AccountUsageStatsDto> GetAccountStatsAsync(string id, int days = 30) =>
+        SendAsync<AccountUsageStatsDto>(HttpMethod.Get, $"{ApiPrefix}/admin/accounts/{Uri.EscapeDataString(id)}/stats?days={Math.Clamp(days, 1, 90)}");
 
-    public Task<JsonElement> GetAccountUsageAsync(string id, bool force = false) =>
-        SendAsync<JsonElement>(HttpMethod.Get, $"{ApiPrefix}/admin/accounts/{Uri.EscapeDataString(id)}/usage?source=passive&force={force.ToString().ToLowerInvariant()}");
+    public Task<AccountUsageInfoDto> GetAccountUsageAsync(string id, bool force = false, string source = "passive") =>
+        SendAsync<AccountUsageInfoDto>(HttpMethod.Get, $"{ApiPrefix}/admin/accounts/{Uri.EscapeDataString(id)}/usage?source={Uri.EscapeDataString(source)}&force={force.ToString().ToLowerInvariant()}");
+
+    public Task<AccountUsageBatchResponseDto> GetAccountUsageBatchAsync(IEnumerable<string> ids, bool force = false) =>
+        SendAsync<AccountUsageBatchResponseDto>(HttpMethod.Post, $"{ApiPrefix}/admin/accounts/usage/batch", new
+        {
+            account_ids = ids.Select(long.Parse).ToArray(),
+            force
+        });
+
+    public Task<OpenAIQuotaUsageDto> RefreshOpenAIQuotaAsync(string id) =>
+        SendAsync<OpenAIQuotaUsageDto>(HttpMethod.Post, $"{ApiPrefix}/admin/openai/accounts/{Uri.EscapeDataString(id)}/quota/refresh");
+
+    public Task<OpenAIQuotaResetResultDto> ResetOpenAIQuotaAsync(string id) =>
+        SendAsync<OpenAIQuotaResetResultDto>(HttpMethod.Post, $"{ApiPrefix}/admin/openai/accounts/{Uri.EscapeDataString(id)}/reset-quota");
 
     public Task<AccountTodayStatsBatchDto> GetAccountTodayStatsBatchAsync(IEnumerable<string> ids) =>
         SendAsync<AccountTodayStatsBatchDto>(HttpMethod.Post, $"{ApiPrefix}/admin/accounts/today-stats/batch", new
@@ -1139,6 +1147,7 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         payload["weekly_limit_usd"] = input.WeeklyLimitUsd;
         payload["monthly_limit_usd"] = input.MonthlyLimitUsd;
         payload["rpm_limit"] = input.RpmLimit;
+        payload["long_context_pricing_enabled"] = input.LongContextPricingEnabled;
         var group = await SendAsync<GoGroup>(HttpMethod.Post, $"{ApiPrefix}/admin/groups", payload);
         return GroupDto.From(group);
     }
@@ -1153,6 +1162,7 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         payload["weekly_limit_usd"] = input.WeeklyLimitUsd;
         payload["monthly_limit_usd"] = input.MonthlyLimitUsd;
         payload["rpm_limit"] = input.RpmLimit;
+        payload["long_context_pricing_enabled"] = input.LongContextPricingEnabled;
         payload["status"] = active ? "active" : "inactive";
         var group = await SendAsync<GoGroup>(HttpMethod.Put, $"{ApiPrefix}/admin/groups/{Uri.EscapeDataString(id)}", payload);
         return GroupDto.From(group);
@@ -2877,6 +2887,8 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
             payload["rate_multiplier"] = settings.RateMultiplier;
             payload["expires_at"] = settings.ExpiresAt;
             payload["auto_pause_on_expired"] = settings.AutoPauseOnExpired;
+            var credentialExtras = BuildModelRestrictionCredentials(settings, includeEmpty: false);
+            if (credentialExtras is not null) payload["credential_extras"] = credentialExtras;
         }
         var account = await SendAsync<GoAccount>(HttpMethod.Post, $"{ApiPrefix}/admin/{route}", payload);
         return AccountDto.From(account);
@@ -2893,12 +2905,38 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         {
             credentials["account_mode"] = input.AccountMode;
             credentials["api_protocol"] = input.ApiProtocol;
+            if (string.Equals(input.ApiProtocol, "adaptive", StringComparison.OrdinalIgnoreCase))
+            {
+                var protocolBaseUrls = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(input.AdaptiveChatCompletionsBaseUrl))
+                    protocolBaseUrls["chat_completions"] = input.AdaptiveChatCompletionsBaseUrl.Trim();
+                if (!string.IsNullOrWhiteSpace(input.AdaptiveAnthropicBaseUrl))
+                    protocolBaseUrls["anthropic"] = input.AdaptiveAnthropicBaseUrl.Trim();
+                if (input.Platform == "deepseek" && !string.IsNullOrWhiteSpace(input.AdaptiveResponsesBaseUrl))
+                    protocolBaseUrls["responses"] = input.AdaptiveResponsesBaseUrl.Trim();
+                if (protocolBaseUrls.Count > 0) credentials["api_base_urls"] = protocolBaseUrls;
+                if (protocolBaseUrls.TryGetValue("chat_completions", out var chatBaseUrl))
+                    credentials["base_url"] = chatBaseUrl;
+            }
+        }
+        var modelRestrictions = BuildModelRestrictionCredentials(input, includeEmpty: input.IsEditing);
+        if (modelRestrictions is not null)
+        {
+            foreach (var (key, value) in modelRestrictions) credentials[key] = value;
         }
         if (requireCredentials && credentials.Count == 0)
         {
             throw new ApiException("账号凭据不能为空。", HttpStatusCode.BadRequest);
         }
         return credentials.Count == 0 ? null : credentials;
+    }
+
+    private static Dictionary<string, object?>? BuildModelRestrictionCredentials(AccountInput input, bool includeEmpty)
+    {
+        var validationError = AccountModelRestrictions.Validate(input);
+        if (validationError is not null)
+            throw new ApiException(validationError, HttpStatusCode.BadRequest);
+        return AccountModelRestrictions.BuildCredentialPatch(input, includeEmpty);
     }
 
     private static Dictionary<string, object?>? ParseObject(string? json, string label)
@@ -3141,10 +3179,6 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
 
         var statusCode = response.StatusCode;
         var errorPayload = await ReadErrorAsync(response);
-        if (statusCode == HttpStatusCode.Locked && string.Equals(errorPayload.Code, "ADMIN_COMPLIANCE_ACK_REQUIRED", StringComparison.OrdinalIgnoreCase))
-        {
-            ComplianceRequired?.Invoke();
-        }
         response.Dispose();
         throw new ApiException(errorPayload.Message, statusCode) { Code = errorPayload.Code, Metadata = errorPayload.Metadata };
     }
