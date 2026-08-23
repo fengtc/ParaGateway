@@ -211,6 +211,11 @@
     gap: 9px;
 }
 
+.dashboard-filter-group > .button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
 .filter-label {
     color: #4c5853;
     font-size: .78rem;

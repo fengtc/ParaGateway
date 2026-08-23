@@ -20,6 +20,16 @@ public sealed class DashboardOpsTypographyTests
     }
 
     [Fact]
+    public void DashboardRefreshButtonKeepsItsLabelHorizontal()
+    {
+        var css = Read("Components", "AdminDashboardPanel.razor.css");
+
+        Assert.Contains(".dashboard-filter-group > .button", css, StringComparison.Ordinal);
+        Assert.Contains("flex: 0 0 auto;", css, StringComparison.Ordinal);
+        Assert.Contains("white-space: nowrap;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RegularUserDashboardUsesTheSameReadableTypography()
     {
         var css = Read("Components", "UserDashboardPanel.razor.css");
