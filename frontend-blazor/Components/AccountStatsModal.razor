@@ -118,21 +118,32 @@
                     }
                     else
                     {
-                        <DxChart Data="@HistoryRows" Width="100%" Height="270px">
-                            <DxChartLineSeries T="AccountUsageHistoryDto" TArgument="string" TValue="double"
-                                               Name="账号计费 (USD)" ArgumentField="point => point.Label" ValueField="point => point.ActualCost" />
-                            <DxChartLineSeries T="AccountUsageHistoryDto" TArgument="string" TValue="double"
-                                               Name="用户计费 (USD)" ArgumentField="point => point.Label" ValueField="point => point.UserCost" />
-                            <DxChartLineSeries T="AccountUsageHistoryDto" TArgument="string" TValue="long"
-                                               Name="请求数" ArgumentField="point => point.Label" ValueField="point => point.Requests" Axis="RequestAxis" />
-                            <DxChartValueAxis>
-                                <DxChartAxisTitle Text="费用 (USD)" />
-                            </DxChartValueAxis>
-                            <DxChartValueAxis Name="RequestAxis" Alignment="ChartAxisAlignment.Far">
-                                <DxChartAxisTitle Text="请求数" />
-                            </DxChartValueAxis>
-                            <DxChartTooltip Enabled="true" />
-                        </DxChart>
+                        <div class="account-stats-chart-layout">
+                            <div class="account-stats-chart-legend" aria-label="账号使用趋势图例">
+                                <span><i class="account-cost"></i>账号计费 (USD)</span>
+                                <span><i class="user-cost"></i>用户计费 (USD)</span>
+                                <span><i class="request-count"></i>请求数</span>
+                            </div>
+                            <DxChart Data="@HistoryRows" Width="100%" Height="270px">
+                                <DxChartLineSeries T="AccountUsageHistoryDto" TArgument="string" TValue="double"
+                                                   Name="账号计费 (USD)" Color="@(System.Drawing.Color.FromArgb(255, 109, 0))"
+                                                   ArgumentField="point => point.Label" ValueField="point => point.ActualCost" />
+                                <DxChartLineSeries T="AccountUsageHistoryDto" TArgument="string" TValue="double"
+                                                   Name="用户计费 (USD)" Color="@(System.Drawing.Color.FromArgb(22, 136, 61))"
+                                                   ArgumentField="point => point.Label" ValueField="point => point.UserCost" />
+                                <DxChartLineSeries T="AccountUsageHistoryDto" TArgument="string" TValue="long"
+                                                   Name="请求数" Color="@(System.Drawing.Color.FromArgb(228, 17, 47))"
+                                                   ArgumentField="point => point.Label" ValueField="point => point.Requests" Axis="RequestAxis" />
+                                <DxChartValueAxis>
+                                    <DxChartAxisTitle Text="费用 (USD)" />
+                                </DxChartValueAxis>
+                                <DxChartValueAxis Name="RequestAxis" Alignment="ChartAxisAlignment.Far">
+                                    <DxChartAxisTitle Text="请求数" />
+                                </DxChartValueAxis>
+                                <DxChartLegend Visible="false" />
+                                <DxChartTooltip Enabled="true" />
+                            </DxChart>
+                        </div>
                     }
                 </section>
 

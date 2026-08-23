@@ -60,6 +60,32 @@ public sealed class UserDashboardPageParityTests
     }
 
     [Fact]
+    public void DashboardChartLegendsDoNotCoverTheChartCanvas()
+    {
+        var component = ReadSource("Components", "UserDashboardPanel.razor");
+        var styles = ReadSource("Components", "UserDashboardPanel.razor.css");
+
+        Assert.Equal(2, component.Split("<DxChartLegend Visible=\"false\" />", StringSplitOptions.None).Length - 1);
+        Assert.Contains("class=\"trend-chart-legend\"", component, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Token 使用趋势图例\"", component, StringComparison.Ordinal);
+        Assert.Contains(".trend-chart-layout", styles, StringComparison.Ordinal);
+        Assert.Contains("flex-wrap: wrap;", styles, StringComparison.Ordinal);
+        Assert.Contains("white-space: nowrap;", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DashboardRefreshButtonKeepsItsLabelOnOneLine()
+    {
+        var component = ReadSource("Components", "UserDashboardPanel.razor");
+        var styles = ReadSource("Components", "UserDashboardPanel.razor.css");
+
+        Assert.Contains("dashboard-refresh-button", component, StringComparison.Ordinal);
+        Assert.Contains(".dashboard-refresh-button", styles, StringComparison.Ordinal);
+        Assert.Contains("min-width: 76px;", styles, StringComparison.Ordinal);
+        Assert.Contains("white-space: nowrap;", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ApiClientUsesTheOfficialUserDashboardEndpoints()
     {
         var api = ReadSource("Services", "ApiClient.cs");

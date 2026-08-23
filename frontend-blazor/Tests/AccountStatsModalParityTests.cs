@@ -45,6 +45,22 @@ public sealed class AccountStatsModalParityTests
         Assert.DoesNotContain("background: white", css, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void AccountStatsChartsKeepLegendsOutsideTheChartCanvas()
+    {
+        var markup = Read("Components", "AccountStatsModal.razor");
+        var css = Read("Components", "AccountStatsModal.razor.css");
+        var distribution = Read("Components", "AccountStatsDistributionPanel.razor");
+
+        Assert.Contains("aria-label=\"账号使用趋势图例\"", markup, StringComparison.Ordinal);
+        Assert.Contains("<DxChartLegend Visible=\"false\" />", markup, StringComparison.Ordinal);
+        Assert.Contains("<DxChartLegend Visible=\"false\" />", distribution, StringComparison.Ordinal);
+        Assert.Contains(".account-stats-chart-layout", css, StringComparison.Ordinal);
+        Assert.Contains(".account-stats-chart-legend", css, StringComparison.Ordinal);
+        Assert.Contains("flex-wrap: wrap;", css, StringComparison.Ordinal);
+        Assert.Contains("white-space: nowrap;", css, StringComparison.Ordinal);
+    }
+
     private static string Read(params string[] parts)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));

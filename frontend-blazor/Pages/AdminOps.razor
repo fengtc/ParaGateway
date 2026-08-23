@@ -117,7 +117,16 @@
             <section class="ops-card switch-card">
                 <header class="card-header"><div><h3>账号切换率趋势</h3><p>近 5 小时账号切换次数 / 请求总数</p></div></header>
                 @if (SwitchTrendRows.Count == 0) { <EmptyState Title="暂无切换数据" Description="当前时间窗口内没有账号切换记录。" /> }
-                else { <DxChart Data="@SwitchTrendRows" Width="100%" Height="255px"><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="切换率 (%)" ArgumentField="p => p.Time" ValueField="p => p.Primary" /><DxChartTooltip Enabled="true" /></DxChart> }
+                else
+                {
+                    <DxChart Data="@SwitchTrendRows" Width="100%" Height="255px">
+                        <DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double"
+                                           Name="切换率 (%)" Color="@(System.Drawing.Color.FromArgb(11, 118, 206))"
+                                           ArgumentField="p => p.Time" ValueField="p => p.Primary" />
+                        <DxChartLegend Visible="false" />
+                        <DxChartTooltip Enabled="true" />
+                    </DxChart>
+                }
             </section>
             <section class="ops-card throughput-card">
                 <header class="card-header"><div><h3>吞吐趋势</h3><p>QPS 与 TPS/1K 趋势</p></div><button type="button" class="text-button" @onclick='() => OpenRequestsAsync("all")'>查看明细</button></header>
@@ -140,14 +149,57 @@
                     </div>
                 }
                 @if (ThroughputRows.Count == 0) { <EmptyState Title="该时间窗口内暂无请求" Description="暂无可展示的吞吐数据。" /> }
-                else { <DxChart Data="@ThroughputRows" Width="100%" Height="255px"><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="QPS" ArgumentField="p => p.Time" ValueField="p => p.Primary" /><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="TPS/1K" ArgumentField="p => p.Time" ValueField="p => p.Secondary" /><DxChartTooltip Enabled="true" /></DxChart> }
+                else
+                {
+                    <div class="ops-chart-layout">
+                        <div class="ops-chart-legend" aria-label="吞吐趋势图例">
+                            <span><i class="qps"></i>QPS</span>
+                            <span><i class="tps"></i>TPS/1K</span>
+                        </div>
+                        <DxChart Data="@ThroughputRows" Width="100%" Height="255px">
+                            <DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double"
+                                               Name="QPS" Color="@(System.Drawing.Color.FromArgb(11, 118, 206))"
+                                               ArgumentField="p => p.Time" ValueField="p => p.Primary" />
+                            <DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double"
+                                               Name="TPS/1K" Color="@(System.Drawing.Color.FromArgb(22, 136, 61))"
+                                               ArgumentField="p => p.Time" ValueField="p => p.Secondary" />
+                            <DxChartLegend Visible="false" />
+                            <DxChartTooltip Enabled="true" />
+                        </DxChart>
+                    </div>
+                }
             </section>
         </div>
 
         <div class="ops-chart-grid">
             <section class="ops-card"><header class="card-header"><div><h3>请求时长分布</h3><p>成功请求的耗时区间（毫秒）</p></div></header>@if (latency.Buckets.Count == 0) { <EmptyState Title="该时间窗口内暂无请求" Description="暂无延迟分布。" /> } else { <div class="bar-list">@foreach (var bucket in latency.Buckets) { <div><span>@bucket.Range</span><i><em style="width:@BarWidth(bucket.Count, latency.Buckets.Max(x => x.Count))%"></em></i><b>@bucket.Count</b></div> }</div> }</section>
             <section class="ops-card"><header class="card-header"><div><h3>错误分布</h3><p>按错误来源归类，排除业务限制</p></div><button type="button" class="text-button" @onclick='() => OpenErrorsAsync("request")'>查看明细</button></header>@if (ErrorDistributionRows.Count == 0) { <EmptyState Title="该时间窗口内暂无错误" Description="暂无错误分类分布。" /> } else { <div class="bar-list error-bars">@foreach (var item in ErrorDistributionRows) { <div><span>@item.Label</span><i><em class="@item.Tone" style="width:@BarWidth(item.Count, ErrorDistributionRows.Max(x => x.Count))%"></em></i><b>@item.Count</b></div> }</div> }</section>
-            <section class="ops-card"><header class="card-header"><div><h3>错误趋势</h3><p>请求错误与上游错误趋势</p></div><button type="button" class="text-button" @onclick='() => OpenErrorsAsync("upstream")'>查看明细</button></header>@if (ErrorTrendRows.Count == 0) { <EmptyState Title="该时间窗口内暂无错误" Description="暂无错误趋势。" /> } else { <DxChart Data="@ErrorTrendRows" Width="100%" Height="250px"><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="请求错误" ArgumentField="p => p.Time" ValueField="p => p.Primary" /><DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double" Name="上游错误" ArgumentField="p => p.Time" ValueField="p => p.Secondary" /><DxChartTooltip Enabled="true" /></DxChart> }</section>
+            <section class="ops-card">
+                <header class="card-header"><div><h3>错误趋势</h3><p>请求错误与上游错误趋势</p></div><button type="button" class="text-button" @onclick='() => OpenErrorsAsync("upstream")'>查看明细</button></header>
+                @if (ErrorTrendRows.Count == 0)
+                {
+                    <EmptyState Title="该时间窗口内暂无错误" Description="暂无错误趋势。" />
+                }
+                else
+                {
+                    <div class="ops-chart-layout">
+                        <div class="ops-chart-legend" aria-label="错误趋势图例">
+                            <span><i class="request-error"></i>请求错误</span>
+                            <span><i class="upstream-error"></i>上游错误</span>
+                        </div>
+                        <DxChart Data="@ErrorTrendRows" Width="100%" Height="250px">
+                            <DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double"
+                                               Name="请求错误" Color="@(System.Drawing.Color.FromArgb(228, 17, 47))"
+                                               ArgumentField="p => p.Time" ValueField="p => p.Primary" />
+                            <DxChartLineSeries T="OpsTrendRow" TArgument="string" TValue="double"
+                                               Name="上游错误" Color="@(System.Drawing.Color.FromArgb(255, 152, 0))"
+                                               ArgumentField="p => p.Time" ValueField="p => p.Secondary" />
+                            <DxChartLegend Visible="false" />
+                            <DxChartTooltip Enabled="true" />
+                        </DxChart>
+                    </div>
+                }
+            </section>
         </div>
 
         @if (advanced.DisplayOpenAiTokenStats)

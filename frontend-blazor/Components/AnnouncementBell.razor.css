@@ -150,16 +150,20 @@
     inset: 0;
     z-index: 120;
     display: flex;
-    padding: 8vh 20px 24px;
-    align-items: flex-start;
+    padding: 24px 20px;
+    align-items: center;
     justify-content: center;
-    overflow-y: auto;
+    overflow: hidden;
     background: rgba(10, 15, 13, .68);
     backdrop-filter: blur(5px);
 }
 
 .announcement-popup {
+    display: flex;
     width: min(680px, 100%);
+    max-height: calc(100vh - 48px);
+    max-height: calc(100dvh - 48px);
+    flex-direction: column;
     overflow: hidden;
     background: var(--surface);
     border: 1px solid rgba(255, 255, 255, .18);
@@ -170,6 +174,7 @@
 .announcement-popup > header {
     display: grid;
     padding: 24px 28px;
+    flex: 0 0 auto;
     grid-template-columns: auto minmax(0, 1fr);
     gap: 9px 12px;
     background: linear-gradient(135deg, #fff9ed, #fff5eb 55%, #fffbea);
@@ -181,9 +186,9 @@
 .announcement-popup-unread i { width: 6px; height: 6px; background: #fff; border-radius: 50%; }
 .announcement-popup h2 { margin: 0; color: var(--text); font-size: 1.3rem; }
 .announcement-popup header p { display: flex; margin: 0; align-items: center; gap: 5px; color: var(--muted); font-size: .74rem; }
-.announcement-popup-body { max-height: 50vh; padding: 26px 28px; overflow-y: auto; }
+.announcement-popup-body { min-height: 0; max-height: none; padding: 26px 28px; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .announcement-popup-body .announcement-markdown::before { background: linear-gradient(#f59e0b, #ea580c, #eab308); }
-.announcement-popup footer { display: flex; padding: 15px 28px; justify-content: flex-end; background: var(--surface-soft); border-top: 1px solid var(--line); }
+.announcement-popup footer { display: flex; padding: 15px 28px; flex: 0 0 auto; justify-content: flex-end; background: var(--surface-soft); border-top: 1px solid var(--line); }
 
 @keyframes announcement-ping {
     75%, 100% { opacity: 0; transform: scale(2); }
@@ -192,6 +197,7 @@
 @media (max-width: 640px) {
     .announcement-modal-summary { align-items: stretch; flex-direction: column; }
     .announcement-modal-summary .button { width: 100%; }
-    .announcement-popup-backdrop { padding: 20px 10px; }
+    .announcement-popup-backdrop { padding: 10px; }
+    .announcement-popup { max-height: calc(100vh - 20px); max-height: calc(100dvh - 20px); }
     .announcement-popup > header, .announcement-popup-body, .announcement-popup footer { padding-left: 18px; padding-right: 18px; }
 }

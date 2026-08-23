@@ -26,13 +26,39 @@ public sealed class UserAccessPageTests
     public void StandardUserNavigationContainsOnlyPersonalAccountFunctions()
     {
         var menu = ReadSource("Layout", "NavMenu.razor");
+        var sectionStart = menu.IndexOf("<div class=\"sidebar-section user-section\">", StringComparison.Ordinal);
+        var sectionEnd = menu.IndexOf("</nav>", sectionStart, StringComparison.Ordinal);
 
-        Assert.Contains("@if (Auth.User?.IsAdmin == true)", menu, StringComparison.Ordinal);
-        Assert.Contains("我的账户", menu, StringComparison.Ordinal);
-        Assert.Contains("href=\"/account\"", menu, StringComparison.Ordinal);
-        Assert.Contains("href=\"/api-keys\"", menu, StringComparison.Ordinal);
-        Assert.Contains("href=\"/usage\"", menu, StringComparison.Ordinal);
-        Assert.Contains("HomeHref => Auth.User?.IsAdmin == true ? \"/\" : \"/account\"", menu, StringComparison.Ordinal);
+        Assert.Contains("@if (IsAdmin)", menu, StringComparison.Ordinal);
+        Assert.Contains("[Parameter] public bool IsAdmin", menu, StringComparison.Ordinal);
+        Assert.Contains("HomeHref => IsAdmin ? \"/\" : \"/account\"", menu, StringComparison.Ordinal);
+        Assert.True(sectionStart >= 0 && sectionEnd > sectionStart);
+
+        var userSection = menu[sectionStart..sectionEnd];
+        foreach (var route in new[] { "/dashboard", "/api-keys", "/usage", "/subscriptions", "/account" })
+            Assert.Contains($"href=\"{route}\"", userSection, StringComparison.Ordinal);
+        Assert.Equal(5, userSection.Split("<NavLink ", StringSplitOptions.None).Length - 1);
+
+        foreach (var hiddenEntry in new[] { "批量生图", "可用渠道", "渠道状态", "/batch-image", "/available-channels", "/monitor" })
+            Assert.DoesNotContain(hiddenEntry, userSection, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AuthenticationChangesImmediatelyRebuildRoleSpecificNavigation()
+    {
+        var layout = ReadSource("Layout", "MainLayout.razor");
+        var menu = ReadSource("Layout", "NavMenu.razor");
+        var callback = ReadSource("Pages", "AuthCallback.razor");
+
+        Assert.Contains("Auth.Changed += OnAuthChanged", layout, StringComparison.Ordinal);
+        Assert.Contains("Auth.Changed -= OnAuthChanged", layout, StringComparison.Ordinal);
+        Assert.Contains("private void OnAuthChanged() => _ = InvokeAsync(StateHasChanged)", layout, StringComparison.Ordinal);
+        Assert.Contains("@key=\"AuthIdentityKey\"", layout, StringComparison.Ordinal);
+        Assert.Contains("IsAdmin=\"@IsAdmin\"", layout, StringComparison.Ordinal);
+        Assert.Contains("Auth.User.Id}:{Auth.User.Role}", layout, StringComparison.Ordinal);
+        Assert.Contains("[Parameter] public bool IsAdmin", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("@inject AuthSession Auth", menu, StringComparison.Ordinal);
+        Assert.Contains("@layout AuthLayout", callback, StringComparison.Ordinal);
     }
 
     [Fact]

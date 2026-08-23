@@ -8,7 +8,9 @@
 
 <div class="app-shell" data-theme="@(isDark ? "dark" : "light")">
     <aside class="app-sidebar @(sidebarCollapsed ? "collapsed" : null) @(sidebarOpen ? "open" : null)">
-        <NavMenu Collapsed="@(sidebarCollapsed && !sidebarOpen)"
+        <NavMenu @key="AuthIdentityKey"
+                 IsAdmin="@IsAdmin"
+                 Collapsed="@(sidebarCollapsed && !sidebarOpen)"
                  IsDark="@isDark"
                  OnNavigate="CloseSidebar"
                  OnToggleTheme="ToggleThemeAsync"
@@ -111,6 +113,8 @@
     private bool isDark;
     private PublicSettingsDto? publicSettings;
 
+    private bool IsAdmin => Auth.User?.IsAdmin == true;
+    private string AuthIdentityKey => Auth.User is null ? "anonymous" : $"{Auth.User.Id}:{Auth.User.Role}";
     private PageHeaderContext PageContext => ResolvePageContext();
 
     private string DisplayName => string.IsNullOrWhiteSpace(Auth.User?.DisplayName)
@@ -128,6 +132,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        Auth.Changed += OnAuthChanged;
         Navigation.LocationChanged += OnLocationChanged;
         try { publicSettings = await Api.GetPublicSettingsAsync(); }
         catch (ApiException) { publicSettings = null; }
@@ -154,6 +159,8 @@
         sidebarOpen = false;
         _ = InvokeAsync(StateHasChanged);
     }
+
+    private void OnAuthChanged() => _ = InvokeAsync(StateHasChanged);
 
     private void OpenSidebar() => sidebarOpen = true;
     private void CloseSidebar() => sidebarOpen = false;
@@ -255,7 +262,11 @@
 
     private static string FormatMoney(decimal value) => $"${value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}";
 
-    public void Dispose() => Navigation.LocationChanged -= OnLocationChanged;
+    public void Dispose()
+    {
+        Auth.Changed -= OnAuthChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
 
     private sealed record PageHeaderContext(string Title, string Description);
 }

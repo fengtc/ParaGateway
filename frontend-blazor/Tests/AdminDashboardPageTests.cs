@@ -66,6 +66,23 @@ public sealed class AdminDashboardPageTests
     }
 
     [Fact]
+    public void AdminDashboardChartLegendsDoNotCoverTheChartCanvases()
+    {
+        var dashboard = ReadSource("Components", "AdminDashboardPanel.razor");
+        var styles = ReadSource("Components", "AdminDashboardPanel.razor.css");
+
+        Assert.Equal(4, dashboard.Split("<DxChartLegend Visible=\"false\" />", StringSplitOptions.None).Length - 1);
+        Assert.Contains("aria-label=\"Token 使用趋势图例\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"最近使用用户图例\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("Color=\"@series.ChartColor\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("UserTrendPalette", dashboard, StringComparison.Ordinal);
+        Assert.Contains(".admin-chart-layout", styles, StringComparison.Ordinal);
+        Assert.Contains(".admin-chart-legend", styles, StringComparison.Ordinal);
+        Assert.Contains("flex-wrap: wrap;", styles, StringComparison.Ordinal);
+        Assert.Contains("white-space: nowrap;", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SnapshotContractDeserializesAllCostAndTrendFields()
     {
         const string json = """

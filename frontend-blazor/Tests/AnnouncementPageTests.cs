@@ -33,6 +33,19 @@ public sealed class AnnouncementPageTests
     }
 
     [Fact]
+    public void AnnouncementPopupKeepsItsActionsInsideTheViewport()
+    {
+        var styles = ReadSource("Components", "AnnouncementBell.razor.css");
+
+        Assert.Contains("max-height: calc(100dvh - 48px);", styles, StringComparison.Ordinal);
+        Assert.Contains("flex-direction: column;", styles, StringComparison.Ordinal);
+        Assert.Contains("min-height: 0; max-height: none;", styles, StringComparison.Ordinal);
+        Assert.Contains("flex: 1 1 auto; overflow-y: auto;", styles, StringComparison.Ordinal);
+        Assert.Contains("overscroll-behavior: contain;", styles, StringComparison.Ordinal);
+        Assert.DoesNotContain("padding: 8vh 20px 24px;", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnnouncementApiAndStoreUseTypedThrottledSharedState()
     {
         var client = ReadSource("Services", "ApiClient.cs");

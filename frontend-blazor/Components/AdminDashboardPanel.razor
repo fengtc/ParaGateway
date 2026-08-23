@@ -267,6 +267,7 @@
                                                   TValue="double"
                                                   ArgumentField="item => item.ChartLabel"
                                                   ValueField="item => item.ActualCost" />
+                                <DxChartLegend Visible="false" />
                                 <DxChartTooltip Enabled="true" />
                             </DxPieChart>
                         </div>
@@ -298,23 +299,33 @@
                 }
                 else
                 {
-                    <DxChart Data="@snapshot.Trend" Width="100%" Height="250px">
-                        <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="long"
-                                           Name="Input" ArgumentField="point => point.Date" ValueField="point => point.InputTokens" />
-                        <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="long"
-                                           Name="Output" ArgumentField="point => point.Date" ValueField="point => point.OutputTokens" />
-                        <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="long"
-                                           Name="Cache Creation" ArgumentField="point => point.Date" ValueField="point => point.CacheCreationTokens" />
-                        <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="long"
-                                           Name="Cache Read" ArgumentField="point => point.Date" ValueField="point => point.CacheReadTokens" />
-                        <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="double"
-                                           Name="Cache Hit Rate" ArgumentField="point => point.Date" ValueField="point => point.CacheHitRate" Axis="PercentAxis" />
-                        <DxChartValueAxis />
-                        <DxChartValueAxis Name="PercentAxis" Alignment="ChartAxisAlignment.Far">
-                            <DxChartAxisTitle Text="命中率 (%)" />
-                        </DxChartValueAxis>
-                        <DxChartTooltip Enabled="true" />
-                    </DxChart>
+                    <div class="admin-chart-layout">
+                        <div class="admin-chart-legend" aria-label="Token 使用趋势图例">
+                            <span><i class="input"></i>Input</span>
+                            <span><i class="output"></i>Output</span>
+                            <span><i class="cache-creation"></i>Cache Creation</span>
+                            <span><i class="cache-read"></i>Cache Read</span>
+                            <span><i class="cache-hit-rate"></i>Cache Hit Rate</span>
+                        </div>
+                        <DxChart Data="@snapshot.Trend" Width="100%" Height="250px">
+                            <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="long"
+                                               Name="Input" Color="@(System.Drawing.Color.FromArgb(255, 109, 0))" ArgumentField="point => point.Date" ValueField="point => point.InputTokens" />
+                            <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="long"
+                                               Name="Output" Color="@(System.Drawing.Color.FromArgb(22, 136, 61))" ArgumentField="point => point.Date" ValueField="point => point.OutputTokens" />
+                            <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="long"
+                                               Name="Cache Creation" Color="@(System.Drawing.Color.FromArgb(228, 17, 47))" ArgumentField="point => point.Date" ValueField="point => point.CacheCreationTokens" />
+                            <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="long"
+                                               Name="Cache Read" Color="@(System.Drawing.Color.FromArgb(255, 152, 0))" ArgumentField="point => point.Date" ValueField="point => point.CacheReadTokens" />
+                            <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="double"
+                                               Name="Cache Hit Rate" Color="@(System.Drawing.Color.FromArgb(11, 118, 206))" ArgumentField="point => point.Date" ValueField="point => point.CacheHitRate" Axis="PercentAxis" />
+                            <DxChartValueAxis />
+                            <DxChartValueAxis Name="PercentAxis" Alignment="ChartAxisAlignment.Far">
+                                <DxChartAxisTitle Text="命中率 (%)" />
+                            </DxChartValueAxis>
+                            <DxChartLegend Visible="false" />
+                            <DxChartTooltip Enabled="true" />
+                        </DxChart>
+                    </div>
                 }
             </section>
         </div>
@@ -327,17 +338,27 @@
             }
             else
             {
-                <DxChart T="AdminDashboardUserTrendPointDto" Width="100%" Height="270px">
-                    @foreach (var series in UserTrendSeries)
-                    {
-                        <DxChartLineSeries T="AdminDashboardUserTrendPointDto" TArgument="string" TValue="long"
-                                           Data="@series.Points"
-                                           Name="@series.Name"
-                                           ArgumentField="point => point.Date"
-                                           ValueField="point => point.Tokens" />
-                    }
-                    <DxChartTooltip Enabled="true" />
-                </DxChart>
+                <div class="admin-chart-layout admin-user-trend-layout">
+                    <div class="admin-chart-legend admin-user-trend-legend" aria-label="最近使用用户图例">
+                        @foreach (var series in UserTrendSeries)
+                        {
+                            <span title="@series.Name"><i style="background-color: @series.CssColor"></i><b>@series.Name</b></span>
+                        }
+                    </div>
+                    <DxChart T="AdminDashboardUserTrendPointDto" Width="100%" Height="270px">
+                        @foreach (var series in UserTrendSeries)
+                        {
+                            <DxChartLineSeries T="AdminDashboardUserTrendPointDto" TArgument="string" TValue="long"
+                                               Data="@series.Points"
+                                               Name="@series.Name"
+                                               Color="@series.ChartColor"
+                                               ArgumentField="point => point.Date"
+                                               ValueField="point => point.Tokens" />
+                        }
+                        <DxChartLegend Visible="false" />
+                        <DxChartTooltip Enabled="true" />
+                    </DxChart>
+                </div>
             }
         </section>
     }
@@ -367,12 +388,35 @@
     private IReadOnlyList<AdminDashboardModelStatDto> ModelRows =>
         snapshot?.Models.OrderByDescending(item => item.TotalTokens).ToList() ?? [];
 
+    private static readonly UserTrendColor[] UserTrendPalette =
+    [
+        new("#d95f02", System.Drawing.Color.FromArgb(217, 95, 2)),
+        new("#7570b3", System.Drawing.Color.FromArgb(117, 112, 179)),
+        new("#1b9e77", System.Drawing.Color.FromArgb(27, 158, 119)),
+        new("#e7298a", System.Drawing.Color.FromArgb(231, 41, 138)),
+        new("#66a61e", System.Drawing.Color.FromArgb(102, 166, 30)),
+        new("#e6ab02", System.Drawing.Color.FromArgb(230, 171, 2)),
+        new("#a6761d", System.Drawing.Color.FromArgb(166, 118, 29)),
+        new("#1f78b4", System.Drawing.Color.FromArgb(31, 120, 180)),
+        new("#b15928", System.Drawing.Color.FromArgb(177, 89, 40)),
+        new("#6a3d9a", System.Drawing.Color.FromArgb(106, 61, 154)),
+        new("#238b45", System.Drawing.Color.FromArgb(35, 139, 69)),
+        new("#636363", System.Drawing.Color.FromArgb(99, 99, 99))
+    ];
+
     private IReadOnlyList<UserTrendSeriesRow> UserTrendSeries => snapshot?.UsersTrend
         .GroupBy(point => point.UserId)
-        .Select(group => new UserTrendSeriesRow(
-            GetUserDisplayName(group.First()),
-            group.OrderBy(point => point.Date).ToList()))
+        .Select(group => new
+        {
+            Name = GetUserDisplayName(group.First()),
+            Points = group.OrderBy(point => point.Date).ToList()
+        })
         .OrderByDescending(series => series.Points.Sum(point => point.Tokens))
+        .Select((series, index) => new UserTrendSeriesRow(
+            series.Name,
+            series.Points,
+            UserTrendPalette[index % UserTrendPalette.Length].Css,
+            UserTrendPalette[index % UserTrendPalette.Length].Chart))
         .ToList() ?? [];
 
     private IReadOnlyList<RankingDisplayRow> RankingRows
@@ -625,7 +669,13 @@
         breakdownGeneration++;
     }
 
-    private sealed record UserTrendSeriesRow(string Name, List<AdminDashboardUserTrendPointDto> Points);
+    private sealed record UserTrendColor(string Css, System.Drawing.Color Chart);
+
+    private sealed record UserTrendSeriesRow(
+        string Name,
+        List<AdminDashboardUserTrendPointDto> Points,
+        string CssColor,
+        System.Drawing.Color ChartColor);
 
     public sealed record RankingDisplayRow(
         long UserId,

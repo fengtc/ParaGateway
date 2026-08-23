@@ -142,6 +142,42 @@
 
 .trend-card { min-height: 355px; }
 
+.usage-trend-layout {
+    display: grid;
+    min-width: 0;
+}
+
+.usage-trend-legend {
+    display: flex;
+    min-height: 34px;
+    padding: 0 8px 4px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    color: var(--ink);
+    font-size: .76rem;
+}
+
+.usage-trend-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.usage-trend-legend i {
+    width: 10px;
+    height: 10px;
+    flex: 0 0 10px;
+    border-radius: 2px;
+}
+
+.usage-trend-legend .input { background: #ff6d00; }
+.usage-trend-legend .output { background: #16883d; }
+.usage-trend-legend .cache-creation { background: #e4112f; }
+.usage-trend-legend .cache-read { background: #ff9800; }
+
 .usage-filter-card {
     display: flex;
     padding: 18px;
@@ -384,4 +420,5 @@
     .usage-filter-grid, .error-filter-grid { grid-template-columns: 1fr; }
     .usage-filter-actions .button { flex: 1 1 auto; }
     .error-detail-grid { grid-template-columns: 1fr; }
+    .usage-trend-legend { padding-inline: 0; justify-content: flex-start; gap: 6px 12px; }
 }

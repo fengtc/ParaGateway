@@ -1,5 +1,3 @@
-@inject AuthSession Auth
-
 <div class="nav-shell @(Collapsed ? "collapsed" : null)">
     <div class="brand-row">
         <div class="brand">
@@ -10,7 +8,7 @@
         </div>
     </div>
     <nav class="side-nav" aria-label="主导航">
-        @if (Auth.User?.IsAdmin == true)
+        @if (IsAdmin)
         {
             <div class="sidebar-section admin-section">
                 <NavLink href="/admin/dashboard" Match="NavLinkMatch.All" title="@(Collapsed ? "运营总览" : null)" @onclick="NavigateAsync">
@@ -86,10 +84,7 @@
             <div class="sidebar-section user-section">
                 <NavLink href="/dashboard" Match="NavLinkMatch.All" title="@(Collapsed ? "账户总览" : null)" @onclick="NavigateAsync"><Icon Name="dashboard" /><span class="nav-label-copy">账户总览</span></NavLink>
                 <NavLink href="/api-keys" title="@(Collapsed ? "API 密钥" : null)" @onclick="NavigateAsync"><Icon Name="key" /><span class="nav-label-copy">API 密钥</span></NavLink>
-                <NavLink href="/batch-image" title="@(Collapsed ? "批量生图" : null)" @onclick="NavigateAsync"><Icon Name="image" /><span class="nav-label-copy">批量生图</span></NavLink>
                 <NavLink href="/usage" title="@(Collapsed ? "使用记录" : null)" @onclick="NavigateAsync"><Icon Name="activity" /><span class="nav-label-copy">使用记录</span></NavLink>
-                <NavLink href="/available-channels" title="@(Collapsed ? "可用渠道" : null)" @onclick="NavigateAsync"><Icon Name="layers" /><span class="nav-label-copy">可用渠道</span></NavLink>
-                <NavLink href="/monitor" title="@(Collapsed ? "渠道状态" : null)" @onclick="NavigateAsync"><Icon Name="pulse" /><span class="nav-label-copy">渠道状态</span></NavLink>
                 <NavLink href="/subscriptions" title="@(Collapsed ? "我的订阅" : null)" @onclick="NavigateAsync"><Icon Name="calendar" /><span class="nav-label-copy">我的订阅</span></NavLink>
                 <NavLink href="/account" title="@(Collapsed ? "个人资料" : null)" @onclick="NavigateAsync"><Icon Name="user" /><span class="nav-label-copy">个人资料</span></NavLink>
             </div>
@@ -111,12 +106,13 @@
 @code {
     [Parameter] public bool Collapsed { get; set; }
     [Parameter] public bool IsDark { get; set; }
+    [Parameter] public bool IsAdmin { get; set; }
     [Parameter] public EventCallback OnNavigate { get; set; }
     [Parameter] public EventCallback OnToggleTheme { get; set; }
     [Parameter] public EventCallback OnToggleCollapsed { get; set; }
     [Parameter] public EventCallback OnExpandRequested { get; set; }
 
-    private string HomeHref => Auth.User?.IsAdmin == true ? "/" : "/account";
+    private string HomeHref => IsAdmin ? "/" : "/account";
 
     private Task NavigateAsync() => OnNavigate.InvokeAsync();
 

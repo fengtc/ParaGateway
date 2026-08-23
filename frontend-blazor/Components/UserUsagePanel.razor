@@ -53,6 +53,7 @@
             {
                 <DxPieChart Data="@ModelRows" InnerDiameter="0.55" Width="100%" Height="245px">
                     <DxPieChartSeries T="UserUsageModelStatDto" TArgument="string" TValue="long" ArgumentField="item => item.Model" ValueField="item => item.TotalTokens" />
+                    <DxChartLegend Visible="false" />
                     <DxChartTooltip Enabled="true" />
                 </DxPieChart>
             }
@@ -60,6 +61,7 @@
             {
                 <DxPieChart Data="@ModelRows" InnerDiameter="0.55" Width="100%" Height="245px">
                     <DxPieChartSeries T="UserUsageModelStatDto" TArgument="string" TValue="double" ArgumentField="item => item.Model" ValueField="item => item.ActualCost" />
+                    <DxChartLegend Visible="false" />
                     <DxChartTooltip Enabled="true" />
                 </DxPieChart>
             }
@@ -74,6 +76,7 @@
             {
                 <DxPieChart Data="@GroupRows" InnerDiameter="0.55" Width="100%" Height="245px">
                     <DxPieChartSeries T="UserUsageGroupStatDto" TArgument="string" TValue="long" ArgumentField="item => item.GroupName" ValueField="item => item.TotalTokens" />
+                    <DxChartLegend Visible="false" />
                     <DxChartTooltip Enabled="true" />
                 </DxPieChart>
             }
@@ -81,6 +84,7 @@
             {
                 <DxPieChart Data="@GroupRows" InnerDiameter="0.55" Width="100%" Height="245px">
                     <DxPieChartSeries T="UserUsageGroupStatDto" TArgument="string" TValue="double" ArgumentField="item => item.GroupName" ValueField="item => item.ActualCost" />
+                    <DxChartLegend Visible="false" />
                     <DxChartTooltip Enabled="true" />
                 </DxPieChart>
             }
@@ -95,6 +99,7 @@
             {
                 <DxPieChart Data="@EndpointRows" InnerDiameter="0.55" Width="100%" Height="245px">
                     <DxPieChartSeries T="UserUsageEndpointStatDto" TArgument="string" TValue="long" ArgumentField="item => item.Endpoint" ValueField="item => item.TotalTokens" />
+                    <DxChartLegend Visible="false" />
                     <DxChartTooltip Enabled="true" />
                 </DxPieChart>
             }
@@ -102,6 +107,7 @@
             {
                 <DxPieChart Data="@EndpointRows" InnerDiameter="0.55" Width="100%" Height="245px">
                     <DxPieChartSeries T="UserUsageEndpointStatDto" TArgument="string" TValue="double" ArgumentField="item => item.Endpoint" ValueField="item => item.ActualCost" />
+                    <DxChartLegend Visible="false" />
                     <DxChartTooltip Enabled="true" />
                 </DxPieChart>
             }
@@ -114,13 +120,22 @@
             else if (TrendRows.Count == 0) { <div class="chart-empty">暂无数据</div> }
             else
             {
-                <DxChart Data="@TrendRows" Width="100%" Height="285px">
-                    <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Input" ArgumentField="point => point.Date" ValueField="point => point.InputTokens" />
-                    <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Output" ArgumentField="point => point.Date" ValueField="point => point.OutputTokens" />
-                    <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Cache Creation" ArgumentField="point => point.Date" ValueField="point => point.CacheCreationTokens" />
-                    <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Cache Read" ArgumentField="point => point.Date" ValueField="point => point.CacheReadTokens" />
-                    <DxChartTooltip Enabled="true" />
-                </DxChart>
+                <div class="usage-trend-layout">
+                    <div class="usage-trend-legend" aria-label="Token 使用趋势图例">
+                        <span><i class="input"></i>Input</span>
+                        <span><i class="output"></i>Output</span>
+                        <span><i class="cache-creation"></i>Cache Creation</span>
+                        <span><i class="cache-read"></i>Cache Read</span>
+                    </div>
+                    <DxChart Data="@TrendRows" Width="100%" Height="285px">
+                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Input" ArgumentField="point => point.Date" ValueField="point => point.InputTokens" />
+                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Output" ArgumentField="point => point.Date" ValueField="point => point.OutputTokens" />
+                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Cache Creation" ArgumentField="point => point.Date" ValueField="point => point.CacheCreationTokens" />
+                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long" Name="Cache Read" ArgumentField="point => point.Date" ValueField="point => point.CacheReadTokens" />
+                        <DxChartLegend Visible="false" />
+                        <DxChartTooltip Enabled="true" />
+                    </DxChart>
+                </div>
             }
         </section>
     </div>

@@ -103,6 +103,21 @@ public sealed class OpsPageParityTests
     }
 
     [Fact]
+    public void OpsChartsKeepLegendsOutsideTheChartCanvases()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+        var css = Read("Pages", "AdminOps.razor.css");
+
+        Assert.Equal(3, markup.Split("<DxChartLegend Visible=\"false\" />", StringSplitOptions.None).Length - 1);
+        Assert.Contains("aria-label=\"吞吐趋势图例\"", markup, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"错误趋势图例\"", markup, StringComparison.Ordinal);
+        Assert.Contains(".ops-chart-layout", css, StringComparison.Ordinal);
+        Assert.Contains(".ops-chart-legend", css, StringComparison.Ordinal);
+        Assert.Contains("flex-wrap: wrap;", css, StringComparison.Ordinal);
+        Assert.Contains("white-space: nowrap;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void OpsErrorTrendUsesOfficialExcluding429And529FieldName()
     {
         var point = JsonSerializer.Deserialize<OpsErrorPointDto>("""{"upstream_error_count_excl_429_529":7}""");

@@ -33,6 +33,21 @@ public sealed class UserUsagePageParityTests
     }
 
     [Fact]
+    public void UserUsageChartLegendsDoNotCoverChartCanvases()
+    {
+        var page = ReadSource("Components", "UserUsagePanel.razor");
+        var styles = ReadSource("Components", "UserUsagePanel.razor.css");
+
+        Assert.Equal(7, page.Split("<DxChartLegend Visible=\"false\" />", StringSplitOptions.None).Length - 1);
+        Assert.Contains("class=\"usage-trend-legend\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Token 使用趋势图例\"", page, StringComparison.Ordinal);
+        Assert.Contains(".usage-trend-layout", styles, StringComparison.Ordinal);
+        Assert.Contains(".usage-trend-legend", styles, StringComparison.Ordinal);
+        Assert.Contains("flex-wrap: wrap;", styles, StringComparison.Ordinal);
+        Assert.Contains("white-space: nowrap;", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UserErrorViewIsFeatureGatedAndHasSafeDetailSurface()
     {
         var page = ReadSource("Components", "UserUsagePanel.razor");

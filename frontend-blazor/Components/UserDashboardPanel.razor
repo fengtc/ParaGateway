@@ -166,7 +166,7 @@
                                    EndDateChanged="@((DateTime value) => OnEndDateChangedAsync(value))"
                                    DisplayFormat="yyyy-MM-dd"
                                    CssClass="dashboard-date-range" />
-                <button type="button" class="button secondary small" disabled="@(refreshing || loadingCharts || loadingUsage)" @onclick="RefreshAllAsync">
+                <button type="button" class="button secondary small dashboard-refresh-button" disabled="@(refreshing || loadingCharts || loadingUsage)" @onclick="RefreshAllAsync">
                     <Icon Name="refresh" Size="15" /> 刷新
                 </button>
             </div>
@@ -202,6 +202,7 @@
                                 <DxPieChartSeries T="UserUsageModelStatDto" TArgument="string" TValue="long"
                                                   ArgumentField="item => item.Model"
                                                   ValueField="item => item.TotalTokens" />
+                                <DxChartLegend Visible="false" />
                                 <DxChartTooltip Enabled="true" />
                             </DxPieChart>
                         </div>
@@ -242,23 +243,33 @@
                 }
                 else
                 {
-                    <DxChart Data="@TrendRows" Width="100%" Height="250px">
-                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
-                                           Name="Input" ArgumentField="point => point.Date" ValueField="point => point.InputTokens" />
-                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
-                                           Name="Output" ArgumentField="point => point.Date" ValueField="point => point.OutputTokens" />
-                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
-                                           Name="Cache Creation" ArgumentField="point => point.Date" ValueField="point => point.CacheCreationTokens" />
-                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
-                                           Name="Cache Read" ArgumentField="point => point.Date" ValueField="point => point.CacheReadTokens" />
-                        <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="double"
-                                           Name="Cache Hit Rate" ArgumentField="point => point.Date" ValueField="point => point.CacheHitRate" Axis="PercentAxis" />
-                        <DxChartValueAxis />
-                        <DxChartValueAxis Name="PercentAxis" Alignment="ChartAxisAlignment.Far">
-                            <DxChartAxisTitle Text="命中率 (%)" />
-                        </DxChartValueAxis>
-                        <DxChartTooltip Enabled="true" />
-                    </DxChart>
+                    <div class="trend-chart-layout">
+                        <div class="trend-chart-legend" aria-label="Token 使用趋势图例">
+                            <span><i class="input"></i>Input</span>
+                            <span><i class="output"></i>Output</span>
+                            <span><i class="cache-creation"></i>Cache Creation</span>
+                            <span><i class="cache-read"></i>Cache Read</span>
+                            <span><i class="cache-hit-rate"></i>Cache Hit Rate</span>
+                        </div>
+                        <DxChart Data="@TrendRows" Width="100%" Height="250px">
+                            <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
+                                               Name="Input" ArgumentField="point => point.Date" ValueField="point => point.InputTokens" />
+                            <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
+                                               Name="Output" ArgumentField="point => point.Date" ValueField="point => point.OutputTokens" />
+                            <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
+                                               Name="Cache Creation" ArgumentField="point => point.Date" ValueField="point => point.CacheCreationTokens" />
+                            <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="long"
+                                               Name="Cache Read" ArgumentField="point => point.Date" ValueField="point => point.CacheReadTokens" />
+                            <DxChartLineSeries T="UserUsageTrendPointDto" TArgument="string" TValue="double"
+                                               Name="Cache Hit Rate" ArgumentField="point => point.Date" ValueField="point => point.CacheHitRate" Axis="PercentAxis" />
+                            <DxChartValueAxis />
+                            <DxChartValueAxis Name="PercentAxis" Alignment="ChartAxisAlignment.Far">
+                                <DxChartAxisTitle Text="命中率 (%)" />
+                            </DxChartValueAxis>
+                            <DxChartLegend Visible="false" />
+                            <DxChartTooltip Enabled="true" />
+                        </DxChart>
+                    </div>
                 }
             </section>
         </div>

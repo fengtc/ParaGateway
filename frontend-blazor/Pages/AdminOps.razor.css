@@ -376,6 +376,44 @@
 .card-header h3 { font-size: .78rem; font-weight: 750; }
 .card-header p { margin: 3px 0 0; color: var(--muted); font-size: .62rem; }
 
+.ops-chart-layout {
+    display: grid;
+    min-width: 0;
+    padding: 0 10px 10px;
+}
+
+.ops-chart-legend {
+    display: flex;
+    min-width: 0;
+    min-height: 34px;
+    padding: 0 10px 4px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    color: var(--ink);
+    font-size: .76rem;
+}
+
+.ops-chart-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.ops-chart-legend i {
+    width: 10px;
+    height: 10px;
+    flex: 0 0 10px;
+    border-radius: 2px;
+}
+
+.ops-chart-legend .qps { background: #0b76ce; }
+.ops-chart-legend .tps { background: #16883d; }
+.ops-chart-legend .request-error { background: #e4112f; }
+.ops-chart-legend .upstream-error { background: #ff9800; }
+
 .compact-list { display: grid; gap: 10px; padding: 13px; }
 .concurrency-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(95px, 1fr) auto; align-items: center; gap: 10px; }
 .concurrency-row > span { display: grid; min-width: 0; }
@@ -632,4 +670,5 @@
     .card-controls > *,
     .alert-event-filters > *,
     .alert-detail-actions > * { width: 100%; }
+    .ops-chart-legend { padding-inline: 4px; justify-content: flex-start; gap: 6px 12px; }
 }
