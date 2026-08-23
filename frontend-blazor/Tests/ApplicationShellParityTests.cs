@@ -10,7 +10,15 @@ public sealed class ApplicationShellParityTests
     {
         var layout = ReadSource("Layout", "MainLayout.razor");
 
-        Assert.Contains("管理控制台", layout, StringComparison.Ordinal);
+        foreach (var title in new[]
+        {
+            "运营总览", "账户总览", "运维管理", "用户管理", "内容风控", "提示风控",
+            "请求审计", "分组管理", "订阅管理", "上游账号", "公告管理", "代理管理",
+            "用量明细", "审计日志", "系统设置"
+        })
+        {
+            Assert.Contains(title, layout, StringComparison.Ordinal);
+        }
         Assert.Contains("系统概览与统计数据", layout, StringComparison.Ordinal);
         Assert.Contains("PageContext.Title", layout, StringComparison.Ordinal);
         Assert.Contains("PageContext.Description", layout, StringComparison.Ordinal);
@@ -34,17 +42,25 @@ public sealed class ApplicationShellParityTests
         var users = menu.IndexOf("href=\"/admin/users\"", StringComparison.Ordinal);
         var riskControl = menu.IndexOf("href=\"/admin/risk-control\"", StringComparison.Ordinal);
         var promptUpgrade = menu.IndexOf("href=\"/admin/prompt-audit\"", StringComparison.Ordinal);
+        var requestAudit = menu.IndexOf("href=\"/admin/request-audit\"", StringComparison.Ordinal);
         var groups = menu.IndexOf("href=\"/admin/groups\"", StringComparison.Ordinal);
         var accounts = menu.IndexOf("href=\"/admin/accounts\"", StringComparison.Ordinal);
         var settings = menu.IndexOf("href=\"/admin/settings\"", StringComparison.Ordinal);
 
-        Assert.True(dashboard >= 0 && dashboard < ops && ops < users && users < riskControl && riskControl < promptUpgrade && promptUpgrade < groups && groups < accounts && accounts < settings);
-        Assert.Contains("内容审核", menu, StringComparison.Ordinal);
-        Assert.Contains("提示词审计", menu, StringComparison.Ordinal);
+        Assert.True(dashboard >= 0 && dashboard < ops && ops < users && users < riskControl && riskControl < promptUpgrade && promptUpgrade < requestAudit && requestAudit < groups && groups < accounts && accounts < settings);
+        Assert.Contains("运营总览", menu, StringComparison.Ordinal);
+        Assert.Contains("运维管理", menu, StringComparison.Ordinal);
+        Assert.Contains("内容风控", menu, StringComparison.Ordinal);
+        Assert.Contains("提示风控", menu, StringComparison.Ordinal);
+        Assert.Contains("请求审计", menu, StringComparison.Ordinal);
         Assert.DoesNotContain("安全审计", menu, StringComparison.Ordinal);
         Assert.DoesNotContain("nav-group-button", menu, StringComparison.Ordinal);
         Assert.Contains("我的账户", menu, StringComparison.Ordinal);
-        Assert.Contains("账号管理", menu, StringComparison.Ordinal);
+        Assert.Contains("上游账号", menu, StringComparison.Ordinal);
+        Assert.Contains("代理管理", menu, StringComparison.Ordinal);
+        Assert.Contains("用量明细", menu, StringComparison.Ordinal);
+        Assert.Contains("审计日志", menu, StringComparison.Ordinal);
+        Assert.Contains("账户总览", menu, StringComparison.Ordinal);
         Assert.DoesNotContain("GetSystemVersionAsync", menu, StringComparison.Ordinal);
         Assert.DoesNotContain("CheckSystemUpdatesAsync", menu, StringComparison.Ordinal);
         Assert.DoesNotContain("version-badge", menu, StringComparison.Ordinal);
@@ -58,7 +74,7 @@ public sealed class ApplicationShellParityTests
         {
             Assert.DoesNotContain($"href=\"{misplacedRoute}\"", menu, StringComparison.OrdinalIgnoreCase);
         }
-        foreach (var hiddenLabel in new[] { "渠道管理", "上游账号", "兑换码", "优惠码", "邀请返利" })
+        foreach (var hiddenLabel in new[] { "渠道管理", "兑换码", "优惠码", "邀请返利" })
         {
             Assert.DoesNotContain(hiddenLabel, menu, StringComparison.Ordinal);
         }
@@ -74,6 +90,30 @@ public sealed class ApplicationShellParityTests
         Assert.DoesNotContain("/purchase", menu, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("/orders", menu, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("支付", menu, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PrimaryNavigationTypographyMatchesTopbarTitle()
+    {
+        var navigation = ReadSource("Layout", "NavMenu.razor.css");
+        var layout = ReadSource("Layout", "MainLayout.razor.css");
+
+        foreach (var declaration in new[] { "font-size: 1rem;", "font-weight: 700;", "line-height: 1.25;" })
+        {
+            Assert.Contains(declaration, navigation, StringComparison.Ordinal);
+            Assert.Contains(declaration, layout, StringComparison.Ordinal);
+        }
+        Assert.Contains(".admin-section .nav-label-copy", navigation, StringComparison.Ordinal);
+        Assert.Contains(".personal-section .nav-label-copy", navigation, StringComparison.Ordinal);
+        Assert.Contains(".user-section .nav-label-copy", navigation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AdminDashboardModelDistributionUsesSolidPieChart()
+    {
+        var dashboard = ReadSource("Components", "AdminDashboardPanel.razor");
+
+        Assert.Contains("<DxPieChart Data=\"@ModelRows\" InnerDiameter=\"0\"", dashboard, StringComparison.Ordinal);
     }
 
     [Fact]

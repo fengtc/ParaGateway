@@ -41,7 +41,7 @@
 .table-sort { display: inline-flex; padding: 0; align-items: center; gap: 4px; color: inherit; background: transparent; border: 0; font: inherit; font-weight: inherit; }
 .account-name-cell, .capacity-cell, .today-stats, .proxy-cell, .expiry-cell { display: grid; min-width: 130px; gap: 3px; }
 .account-name-cell { min-width: 180px; }
-.account-name-cell strong { overflow: hidden; max-width: 240px; text-overflow: ellipsis; font-size: .94rem; }
+.account-name-cell strong { overflow: hidden; max-width: 240px; text-overflow: ellipsis; font-size: .85rem; font-weight: 650; }
 .account-name-cell small, .capacity-cell small, .today-stats small, .proxy-cell small, .expiry-cell small { color: var(--muted); font-size: .8rem; }
 .accounts-data-table code { color: var(--muted); background: transparent; font-size: .83rem; }
 .platform-stack { display: grid; justify-items: start; gap: 4px; }

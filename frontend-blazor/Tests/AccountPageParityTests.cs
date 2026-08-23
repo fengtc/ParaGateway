@@ -47,6 +47,8 @@ public sealed class AccountPageParityTests
         Assert.Contains("class=\"search-box account-search\"", markup, StringComparison.Ordinal);
         Assert.Contains("class=\"schedule-column\"", markup, StringComparison.Ordinal);
         Assert.Contains(".schedule-column .table-sort", css, StringComparison.Ordinal);
+        Assert.Contains(".account-name-cell strong { overflow: hidden; max-width: 240px; text-overflow: ellipsis; font-size: .85rem; font-weight: 650; }", css, StringComparison.Ordinal);
+        Assert.Contains(".auth-cell strong { color: var(--ink); font-size: .85rem; font-weight: 650; }", css, StringComparison.Ordinal);
         Assert.Contains(".schedule-switch::after", css, StringComparison.Ordinal);
         Assert.Contains("top: 3px; left: 3px; width: 16px; height: 16px", css, StringComparison.Ordinal);
         Assert.Contains(".schedule-switch.on::after { transform: translateX(16px); }", css, StringComparison.Ordinal);
@@ -131,7 +133,7 @@ public sealed class AccountPageParityTests
     public void AccountShellUsesOfficialTitleDescription()
     {
         var layout = Read("Layout", "MainLayout.razor");
-        Assert.Contains("new(\"账号管理\", \"管理官方平台账号、认证凭据、分组与调度状态\")", layout, StringComparison.Ordinal);
+        Assert.Contains("new(\"上游账号\", \"管理官方平台账号、认证凭据、分组与调度状态\")", layout, StringComparison.Ordinal);
         Assert.Contains("new(\"上游账号\", \"管理独立的 OpenAI、Claude 兼容上游连接与调度策略\")", layout, StringComparison.Ordinal);
     }
 

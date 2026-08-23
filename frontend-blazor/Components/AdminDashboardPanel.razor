@@ -183,12 +183,13 @@
                     {
                         <div class="distribution-layout">
                             <div class="distribution-chart">
-                                <DxPieChart Data="@ModelRows" InnerDiameter="0.55" Width="100%" Height="210px">
+                                <DxPieChart Data="@ModelRows" InnerDiameter="0" Width="100%" Height="210px">
                                     <DxPieChartSeries T="AdminDashboardModelStatDto"
                                                       TArgument="string"
                                                       TValue="long"
                                                       ArgumentField="item => item.Model"
                                                       ValueField="item => item.TotalTokens" />
+                                    <DxChartLegend Visible="false" />
                                     <DxChartTooltip Enabled="true" />
                                 </DxPieChart>
                             </div>
@@ -260,7 +261,7 @@
                 {
                     <div class="distribution-layout">
                         <div class="distribution-chart">
-                            <DxPieChart Data="@RankingRows" InnerDiameter="0.55" Width="100%" Height="210px">
+                            <DxPieChart Data="@RankingRows" InnerDiameter="0" Width="100%" Height="210px">
                                 <DxPieChartSeries T="RankingDisplayRow"
                                                   TArgument="string"
                                                   TValue="double"

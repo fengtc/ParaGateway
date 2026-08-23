@@ -3966,3 +3966,94 @@ public sealed class PagedResult<T>
         PageSize = page.PageSize, Total = (int)page.Total, TotalPages = page.Pages
     };
 }
+
+public sealed class RequestAuditPolicyDto
+{
+    public short Id { get; set; } = 1;
+    public bool Enabled { get; set; }
+    [JsonPropertyName("capture_mode")] public string CaptureMode { get; set; } = "all";
+    [JsonPropertyName("sample_rate")] public double SampleRate { get; set; } = 100;
+    [JsonPropertyName("retention_days")] public int RetentionDays { get; set; } = 30;
+    [JsonPropertyName("capture_request_body")] public bool CaptureRequestBody { get; set; } = true;
+    [JsonPropertyName("capture_response_body")] public bool CaptureResponseBody { get; set; } = true;
+    [JsonPropertyName("store_encrypted_content")] public bool StoreEncryptedContent { get; set; }
+    [JsonPropertyName("redaction_level")] public string RedactionLevel { get; set; } = "standard";
+    [JsonPropertyName("max_body_bytes")] public int MaxBodyBytes { get; set; } = 1024 * 1024;
+    public long Version { get; set; } = 1;
+    [JsonPropertyName("updated_by")] public long? UpdatedBy { get; set; }
+    [JsonPropertyName("updated_at")] public DateTimeOffset? UpdatedAt { get; set; }
+    [JsonPropertyName("encryption_configured")] public bool EncryptionConfigured { get; set; }
+}
+
+public sealed class RequestAuditRuntimeDto
+{
+    public bool Enabled { get; set; }
+    [JsonPropertyName("queue_depth")] public int QueueDepth { get; set; }
+    [JsonPropertyName("queue_capacity")] public int QueueCapacity { get; set; }
+    [JsonPropertyName("enqueued_total")] public long EnqueuedTotal { get; set; }
+    [JsonPropertyName("persisted_total")] public long PersistedTotal { get; set; }
+    [JsonPropertyName("dropped_total")] public long DroppedTotal { get; set; }
+    [JsonPropertyName("failed_total")] public long FailedTotal { get; set; }
+    [JsonPropertyName("last_persisted_at")] public DateTimeOffset? LastPersistedAt { get; set; }
+    [JsonPropertyName("last_cleanup_at")] public DateTimeOffset? LastCleanupAt { get; set; }
+    [JsonPropertyName("last_cleanup_count")] public long LastCleanupCount { get; set; }
+}
+
+public sealed class RequestAuditRecordDto
+{
+    public long Id { get; set; }
+    [JsonPropertyName("request_id")] public string RequestId { get; set; } = string.Empty;
+    [JsonPropertyName("user_id")] public long? UserId { get; set; }
+    public string Username { get; set; } = string.Empty;
+    [JsonPropertyName("user_email")] public string UserEmail { get; set; } = string.Empty;
+    [JsonPropertyName("api_key_id")] public long? ApiKeyId { get; set; }
+    [JsonPropertyName("api_key_name")] public string ApiKeyName { get; set; } = string.Empty;
+    [JsonPropertyName("group_id")] public long? GroupId { get; set; }
+    [JsonPropertyName("group_name")] public string GroupName { get; set; } = string.Empty;
+    public string Method { get; set; } = string.Empty;
+    public string Endpoint { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    [JsonPropertyName("client_ip")] public string ClientIp { get; set; } = string.Empty;
+    [JsonPropertyName("status_code")] public int StatusCode { get; set; }
+    [JsonPropertyName("latency_ms")] public long LatencyMs { get; set; }
+    [JsonPropertyName("is_stream")] public bool IsStream { get; set; }
+    [JsonPropertyName("capture_reason")] public string CaptureReason { get; set; } = string.Empty;
+    [JsonPropertyName("policy_version")] public long PolicyVersion { get; set; }
+    [JsonPropertyName("request_content_type")] public string RequestContentType { get; set; } = string.Empty;
+    [JsonPropertyName("response_content_type")] public string ResponseContentType { get; set; } = string.Empty;
+    [JsonPropertyName("request_preview")] public string RequestPreview { get; set; } = string.Empty;
+    [JsonPropertyName("response_preview")] public string ResponsePreview { get; set; } = string.Empty;
+    [JsonPropertyName("encryption_version")] public string EncryptionVersion { get; set; } = string.Empty;
+    [JsonPropertyName("request_bytes")] public long RequestBytes { get; set; }
+    [JsonPropertyName("response_bytes")] public long ResponseBytes { get; set; }
+    [JsonPropertyName("request_truncated")] public bool RequestTruncated { get; set; }
+    [JsonPropertyName("response_truncated")] public bool ResponseTruncated { get; set; }
+    [JsonPropertyName("request_body_omitted")] public bool RequestBodyOmitted { get; set; }
+    [JsonPropertyName("response_body_omitted")] public bool ResponseBodyOmitted { get; set; }
+    [JsonPropertyName("content_error")] public string ContentError { get; set; } = string.Empty;
+    [JsonPropertyName("expires_at")] public DateTimeOffset? ExpiresAt { get; set; }
+    [JsonPropertyName("created_at")] public DateTimeOffset? CreatedAt { get; set; }
+    [JsonPropertyName("raw_content_available")] public bool RawContentAvailable { get; set; }
+}
+
+public sealed class RequestAuditContentDto
+{
+    [JsonPropertyName("record_id")] public long RecordId { get; set; }
+    [JsonPropertyName("request_body")] public string RequestBody { get; set; } = string.Empty;
+    [JsonPropertyName("response_body")] public string ResponseBody { get; set; } = string.Empty;
+    [JsonPropertyName("request_available")] public bool RequestAvailable { get; set; }
+    [JsonPropertyName("response_available")] public bool ResponseAvailable { get; set; }
+}
+
+public sealed class RequestAuditFilterDto
+{
+    [JsonPropertyName("user_id")] public string UserId { get; set; } = string.Empty;
+    [JsonPropertyName("api_key_id")] public string ApiKeyId { get; set; } = string.Empty;
+    [JsonPropertyName("group_id")] public string GroupId { get; set; } = string.Empty;
+    [JsonPropertyName("status_code")] public string StatusCode { get; set; } = string.Empty;
+    [JsonPropertyName("request_id")] public string RequestId { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    public string Query { get; set; } = string.Empty;
+    [JsonPropertyName("start_at")] public string StartAt { get; set; } = string.Empty;
+    [JsonPropertyName("end_at")] public string EndAt { get; set; } = string.Empty;
+}

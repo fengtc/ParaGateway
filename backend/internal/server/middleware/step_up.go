@@ -12,6 +12,9 @@ import (
 // StepUpAuthMiddleware 敏感操作 step-up 2FA 门控中间件类型。
 type StepUpAuthMiddleware gin.HandlerFunc
 
+// StrictStepUpAuthMiddleware 不受全局开关影响，用于请求原文等高敏感数据。
+type StrictStepUpAuthMiddleware gin.HandlerFunc
+
 // stepUpGrantChecker 抽象 TOTP step-up 授权检查能力（由 TotpService 实现）。
 type stepUpGrantChecker interface {
 	HasStepUpGrant(ctx context.Context, userID int64, sessionKey string) (bool, error)
@@ -51,6 +54,15 @@ func NewStepUpAuthMiddleware(
 	settingService *service.SettingService,
 ) StepUpAuthMiddleware {
 	return StepUpAuthMiddleware(stepUpAuth(totpService, userService, stepUpSettingsOrNil(settingService)))
+}
+
+// NewStrictStepUpAuthMiddleware 创建不可被 step_up_enabled 绕过的二次验证门控。
+// 管理员 API Key、未启用 TOTP 的会话及没有近期授权的会话均被拒绝。
+func NewStrictStepUpAuthMiddleware(
+	totpService *service.TotpService,
+	userService *service.UserService,
+) StrictStepUpAuthMiddleware {
+	return StrictStepUpAuthMiddleware(stepUpAuth(totpService, userService, nil))
 }
 
 // stepUpSettingsOrNil 将可能为 nil 的具体指针归一化为接口，

@@ -28,9 +28,9 @@ public sealed class ProviderSchedulingPageTests
         Assert.Contains("UsageWindowRows", upstream, StringComparison.Ordinal);
 
         Assert.Contains("href=\"/admin/accounts\"", navigation, StringComparison.Ordinal);
-        Assert.Contains("账号管理", navigation, StringComparison.Ordinal);
+        Assert.Contains("上游账号", navigation, StringComparison.Ordinal);
         Assert.DoesNotContain("href=\"/admin/upstream-accounts\"", navigation, StringComparison.Ordinal);
-        Assert.DoesNotContain("上游账号", navigation, StringComparison.Ordinal);
+        Assert.DoesNotContain("账号管理", navigation, StringComparison.Ordinal);
     }
 
     [Fact]

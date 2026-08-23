@@ -162,6 +162,9 @@ func runMainServer() {
 			log.Printf("Prompt Audit started in degraded state: %v", err)
 		}
 	}
+	if app.RequestAudit != nil {
+		app.RequestAudit.Start()
+	}
 
 	// 启动服务器
 	go func() {

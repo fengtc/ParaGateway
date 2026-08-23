@@ -201,32 +201,33 @@
         if (path.Length == 0 || path is "admin" or "admin/dashboard")
         {
             return Auth.User?.IsAdmin == true
-                ? new("管理控制台", "系统概览与统计数据")
-                : new("仪表盘", "查看账号使用情况与最近请求");
+                ? new("运营总览", "系统概览与统计数据")
+                : new("账户总览", "查看账号使用情况与最近请求");
         }
 
         return path switch
         {
-            "dashboard" => new("仪表盘", "查看账号使用情况与最近请求"),
-            "admin/ops" => new("运维监控", "查看网关运行状态、队列与服务健康度"),
+            "dashboard" => new("账户总览", "查看账号使用情况与最近请求"),
+            "admin/ops" => new("运维管理", "查看网关运行状态、队列与服务健康度"),
             "users" or "admin/users" => new("用户管理", "管理用户账号、额度、并发与访问状态"),
             "groups" or "admin/groups" => new("分组管理", "管理 API 密钥分组和费率配置"),
             "channels" or "admin/channels" or "admin/channels/pricing" => new("渠道管理", "配置渠道定价、模型映射与分组规则"),
             "admin/channels/monitor" => new("渠道监控", "查看渠道模型、错误与用户调用明细"),
             "admin/subscriptions" => new("订阅管理", "管理用户订阅和配额限制"),
-            "providers" or "admin/accounts" => new("账号管理", "管理官方平台账号、认证凭据、分组与调度状态"),
+            "providers" or "admin/accounts" => new("上游账号", "管理官方平台账号、认证凭据、分组与调度状态"),
             "admin/upstream-accounts" => new("上游账号", "管理独立的 OpenAI、Claude 兼容上游连接与调度策略"),
             "provider-oauth" => new("官方 OAuth 接入", "通过官方授权流程添加平台账号"),
             "admin/models" => new("账号模型", "同步并管理平台账号支持的模型"),
             "admin/announcements" => new("公告管理", "发布并维护面向用户的系统公告"),
             "announcements" => new("公告", "查看平台最新通知与服务动态"),
-            "admin/proxies" => new("IP管理", "管理上游代理节点及账号绑定关系"),
-            "admin/risk-control" => new("内容审核", "配置请求内容审核与风险控制策略"),
-            "admin/prompt-audit" => new("提示词审计", "检索和审计命中的提示词风险记录"),
+            "admin/proxies" => new("代理管理", "管理上游代理节点及账号绑定关系"),
+            "admin/risk-control" => new("内容风控", "配置请求内容审核与风险控制策略"),
+            "admin/prompt-audit" => new("提示风控", "检索和审计命中的提示词风险记录"),
+            "admin/request-audit" => new("请求审计", "查询并审计用户请求内容与响应记录"),
             "admin/redeem" => new("兑换码管理", "创建、发放并追踪兑换码使用情况"),
             "admin/promo-codes" => new("优惠码管理", "管理优惠码规则和使用记录"),
-            "admin/usage" => new("使用记录", "查询全站请求、Token 与费用明细"),
-            "admin/audit-logs" => new("操作日志", "查看管理员操作及安全审计记录"),
+            "admin/usage" => new("用量明细", "查询全站请求、Token 与费用明细"),
+            "admin/audit-logs" => new("审计日志", "查看管理员操作及安全审计记录"),
             "admin/settings" => new("系统设置", "配置站点、认证、通知与网关运行参数"),
             "admin/affiliates" or "admin/affiliates/invites" => new("邀请记录", "查看邀请关系与注册转化"),
             "admin/affiliates/rebates" => new("返利记录", "查看邀请返利计算与发放记录"),

@@ -13,25 +13,29 @@
         @if (Auth.User?.IsAdmin == true)
         {
             <div class="sidebar-section admin-section">
-                <NavLink href="/admin/dashboard" Match="NavLinkMatch.All" title="@(Collapsed ? "仪表盘" : null)" @onclick="NavigateAsync">
+                <NavLink href="/admin/dashboard" Match="NavLinkMatch.All" title="@(Collapsed ? "运营总览" : null)" @onclick="NavigateAsync">
                     <Icon Name="dashboard" />
-                    <span class="nav-label-copy">仪表盘</span>
+                    <span class="nav-label-copy">运营总览</span>
                 </NavLink>
-                <NavLink href="/admin/ops" title="@(Collapsed ? "运维监控" : null)" @onclick="NavigateAsync">
+                <NavLink href="/admin/ops" title="@(Collapsed ? "运维管理" : null)" @onclick="NavigateAsync">
                     <Icon Name="activity" />
-                    <span class="nav-label-copy">运维监控</span>
+                    <span class="nav-label-copy">运维管理</span>
                 </NavLink>
                 <NavLink href="/admin/users" title="@(Collapsed ? "用户管理" : null)" @onclick="NavigateAsync">
                     <Icon Name="users" />
                     <span class="nav-label-copy">用户管理</span>
                 </NavLink>
-                <NavLink href="/admin/risk-control" title="@(Collapsed ? "内容审核" : null)" @onclick="NavigateAsync">
+                <NavLink href="/admin/risk-control" title="@(Collapsed ? "内容风控" : null)" @onclick="NavigateAsync">
                     <Icon Name="shield" />
-                    <span class="nav-label-copy">内容审核</span>
+                    <span class="nav-label-copy">内容风控</span>
                 </NavLink>
-                <NavLink href="/admin/prompt-audit" title="@(Collapsed ? "提示词审计" : null)" @onclick="NavigateAsync">
+                <NavLink href="/admin/prompt-audit" title="@(Collapsed ? "提示风控" : null)" @onclick="NavigateAsync">
                     <Icon Name="file-text" />
-                    <span class="nav-label-copy">提示词审计</span>
+                    <span class="nav-label-copy">提示风控</span>
+                </NavLink>
+                <NavLink href="/admin/request-audit" title="@(Collapsed ? "请求审计" : null)" @onclick="NavigateAsync">
+                    <Icon Name="database" />
+                    <span class="nav-label-copy">请求审计</span>
                 </NavLink>
                 <NavLink href="/admin/groups" title="@(Collapsed ? "分组管理" : null)" @onclick="NavigateAsync">
                     <Icon Name="folder" />
@@ -42,26 +46,26 @@
                     <Icon Name="calendar" />
                     <span class="nav-label-copy">订阅管理</span>
                 </NavLink>
-                <NavLink href="/admin/accounts" title="@(Collapsed ? "账号管理" : null)" @onclick="NavigateAsync">
+                <NavLink href="/admin/accounts" title="@(Collapsed ? "上游账号" : null)" @onclick="NavigateAsync">
                     <Icon Name="users" />
-                    <span class="nav-label-copy">账号管理</span>
+                    <span class="nav-label-copy">上游账号</span>
                 </NavLink>
                 <NavLink href="/admin/announcements" title="@(Collapsed ? "公告管理" : null)" @onclick="NavigateAsync">
                     <Icon Name="bell" />
                     <span class="nav-label-copy">公告管理</span>
                 </NavLink>
-                <NavLink href="/admin/proxies" title="@(Collapsed ? "IP管理" : null)" @onclick="NavigateAsync">
+                <NavLink href="/admin/proxies" title="@(Collapsed ? "代理管理" : null)" @onclick="NavigateAsync">
                     <Icon Name="server" />
-                    <span class="nav-label-copy">IP管理</span>
+                    <span class="nav-label-copy">代理管理</span>
                 </NavLink>
 
-                <NavLink href="/admin/usage" title="@(Collapsed ? "使用记录" : null)" @onclick="NavigateAsync">
+                <NavLink href="/admin/usage" title="@(Collapsed ? "用量明细" : null)" @onclick="NavigateAsync">
                     <Icon Name="activity" />
-                    <span class="nav-label-copy">使用记录</span>
+                    <span class="nav-label-copy">用量明细</span>
                 </NavLink>
-                <NavLink href="/admin/audit-logs" title="@(Collapsed ? "操作日志" : null)" @onclick="NavigateAsync">
+                <NavLink href="/admin/audit-logs" title="@(Collapsed ? "审计日志" : null)" @onclick="NavigateAsync">
                     <Icon Name="file-text" />
-                    <span class="nav-label-copy">操作日志</span>
+                    <span class="nav-label-copy">审计日志</span>
                 </NavLink>
                 <NavLink href="/admin/settings" title="@(Collapsed ? "系统设置" : null)" @onclick="NavigateAsync">
                     <Icon Name="settings" />
@@ -80,7 +84,7 @@
         else
         {
             <div class="sidebar-section user-section">
-                <NavLink href="/dashboard" Match="NavLinkMatch.All" title="@(Collapsed ? "仪表盘" : null)" @onclick="NavigateAsync"><Icon Name="dashboard" /><span class="nav-label-copy">仪表盘</span></NavLink>
+                <NavLink href="/dashboard" Match="NavLinkMatch.All" title="@(Collapsed ? "账户总览" : null)" @onclick="NavigateAsync"><Icon Name="dashboard" /><span class="nav-label-copy">账户总览</span></NavLink>
                 <NavLink href="/api-keys" title="@(Collapsed ? "API 密钥" : null)" @onclick="NavigateAsync"><Icon Name="key" /><span class="nav-label-copy">API 密钥</span></NavLink>
                 <NavLink href="/batch-image" title="@(Collapsed ? "批量生图" : null)" @onclick="NavigateAsync"><Icon Name="image" /><span class="nav-label-copy">批量生图</span></NavLink>
                 <NavLink href="/usage" title="@(Collapsed ? "使用记录" : null)" @onclick="NavigateAsync"><Icon Name="activity" /><span class="nav-label-copy">使用记录</span></NavLink>

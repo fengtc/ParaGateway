@@ -17,6 +17,7 @@ func RegisterAdminRoutes(
 	adminAuth middleware.AdminAuthMiddleware,
 	auditLog middleware.AuditLogMiddleware,
 	stepUpAuth middleware.StepUpAuthMiddleware,
+	strictStepUpAuth middleware.StrictStepUpAuthMiddleware,
 	settingService *service.SettingService,
 	panelRateLimiter *middleware.PanelRateLimiter,
 ) {
@@ -122,6 +123,9 @@ func RegisterAdminRoutes(
 		// 独立提示词输入审计
 		registerPromptAuditRoutes(admin, h)
 
+		// 企业请求与响应归档
+		registerRequestAuditRoutes(admin, h, strictStepUpAuth)
+
 		// 邀请返利（专属用户管理）
 		registerAffiliateRoutes(admin, h)
 
@@ -143,6 +147,18 @@ func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		promptAudit.POST("/events/batch-delete", h.Admin.PromptAudit.BatchDelete)
 		promptAudit.POST("/events/delete-preview", h.Admin.PromptAudit.DeletePreview)
 		promptAudit.POST("/events/delete-by-filter", h.Admin.PromptAudit.DeleteByFilter)
+	}
+}
+
+func registerRequestAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers, strictStepUpAuth middleware.StrictStepUpAuthMiddleware) {
+	requestAudit := admin.Group("/request-audit")
+	{
+		requestAudit.GET("/policy", h.Admin.RequestAudit.GetPolicy)
+		requestAudit.PUT("/policy", gin.HandlerFunc(strictStepUpAuth), h.Admin.RequestAudit.UpdatePolicy)
+		requestAudit.GET("/runtime", h.Admin.RequestAudit.Runtime)
+		requestAudit.GET("/records", h.Admin.RequestAudit.List)
+		requestAudit.GET("/records/:id", h.Admin.RequestAudit.Get)
+		requestAudit.GET("/records/:id/content", gin.HandlerFunc(strictStepUpAuth), h.Admin.RequestAudit.GetContent)
 	}
 }
 

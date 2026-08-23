@@ -61,6 +61,20 @@ public sealed class UsersPageParityTests
     }
 
     [Fact]
+    public void TruncatedUserAttributeCellsRemainTableCells()
+    {
+        var markup = ReadSource("Pages", "Users.razor");
+        var css = ReadSource("Pages", "Users.razor.css");
+
+        // The shared .truncate-cell rule is a block element for non-table content.
+        // User-list cells must explicitly retain table-cell layout or row borders
+        // and vertically centered attribute values drift out of alignment.
+        Assert.Contains("<td class=\"truncate-cell\">@FormatAttributeValue(user.Id, definition)</td>", markup, StringComparison.Ordinal);
+        Assert.Contains(".users-data-table td.truncate-cell", css, StringComparison.Ordinal);
+        Assert.Contains("display: table-cell;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UsersPageConnectsEveryOfficialAdminEndpoint()
     {
         var client = ReadSource("Services", "ApiClient.cs");

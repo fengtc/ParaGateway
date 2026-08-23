@@ -140,6 +140,15 @@
     white-space: nowrap;
 }
 
+.admin-section .nav-label-copy,
+.personal-section .nav-label-copy,
+.user-section .nav-label-copy {
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
 .group-label {
     display: flex;
     flex: 1 1 auto;

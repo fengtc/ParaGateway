@@ -13,6 +13,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
+	"github.com/Wei-Shaw/sub2api/internal/requestaudit"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -40,6 +41,29 @@ func RegisterGatewayRoutes(
 	endpointNorm := handler.InboundEndpointMiddleware()
 	compositeTarget := compositeTargetPlatformMiddleware(compositeResolver)
 	compositeGeminiTarget := compositeGeminiTargetPlatformMiddleware(compositeResolver)
+	if h.RequestAudit != nil {
+		r.Use(h.RequestAudit.Middleware(func(c *gin.Context) requestaudit.Identity {
+			apiKey, ok := middleware.GetAPIKeyFromContext(c)
+			if !ok || apiKey == nil {
+				return requestaudit.Identity{}
+			}
+			identity := requestaudit.Identity{APIKeyID: apiKey.ID, APIKeyName: apiKey.Name, ClientIP: middleware.SecurityClientIP(c)}
+			if apiKey.User != nil {
+				identity.UserID = apiKey.User.ID
+				identity.Username = apiKey.User.Username
+				identity.UserEmail = apiKey.User.Email
+			}
+			if apiKey.Group != nil {
+				id := apiKey.Group.ID
+				identity.GroupID = &id
+				identity.GroupName = apiKey.Group.Name
+			} else if apiKey.GroupID != nil {
+				id := *apiKey.GroupID
+				identity.GroupID = &id
+			}
+			return identity
+		}))
+	}
 
 	// 未分组 Key 拦截中间件（按协议格式区分错误响应）
 	requireGroupAnthropic := middleware.RequireGroupAssignment(settingService, middleware.AnthropicErrorWriter)

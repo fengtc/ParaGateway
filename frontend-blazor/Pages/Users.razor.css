@@ -163,6 +163,14 @@
 
 .numeric-cell { font-variant-numeric: tabular-nums; }
 .truncate-cell { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+/* app.css uses display:block for generic truncate elements. Keep these elements as table cells so dynamic attributes (including department) share the row grid. */
+.users-data-table td.truncate-cell {
+    display: table-cell;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .date-cell { color: var(--muted); font-size: .7rem; }
 .status-badge.purple { color: #7c5ac7; background: rgba(124, 90, 199, .12); }
 .state-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; }

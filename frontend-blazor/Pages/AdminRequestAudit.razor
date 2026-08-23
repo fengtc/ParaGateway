@@ -1,0 +1,230 @@
+@page "/admin/request-audit"
+@using ParaGateway.Frontend.Models
+@inject ApiClient Api
+@inject ToastService Toasts
+@inject IJSRuntime JS
+
+<PageTitle>请求审计 · ParaGateway</PageTitle>
+
+<div class="request-audit-page">
+    <header class="page-heading">
+        <div><span>企业安全</span><h1>请求审计</h1><p>按企业策略归档 API 请求与响应；列表仅展示脱敏预览，原文查看受二次验证和操作日志保护。</p></div>
+        @if (!loading)
+        {
+            <aside class="policy-state @(policy.Enabled ? "enabled" : null)"><i></i><span>@(policy.Enabled ? "正在记录" : "已关闭")</span><small>策略 v@policy.Version</small></aside>
+        }
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@error</span><button type="button" @onclick="LoadAllAsync">重试</button></div>
+    }
+    @if (loading)
+    {
+        <LoadingState Text="正在载入请求审计" />
+    }
+    else
+    {
+        <nav class="page-tabs" role="tablist" aria-label="请求审计">
+            <button type="button" role="tab" aria-selected="@(activeTab == "records")" class="@(activeTab == "records" ? "active" : null)" @onclick='() => activeTab = "records"'>审计记录</button>
+            <button type="button" role="tab" aria-selected="@(activeTab == "policy")" class="@(activeTab == "policy" ? "active" : null)" @onclick='() => activeTab = "policy"'>审计策略</button>
+        </nav>
+
+        @if (activeTab == "records")
+        {
+            <section class="runtime-strip" aria-label="请求审计运行状态">
+                <article><span>队列</span><strong>@runtime.QueueDepth / @runtime.QueueCapacity</strong></article>
+                <article><span>已入队</span><strong>@runtime.EnqueuedTotal.ToString("N0")</strong></article>
+                <article><span>已保存</span><strong>@runtime.PersistedTotal.ToString("N0")</strong></article>
+                <article><span>丢弃 / 失败</span><strong>@runtime.DroppedTotal / @runtime.FailedTotal</strong></article>
+                <article><span>最近保存</span><strong>@FormatDateTime(runtime.LastPersistedAt)</strong></article>
+                <button type="button" class="icon-button" title="刷新运行状态" @onclick="LoadRuntimeAsync"><Icon Name="refresh" Size="16" /></button>
+            </section>
+
+            @if (!policy.Enabled)
+            {
+                <div class="policy-notice"><Icon Name="info" Size="17" /><span>当前策略已关闭，不会新增审计记录；历史记录仍按各自到期时间自动清理。</span><button type="button" @onclick='() => activeTab = "policy"'>打开策略</button></div>
+            }
+
+            <section class="records-section">
+                <header><div><h2>请求与响应记录</h2><p>可按用户、模型、状态码、Request ID 和时间检索。</p></div><button type="button" class="button secondary small" @onclick="LoadRecordsAsync"><Icon Name="refresh" Size="15" />刷新</button></header>
+                <div class="filters">
+                    <FilterInput Label="关键词" Value="@filters.Query" Changed="v => filters.Query = v" />
+                    <FilterInput Label="用户 ID" Type="number" Value="@filters.UserId" Changed="v => filters.UserId = v" />
+                    <FilterInput Label="模型" Value="@filters.Model" Changed="v => filters.Model = v" />
+                    <label><span>HTTP 状态</span><select @bind="filters.StatusCode"><option value="">全部</option><option value="200">200</option><option value="400">400</option><option value="401">401</option><option value="403">403</option><option value="429">429</option><option value="500">500</option><option value="502">502</option><option value="503">503</option></select></label>
+                    <FilterInput Label="Request ID" Value="@filters.RequestId" Changed="v => filters.RequestId = v" />
+                    <label><span>开始时间</span><input type="datetime-local" value="@filters.StartAt" @onchange="e => filters.StartAt = e.Value?.ToString() ?? string.Empty" /></label>
+                    <label><span>结束时间</span><input type="datetime-local" value="@filters.EndAt" @onchange="e => filters.EndAt = e.Value?.ToString() ?? string.Empty" /></label>
+                    <div class="filter-actions"><button type="button" class="button primary small" @onclick="ApplyFiltersAsync"><Icon Name="search" Size="15" />搜索</button><button type="button" class="text-action" @onclick="ResetFiltersAsync">重置</button></div>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(recordsError)) { <div class="inline-alert danger"><span>@recordsError</span></div> }
+                <div class="records-table-wrap">
+                    <table class="records-table">
+                        <thead><tr><th>时间</th><th>用户 / API Key</th><th>入口 / 模型</th><th>状态</th><th>正文</th><th>脱敏预览</th><th>操作</th></tr></thead>
+                        <tbody>
+                            @if (recordsLoading) { <tr><td colspan="7"><LoadingState Text="正在载入审计记录" /></td></tr> }
+                            else if (records.Items.Count == 0) { <tr><td colspan="7"><EmptyState Title="暂无请求审计记录" Description="启用策略或调整筛选条件后重试。" /></td></tr> }
+                            else
+                            {
+                                @foreach (var item in records.Items)
+                                {
+                                    <tr>
+                                        <td class="nowrap">@FormatDateTime(item.CreatedAt)</td>
+                                        <td><span class="identity"><b>@Dash(item.Username)</b><small>@Dash(item.UserEmail)</small><small>@Dash(item.ApiKeyName)</small></span></td>
+                                        <td><span class="route"><b>@item.Method @Dash(item.Endpoint)</b><small>@Dash(item.Model) · @Dash(item.RequestId)</small></span></td>
+                                        <td><span class="status @StatusTone(item.StatusCode)">@item.StatusCode</span><small class="latency">@item.LatencyMs ms</small></td>
+                                        <td><span class="body-state @(item.RawContentAvailable ? "encrypted" : null)"><Icon Name="@(item.RawContentAvailable ? "shield" : "eye-off")" Size="14" />@(item.RawContentAvailable ? "已加密" : "仅预览")</span>@if (item.RequestTruncated || item.ResponseTruncated) { <small class="truncated">存在截断</small> }</td>
+                                        <td><p class="preview" title="@Preview(item)">@Preview(item)</p></td>
+                                        <td><button type="button" class="row-action" @onclick="() => OpenRecordAsync(item.Id)">查看</button></td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <footer class="pagination"><span>共 @records.Total.ToString("N0") 条</span><div><select value="@pageSize" @onchange="PageSizeChangedAsync"><option value="10">10 / 页</option><option value="20">20 / 页</option><option value="50">50 / 页</option><option value="100">100 / 页</option></select><button type="button" class="icon-button" disabled="@(page <= 1)" @onclick="() => ChangePageAsync(page - 1)"><Icon Name="chevron-left" Size="15" /></button><span>@(page) / @TotalPages</span><button type="button" class="icon-button" disabled="@(page >= TotalPages)" @onclick="() => ChangePageAsync(page + 1)"><Icon Name="chevron-right" Size="15" /></button></div></footer>
+            </section>
+        }
+        else
+        {
+            <section class="policy-section">
+                <header><div><h2>企业留存策略</h2><p>默认关闭。启用即代表企业确认其员工请求可按此策略用于内部安全审计。</p></div><span>最后更新 @FormatDateTime(policy.UpdatedAt)</span></header>
+
+                <div class="policy-grid">
+                    <fieldset><legend>记录范围</legend><label class="toggle-row"><span><b>启用请求审计</b><small>关闭后只保留现有元数据和历史记录</small></span><input type="checkbox" @bind="policy.Enabled" /></label><label><span>记录模式</span><select @bind="policy.CaptureMode"><option value="all">全部请求</option><option value="errors">仅异常请求（HTTP 4xx/5xx）</option><option value="sample">普通请求抽样</option></select></label>@if (policy.CaptureMode == "sample") { <label><span>抽样比例（%）</span><input type="number" min="0" max="100" step="0.1" @bind="policy.SampleRate" /></label> }<label><span>保留周期（天）</span><input type="number" min="1" max="3650" @bind="policy.RetentionDays" /></label></fieldset>
+
+                    <fieldset><legend>正文范围</legend><label class="toggle-row"><span><b>保存请求正文</b><small>包含消息、工具参数及其他文本字段</small></span><input type="checkbox" @bind="policy.CaptureRequestBody" /></label><label class="toggle-row"><span><b>保存响应正文</b><small>流式响应会聚合到单条审计记录</small></span><input type="checkbox" @bind="policy.CaptureResponseBody" /></label><label><span>单侧正文上限（KB）</span><input type="number" min="4" max="4096" @bind="MaxBodyKilobytes" /></label><small class="field-note">超过上限会明确标记为截断；图片、音频、视频和 multipart 正文只记录元数据。</small></fieldset>
+
+                    <fieldset><legend>加密与脱敏</legend><label class="toggle-row"><span><b>保存加密原文</b><small>AES-256-GCM 应用层加密，数据库不保存明文</small></span><input type="checkbox" @bind="policy.StoreEncryptedContent" disabled="@(!policy.EncryptionConfigured && !policy.StoreEncryptedContent)" /></label>@if (!policy.EncryptionConfigured) { <div class="key-warning"><Icon Name="alert" Size="16" /><span>尚未配置持久化加密密钥，只能保存脱敏预览。</span></div> }<label><span>脱敏级别</span><select @bind="policy.RedactionLevel"><option value="standard">标准：隐藏凭据字段</option><option value="strict">严格：不展示任何正文预览</option></select></label><small class="field-note">脱敏预览用于检索；加密原文仅通过二次验证后的独立接口读取。</small></fieldset>
+                </div>
+
+                <div class="policy-actions"><span>自动清理每小时执行，历史记录沿用创建时的到期时间。</span><button type="button" class="button secondary" @onclick="ReloadPolicyAsync" disabled="@saving">重置</button><button type="button" class="button primary" @onclick="SavePolicyAsync" disabled="@saving"><Icon Name="save" Size="16" />@(saving ? "保存中…" : "保存策略")</button></div>
+            </section>
+        }
+    }
+</div>
+
+<AppModal Open="detailOpen" Title="请求审计详情" MaxWidth="1120px" OnClose="CloseDetail">
+    <ChildContent>
+        @if (detailLoading) { <LoadingState Text="正在载入请求审计详情" /> }
+        else if (activeRecord is not null)
+        {
+            <div class="detail-meta"><div><span>用户</span><b>@Dash(activeRecord.Username)</b><small>@Dash(activeRecord.UserEmail)</small></div><div><span>API Key / 分组</span><b>@Dash(activeRecord.ApiKeyName)</b><small>@Dash(activeRecord.GroupName)</small></div><div><span>请求</span><b>@activeRecord.Method @Dash(activeRecord.Endpoint)</b><small>@Dash(activeRecord.RequestId)</small></div><div><span>结果</span><b>HTTP @activeRecord.StatusCode</b><small>@activeRecord.LatencyMs ms · @FormatDateTime(activeRecord.CreatedAt)</small></div></div>
+            <div class="content-columns"><section><header><h3>请求正文</h3><small>@BodyMeta(activeRecord.RequestBytes, activeRecord.RequestTruncated, activeRecord.RequestBodyOmitted)</small></header><pre>@RequestDisplay</pre></section><section><header><h3>响应正文</h3><small>@BodyMeta(activeRecord.ResponseBytes, activeRecord.ResponseTruncated, activeRecord.ResponseBodyOmitted)</small></header><pre>@ResponseDisplay</pre></section></div>
+            @if (!string.IsNullOrWhiteSpace(detailError)) { <div class="inline-alert danger"><span>@detailError</span></div> }
+        }
+    </ChildContent>
+    <Footer>
+        <button type="button" class="button secondary" @onclick="CloseDetail">关闭</button>
+        @if (activeRecord?.RawContentAvailable == true && rawContent is null) { <button type="button" class="button primary" disabled="@contentLoading" @onclick="LoadRawContentAsync"><Icon Name="eye" Size="16" />@(contentLoading ? "解密中…" : "查看加密原文")</button> }
+    </Footer>
+</AppModal>
+
+@code {
+    private bool loading = true, recordsLoading, saving, detailOpen, detailLoading, contentLoading;
+    private string activeTab = "records", error = string.Empty, recordsError = string.Empty, detailError = string.Empty;
+    private RequestAuditPolicyDto policy = new();
+    private RequestAuditRuntimeDto runtime = new();
+    private PagedEnvelope<RequestAuditRecordDto> records = new();
+    private RequestAuditFilterDto filters = new();
+    private RequestAuditRecordDto? activeRecord;
+    private RequestAuditContentDto? rawContent;
+    private int page = 1, pageSize = 20;
+
+    protected override async Task OnInitializedAsync() => await LoadAllAsync();
+
+    private async Task LoadAllAsync()
+    {
+        loading = true; error = string.Empty;
+        try { await Task.WhenAll(ReloadPolicyAsync(), LoadRuntimeAsync(), LoadRecordsAsync()); }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task ReloadPolicyAsync() { policy = await Api.GetRequestAuditPolicyAsync(); }
+    private async Task LoadRuntimeAsync() { try { runtime = await Api.GetRequestAuditRuntimeAsync(); } catch (ApiException ex) { error = ex.Message; } }
+    private async Task LoadRecordsAsync()
+    {
+        recordsLoading = true; recordsError = string.Empty;
+        try { records = await Api.GetRequestAuditRecordsAsync(page, pageSize, BuildApiFilters()); }
+        catch (ApiException ex) { recordsError = ex.Message; }
+        finally { recordsLoading = false; }
+    }
+
+    private async Task SavePolicyAsync() => await RunSensitiveAsync(async () =>
+    {
+        saving = true; error = string.Empty;
+        try
+        {
+            policy = await Api.UpdateRequestAuditPolicyAsync(new
+            {
+                enabled = policy.Enabled, capture_mode = policy.CaptureMode, sample_rate = policy.SampleRate,
+                retention_days = policy.RetentionDays, capture_request_body = policy.CaptureRequestBody,
+                capture_response_body = policy.CaptureResponseBody, store_encrypted_content = policy.StoreEncryptedContent,
+                redaction_level = policy.RedactionLevel, max_body_bytes = policy.MaxBodyBytes, expected_version = policy.Version
+            });
+            Toasts.Success("请求审计策略已更新");
+            await LoadRuntimeAsync();
+        }
+        finally { saving = false; }
+    });
+
+    private async Task ApplyFiltersAsync() { page = 1; await LoadRecordsAsync(); }
+    private async Task ResetFiltersAsync() { filters = new(); page = 1; await LoadRecordsAsync(); }
+    private async Task ChangePageAsync(int value) { page = Math.Clamp(value, 1, TotalPages); await LoadRecordsAsync(); }
+    private async Task PageSizeChangedAsync(ChangeEventArgs args) { pageSize = int.TryParse(args.Value?.ToString(), out var value) ? value : 20; page = 1; await LoadRecordsAsync(); }
+
+    private async Task OpenRecordAsync(long id)
+    {
+        detailOpen = true; detailLoading = true; detailError = string.Empty; rawContent = null;
+        try { activeRecord = await Api.GetRequestAuditRecordAsync(id); }
+        catch (ApiException ex) { detailError = ex.Message; }
+        finally { detailLoading = false; }
+    }
+
+    private async Task LoadRawContentAsync()
+    {
+        if (activeRecord is null) return;
+        await RunSensitiveAsync(async () =>
+        {
+            contentLoading = true; detailError = string.Empty;
+            try { rawContent = await Api.GetRequestAuditContentAsync(activeRecord.Id); }
+            finally { contentLoading = false; }
+        }, value => detailError = value);
+    }
+
+    private async Task RunSensitiveAsync(Func<Task> operation, Action<string>? setError = null)
+    {
+        setError ??= value => error = value;
+        try { await operation(); }
+        catch (ApiException ex) when (string.Equals(ex.Code, "STEP_UP_REQUIRED", StringComparison.OrdinalIgnoreCase))
+        {
+            var code = await JS.InvokeAsync<string?>("prompt", "请输入管理员 TOTP 验证码以继续敏感操作");
+            if (string.IsNullOrWhiteSpace(code)) return;
+            try { await Api.VerifyTotpStepUpAsync(code); await operation(); }
+            catch (ApiException retry) { setError(retry.Message); }
+        }
+        catch (ApiException ex) { setError(ex.Message); }
+    }
+
+    private void CloseDetail() { detailOpen = false; activeRecord = null; rawContent = null; detailError = string.Empty; }
+    private RequestAuditFilterDto BuildApiFilters() => new()
+    {
+        UserId = filters.UserId, ApiKeyId = filters.ApiKeyId, GroupId = filters.GroupId,
+        StatusCode = filters.StatusCode, RequestId = filters.RequestId, Model = filters.Model,
+        Query = filters.Query, StartAt = ToUtc(filters.StartAt), EndAt = ToUtc(filters.EndAt)
+    };
+    private static string ToUtc(string value) => DateTimeOffset.TryParse(value, out var parsed) ? parsed.ToUniversalTime().ToString("O") : string.Empty;
+    private int TotalPages => Math.Max(1, records.Pages > 0 ? records.Pages : (int)Math.Ceiling(records.Total / (double)Math.Max(1, pageSize)));
+    private int MaxBodyKilobytes { get => Math.Max(4, policy.MaxBodyBytes / 1024); set => policy.MaxBodyBytes = Math.Clamp(value, 4, 4096) * 1024; }
+    private string RequestDisplay => rawContent?.RequestAvailable == true ? rawContent.RequestBody : Dash(activeRecord?.RequestPreview);
+    private string ResponseDisplay => rawContent?.ResponseAvailable == true ? rawContent.ResponseBody : Dash(activeRecord?.ResponsePreview);
+    private static string Preview(RequestAuditRecordDto item) => !string.IsNullOrWhiteSpace(item.RequestPreview) ? item.RequestPreview : !string.IsNullOrWhiteSpace(item.ResponsePreview) ? item.ResponsePreview : "—";
+    private static string BodyMeta(long bytes, bool truncated, bool omitted) => omitted ? "正文未保存" : $"{FormatBytes(bytes)}{(truncated ? " · 已截断" : string.Empty)}";
+    private static string FormatBytes(long bytes) => bytes < 1024 ? $"{bytes} B" : bytes < 1024 * 1024 ? $"{bytes / 1024d:0.0} KB" : $"{bytes / 1024d / 1024:0.0} MB";
+    private static string StatusTone(int status) => status >= 500 ? "danger" : status >= 400 ? "warning" : "success";
+    private static string Dash(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value;
+    private static string FormatDateTime(DateTimeOffset? value) => value.HasValue && value.Value != default ? value.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") : "—";
+}

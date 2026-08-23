@@ -2426,6 +2426,36 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
     {
         if (!string.IsNullOrWhiteSpace(value)) query.Add($"{key}={Uri.EscapeDataString(value.Trim())}");
     }
+    public Task<RequestAuditPolicyDto> GetRequestAuditPolicyAsync() =>
+        SendAsync<RequestAuditPolicyDto>(HttpMethod.Get, $"{ApiPrefix}/admin/request-audit/policy");
+
+    public Task<RequestAuditPolicyDto> UpdateRequestAuditPolicyAsync(object payload) =>
+        SendAsync<RequestAuditPolicyDto>(HttpMethod.Put, $"{ApiPrefix}/admin/request-audit/policy", payload);
+
+    public Task<RequestAuditRuntimeDto> GetRequestAuditRuntimeAsync() =>
+        SendAsync<RequestAuditRuntimeDto>(HttpMethod.Get, $"{ApiPrefix}/admin/request-audit/runtime");
+
+    public Task<PagedEnvelope<RequestAuditRecordDto>> GetRequestAuditRecordsAsync(int page, int pageSize, RequestAuditFilterDto? filters = null)
+    {
+        filters ??= new();
+        var query = new List<string> { $"page={Math.Max(1, page)}", $"page_size={Math.Clamp(pageSize, 1, 100)}" };
+        AddPromptAuditQuery(query, "user_id", filters.UserId);
+        AddPromptAuditQuery(query, "api_key_id", filters.ApiKeyId);
+        AddPromptAuditQuery(query, "group_id", filters.GroupId);
+        AddPromptAuditQuery(query, "status_code", filters.StatusCode);
+        AddPromptAuditQuery(query, "request_id", filters.RequestId);
+        AddPromptAuditQuery(query, "model", filters.Model);
+        AddPromptAuditQuery(query, "q", filters.Query);
+        AddPromptAuditQuery(query, "start_at", filters.StartAt);
+        AddPromptAuditQuery(query, "end_at", filters.EndAt);
+        return SendAsync<PagedEnvelope<RequestAuditRecordDto>>(HttpMethod.Get, $"{ApiPrefix}/admin/request-audit/records?{string.Join("&", query)}");
+    }
+
+    public Task<RequestAuditRecordDto> GetRequestAuditRecordAsync(long id) =>
+        SendAsync<RequestAuditRecordDto>(HttpMethod.Get, $"{ApiPrefix}/admin/request-audit/records/{id}");
+
+    public Task<RequestAuditContentDto> GetRequestAuditContentAsync(long id) =>
+        SendAsync<RequestAuditContentDto>(HttpMethod.Get, $"{ApiPrefix}/admin/request-audit/records/{id}/content");
 
     public Task<SystemUpdateInfoDto> CheckSystemUpdatesAsync(bool force = false) =>
         SendAsync<SystemUpdateInfoDto>(HttpMethod.Get, $"{ApiPrefix}/admin/system/check-updates{(force ? "?force=true" : string.Empty)}");
