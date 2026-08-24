@@ -22,10 +22,11 @@ public sealed class ChartLegendCoverageTests
             for (var index = 0; index < matches.Count; index++)
             {
                 chartCount++;
-                Assert.Contains(
-                    "<DxChartLegend Visible=\"false\" />",
-                    matches[index].Value,
-                    StringComparison.Ordinal);
+                var chart = matches[index].Value;
+                Assert.True(
+                    chart.Contains("<DxChartLegend Visible=\"false\" />", StringComparison.Ordinal)
+                    || chart.Contains("Position=\"RelativePosition.Outside\"", StringComparison.Ordinal),
+                    $"Chart in {file} must hide its canvas legend or place it outside the plot area.");
             }
         }
 

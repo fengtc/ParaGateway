@@ -71,15 +71,12 @@ public sealed class AdminDashboardPageTests
         var dashboard = ReadSource("Components", "AdminDashboardPanel.razor");
         var styles = ReadSource("Components", "AdminDashboardPanel.razor.css");
 
-        Assert.Equal(4, dashboard.Split("<DxChartLegend Visible=\"false\" />", StringSplitOptions.None).Length - 1);
-        Assert.Contains("aria-label=\"Token 使用趋势图例\"", dashboard, StringComparison.Ordinal);
-        Assert.Contains("aria-label=\"最近使用用户图例\"", dashboard, StringComparison.Ordinal);
+        Assert.Equal(2, dashboard.Split("<DxChartLegend Visible=\"false\" />", StringSplitOptions.None).Length - 1);
+        Assert.Equal(2, dashboard.Split("Position=\"RelativePosition.Outside\"", StringSplitOptions.None).Length - 1);
         Assert.Contains("Color=\"@series.ChartColor\"", dashboard, StringComparison.Ordinal);
         Assert.Contains("UserTrendPalette", dashboard, StringComparison.Ordinal);
-        Assert.Contains(".admin-chart-layout", styles, StringComparison.Ordinal);
-        Assert.Contains(".admin-chart-legend", styles, StringComparison.Ordinal);
-        Assert.Contains("flex-wrap: wrap;", styles, StringComparison.Ordinal);
-        Assert.Contains("white-space: nowrap;", styles, StringComparison.Ordinal);
+        Assert.DoesNotContain("admin-chart-legend", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain(".admin-chart-legend", styles, StringComparison.Ordinal);
     }
 
     [Fact]

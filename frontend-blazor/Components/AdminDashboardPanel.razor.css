@@ -247,53 +247,6 @@
     min-height: 322px;
 }
 
-.admin-chart-layout {
-    display: grid;
-    min-width: 0;
-    padding: 0 10px 10px;
-}
-
-.admin-chart-legend {
-    display: flex;
-    min-width: 0;
-    min-height: 34px;
-    padding: 0 10px 4px;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: 6px 18px;
-    color: var(--ink);
-    font-size: .76rem;
-}
-
-.admin-chart-legend span {
-    display: inline-flex;
-    min-width: 0;
-    max-width: min(220px, 100%);
-    align-items: center;
-    gap: 6px;
-    white-space: nowrap;
-}
-
-.admin-chart-legend i {
-    width: 10px;
-    height: 10px;
-    flex: 0 0 10px;
-    border-radius: 2px;
-}
-
-.admin-chart-legend b {
-    overflow: hidden;
-    font-weight: 500;
-    text-overflow: ellipsis;
-}
-
-.admin-chart-legend .input { background: #ff6d00; }
-.admin-chart-legend .output { background: #16883d; }
-.admin-chart-legend .cache-creation { background: #e4112f; }
-.admin-chart-legend .cache-read { background: #ff9800; }
-.admin-chart-legend .cache-hit-rate { background: #0b76ce; }
-
 .chart-heading {
     flex-wrap: wrap;
 }
@@ -419,13 +372,6 @@
     padding-bottom: 12px;
 }
 
-.admin-user-trend-layout {
-    padding-bottom: 0;
-}
-
-.admin-user-trend-legend {
-    padding-inline: 16px;
-}
 
 /* Match the readable typography hierarchy used by user management. */
 .admin-dashboard { font-size: 1rem; }
@@ -498,12 +444,6 @@
     .distribution-layout {
         align-items: stretch;
         flex-direction: column;
-    }
-
-    .admin-chart-legend {
-        padding-inline: 4px;
-        justify-content: flex-start;
-        gap: 6px 12px;
     }
 }
 

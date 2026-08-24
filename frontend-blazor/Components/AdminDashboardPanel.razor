@@ -299,15 +299,7 @@
                 }
                 else
                 {
-                    <div class="admin-chart-layout">
-                        <div class="admin-chart-legend" aria-label="Token 使用趋势图例">
-                            <span><i class="input"></i>Input</span>
-                            <span><i class="output"></i>Output</span>
-                            <span><i class="cache-creation"></i>Cache Creation</span>
-                            <span><i class="cache-read"></i>Cache Read</span>
-                            <span><i class="cache-hit-rate"></i>Cache Hit Rate</span>
-                        </div>
-                        <DxChart Data="@snapshot.Trend" Width="100%" Height="250px">
+                    <DxChart Data="@snapshot.Trend" Width="100%" Height="250px">
                             <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="long"
                                                Name="Input" Color="@(System.Drawing.Color.FromArgb(255, 109, 0))" ArgumentField="point => point.Date" ValueField="point => point.InputTokens" />
                             <DxChartLineSeries T="AdminDashboardTrendPointDto" TArgument="string" TValue="long"
@@ -322,10 +314,13 @@
                             <DxChartValueAxis Name="PercentAxis" Alignment="ChartAxisAlignment.Far">
                                 <DxChartAxisTitle Text="命中率 (%)" />
                             </DxChartValueAxis>
-                            <DxChartLegend Visible="false" />
+                            <DxChartLegend Visible="true"
+                                           Position="RelativePosition.Outside"
+                                           HorizontalAlignment="HorizontalAlignment.Center"
+                                           VerticalAlignment="VerticalEdge.Top"
+                                           Orientation="Orientation.Horizontal" />
                             <DxChartTooltip Enabled="true" />
                         </DxChart>
-                    </div>
                 }
             </section>
         </div>
@@ -338,14 +333,7 @@
             }
             else
             {
-                <div class="admin-chart-layout admin-user-trend-layout">
-                    <div class="admin-chart-legend admin-user-trend-legend" aria-label="最近使用用户图例">
-                        @foreach (var series in UserTrendSeries)
-                        {
-                            <span title="@series.Name"><i style="background-color: @series.CssColor"></i><b>@series.Name</b></span>
-                        }
-                    </div>
-                    <DxChart T="AdminDashboardUserTrendPointDto" Width="100%" Height="270px">
+                <DxChart T="AdminDashboardUserTrendPointDto" Width="100%" Height="270px">
                         @foreach (var series in UserTrendSeries)
                         {
                             <DxChartLineSeries T="AdminDashboardUserTrendPointDto" TArgument="string" TValue="long"
@@ -355,10 +343,13 @@
                                                ArgumentField="point => point.Date"
                                                ValueField="point => point.Tokens" />
                         }
-                        <DxChartLegend Visible="false" />
+                        <DxChartLegend Visible="true"
+                                           Position="RelativePosition.Outside"
+                                           HorizontalAlignment="HorizontalAlignment.Center"
+                                           VerticalAlignment="VerticalEdge.Top"
+                                           Orientation="Orientation.Horizontal" />
                         <DxChartTooltip Enabled="true" />
                     </DxChart>
-                </div>
             }
         </section>
     }
@@ -390,18 +381,18 @@
 
     private static readonly UserTrendColor[] UserTrendPalette =
     [
-        new("#d95f02", System.Drawing.Color.FromArgb(217, 95, 2)),
-        new("#7570b3", System.Drawing.Color.FromArgb(117, 112, 179)),
-        new("#1b9e77", System.Drawing.Color.FromArgb(27, 158, 119)),
-        new("#e7298a", System.Drawing.Color.FromArgb(231, 41, 138)),
-        new("#66a61e", System.Drawing.Color.FromArgb(102, 166, 30)),
-        new("#e6ab02", System.Drawing.Color.FromArgb(230, 171, 2)),
-        new("#a6761d", System.Drawing.Color.FromArgb(166, 118, 29)),
-        new("#1f78b4", System.Drawing.Color.FromArgb(31, 120, 180)),
-        new("#b15928", System.Drawing.Color.FromArgb(177, 89, 40)),
-        new("#6a3d9a", System.Drawing.Color.FromArgb(106, 61, 154)),
-        new("#238b45", System.Drawing.Color.FromArgb(35, 139, 69)),
-        new("#636363", System.Drawing.Color.FromArgb(99, 99, 99))
+        new(System.Drawing.Color.FromArgb(217, 95, 2)),
+        new(System.Drawing.Color.FromArgb(117, 112, 179)),
+        new(System.Drawing.Color.FromArgb(27, 158, 119)),
+        new(System.Drawing.Color.FromArgb(231, 41, 138)),
+        new(System.Drawing.Color.FromArgb(102, 166, 30)),
+        new(System.Drawing.Color.FromArgb(230, 171, 2)),
+        new(System.Drawing.Color.FromArgb(166, 118, 29)),
+        new(System.Drawing.Color.FromArgb(31, 120, 180)),
+        new(System.Drawing.Color.FromArgb(177, 89, 40)),
+        new(System.Drawing.Color.FromArgb(106, 61, 154)),
+        new(System.Drawing.Color.FromArgb(35, 139, 69)),
+        new(System.Drawing.Color.FromArgb(99, 99, 99))
     ];
 
     private IReadOnlyList<UserTrendSeriesRow> UserTrendSeries => snapshot?.UsersTrend
@@ -415,7 +406,6 @@
         .Select((series, index) => new UserTrendSeriesRow(
             series.Name,
             series.Points,
-            UserTrendPalette[index % UserTrendPalette.Length].Css,
             UserTrendPalette[index % UserTrendPalette.Length].Chart))
         .ToList() ?? [];
 
@@ -669,12 +659,11 @@
         breakdownGeneration++;
     }
 
-    private sealed record UserTrendColor(string Css, System.Drawing.Color Chart);
+    private sealed record UserTrendColor(System.Drawing.Color Chart);
 
     private sealed record UserTrendSeriesRow(
         string Name,
         List<AdminDashboardUserTrendPointDto> Points,
-        string CssColor,
         System.Drawing.Color ChartColor);
 
     public sealed record RankingDisplayRow(
