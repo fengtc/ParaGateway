@@ -2,6 +2,21 @@
 @inject IJSRuntime JS
 
 <div class="account-quota-cell" data-platform="@Account.Platform">
+    @if (TodayStatsLoading && TodayStats is null)
+    {
+        <div class="today-stats-loading" aria-label="正在加载今日账号统计"><span></span><span></span><span></span></div>
+    }
+    else
+    {
+        var todayStats = TodayStats ?? new AccountTodayStatsDto();
+        <div class="quota-stats account-today-stats" aria-label="今日 API 账号统计">
+            <span>@todayStats.Requests req</span>
+            <span>@FormatCompact(todayStats.Tokens)</span>
+            <span title="账号费用">A @UiFormat.Usd(todayStats.Cost)</span>
+            <span title="用户费用">U @UiFormat.Usd(todayStats.UserCost)</span>
+        </div>
+    }
+
     @if (IsOfficialUsageAccount)
     {
         @if (UsageLoading && CurrentUsage is null)
@@ -18,15 +33,13 @@
                     <b>@item.Window.Utilization.ToString("0.#")%</b>
                     <small class="quota-reset" title="@item.Window.ResetsAt?.ToString("O")">@FormatReset(item.Window)</small>
                 </div>
-                @if (item.Window.WindowStats is { } stats)
-                {
-                    <div class="quota-stats" aria-label="@item.Label 窗口统计">
-                        <span>@stats.Requests req</span>
-                        <span>@FormatCompact(stats.Tokens)</span>
-                        <span>A $@stats.StandardCost.ToString("0.##")</span>
-                        <span>U $@stats.UserCost.ToString("0.##")</span>
-                    </div>
-                }
+                var stats = item.Window.WindowStats ?? new AccountUsageWindowStatsDto();
+                <div class="quota-stats" aria-label="@item.Label 窗口统计">
+                    <span>@stats.Requests req</span>
+                    <span>@FormatCompact(stats.Tokens)</span>
+                    <span title="账号费用">A @UiFormat.Usd(stats.Cost)</span>
+                    <span title="用户费用">U @UiFormat.Usd(stats.UserCost)</span>
+                </div>
             }
 
             @if (!CurrentWindows.Any())
@@ -97,10 +110,6 @@
         @LegacyWindow("周", Account.QuotaWeeklyUsed, Account.QuotaWeeklyLimit)
         @LegacyWindow("总", Account.QuotaUsed, Account.QuotaLimit)
     }
-    else
-    {
-        <span class="quota-unavailable">-</span>
-    }
 
     @if (!string.IsNullOrWhiteSpace(CurrentError))
     {
@@ -114,6 +123,8 @@
 
 @code {
     [Parameter, EditorRequired] public AccountDto Account { get; set; } = new();
+    [Parameter] public AccountTodayStatsDto? TodayStats { get; set; }
+    [Parameter] public bool TodayStatsLoading { get; set; }
     [Parameter] public AccountUsageInfoDto? Usage { get; set; }
     [Parameter] public bool UsageLoading { get; set; }
     [Parameter] public string? UsageError { get; set; }
@@ -153,7 +164,7 @@
     private bool IsOfficialUsageAccount => Account.Platform switch
     {
         "anthropic" => Account.Type is "oauth" or "setup-token",
-        "openai" => IsOpenAIOAuth,
+        "openai" => Account.Type == "oauth",
         "gemini" => true,
         "antigravity" or "grok" => Account.Type == "oauth",
         _ => false

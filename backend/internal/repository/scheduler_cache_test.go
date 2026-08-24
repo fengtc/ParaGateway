@@ -13,7 +13,7 @@ func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 		"plan_type":     "plus",
 		"access_token":  "secret-access-token",
 		"refresh_token": "secret-refresh-token",
-	})
+	}, false)
 
 	require.Equal(t, "plus", filtered["plan_type"])
 	require.NotContains(t, filtered, "access_token")
@@ -35,6 +35,100 @@ func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
 
 	require.True(t, metadata.IsOpenAIChatGPTSubscription())
 	require.Empty(t, metadata.GetCredential("access_token"))
+}
+
+func TestSchedulerMetadataAccountKeepsCopilotBillingGuardInputs(t *testing.T) {
+	proxyID := int64(77)
+	account := service.Account{
+		ID:       25,
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"oauth_profile":       service.CopilotOAuthProfile,
+			"billing_username":    "octocat",
+			"billing_pat":         "secret-billing-pat",
+			"github_access_token": "secret-github-token",
+			"access_token":        "secret-copilot-token",
+		},
+		Extra: map[string]any{
+			"billing_credit_limit":        20000.0,
+			"billing_safety_margin":       200.0,
+			"billing_auto_pause_disabled": false,
+			"unrelated":                   "drop-me",
+		},
+		ProxyID: &proxyID,
+		Proxy: &service.Proxy{
+			ID:       proxyID,
+			Name:     "private-proxy",
+			Protocol: "http",
+			Host:     "127.0.0.1",
+			Port:     8080,
+			Username: "proxy-user",
+			Password: "secret-proxy-password",
+			Status:   service.StatusActive,
+		},
+	}
+
+	metadata := buildSchedulerMetadataAccount(account)
+	_, metaPayload, err := marshalSchedulerCacheAccount(account)
+	require.NoError(t, err)
+
+	require.True(t, metadata.IsGitHubCopilot())
+	require.Equal(t, service.CopilotOAuthProfile, metadata.GetCredential("oauth_profile"))
+	require.Equal(t, 20000.0, metadata.Extra["billing_credit_limit"])
+	require.Equal(t, 200.0, metadata.Extra["billing_safety_margin"])
+	require.Equal(t, false, metadata.Extra["billing_auto_pause_disabled"])
+	require.NotContains(t, metadata.Extra, "unrelated")
+	require.NotContains(t, metadata.Credentials, "billing_username")
+	require.NotContains(t, metadata.Credentials, "billing_pat")
+	require.NotContains(t, metadata.Credentials, "github_access_token")
+	require.NotContains(t, metadata.Credentials, "access_token")
+	require.Nil(t, metadata.ProxyID)
+	require.Nil(t, metadata.Proxy)
+	require.NotContains(t, string(metaPayload), "secret-billing-pat")
+	require.NotContains(t, string(metaPayload), "secret-github-token")
+	require.NotContains(t, string(metaPayload), "secret-copilot-token")
+	require.NotContains(t, string(metaPayload), "secret-proxy-password")
+}
+
+func TestSchedulerMetadataAccountDoesNotProjectCopilotBillingInputsForOtherOAuthProfiles(t *testing.T) {
+	proxyID := int64(78)
+	account := service.Account{
+		ID:       26,
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"oauth_profile":    "chatgpt",
+			"billing_username": "octocat",
+			"billing_pat":      "secret-billing-pat",
+		},
+		Extra: map[string]any{
+			"billing_credit_limit":        20000.0,
+			"billing_safety_margin":       200.0,
+			"billing_auto_pause_disabled": false,
+		},
+		ProxyID: &proxyID,
+		Proxy: &service.Proxy{
+			ID:       proxyID,
+			Protocol: "http",
+			Host:     "127.0.0.1",
+			Port:     8080,
+			Username: "proxy-user",
+			Password: "secret-proxy-password",
+		},
+	}
+
+	metadata := buildSchedulerMetadataAccount(account)
+
+	require.False(t, metadata.IsGitHubCopilot())
+	require.NotContains(t, metadata.Credentials, "oauth_profile")
+	require.NotContains(t, metadata.Credentials, "billing_username")
+	require.NotContains(t, metadata.Credentials, "billing_pat")
+	require.NotContains(t, metadata.Extra, "billing_credit_limit")
+	require.NotContains(t, metadata.Extra, "billing_safety_margin")
+	require.NotContains(t, metadata.Extra, "billing_auto_pause_disabled")
+	require.Nil(t, metadata.ProxyID)
+	require.Nil(t, metadata.Proxy)
 }
 
 func TestSchedulerMetadataAccountKeepsRuntimeSchedulingPolicy(t *testing.T) {

@@ -22,6 +22,15 @@ var sensitiveCredentialKeySet = func() map[string]struct{} {
 	return m
 }()
 
+var githubCopilotServerCredentialKeys = []string{
+	"oauth_profile",
+	"base_url",
+	"expires_at",
+	"refresh_at",
+	"github_login",
+	"github_user_id",
+}
+
 // IsSensitiveCredentialKey 判断指定键是否为敏感凭证子键。
 func IsSensitiveCredentialKey(key string) bool {
 	_, ok := sensitiveCredentialKeySet[key]
@@ -46,6 +55,19 @@ func MergePreservingSensitiveCreds(existing, incoming map[string]any) map[string
 		}
 		if existingVal, ok := existing[key]; ok {
 			out[key] = existingVal
+		}
+	}
+	return out
+}
+
+func MergePreservingGitHubCopilotCreds(existing, incoming map[string]any) map[string]any {
+	out := MergePreservingSensitiveCreds(existing, incoming)
+	for _, key := range githubCopilotServerCredentialKeys {
+		if _, hasIncoming := incoming[key]; hasIncoming {
+			continue
+		}
+		if existingValue, ok := existing[key]; ok {
+			out[key] = existingValue
 		}
 	}
 	return out

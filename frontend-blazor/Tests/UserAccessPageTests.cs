@@ -93,7 +93,7 @@ public sealed class UserAccessPageTests
         Assert.DoesNotContain("Api.GetApiKeysAsync", keys, StringComparison.Ordinal);
         Assert.DoesNotContain("IsAdmin", keys, StringComparison.Ordinal);
         Assert.Contains("IsAdminRoute", usage, StringComparison.Ordinal);
-        Assert.Contains("<AdminUsagePanel />", usage, StringComparison.Ordinal);
+        Assert.Contains("<AdminUsagePanel InitialUserId=", usage, StringComparison.Ordinal);
         Assert.Contains("<UserUsagePanel />", usage, StringComparison.Ordinal);
         Assert.Contains("我的使用记录", usage, StringComparison.Ordinal);
     }

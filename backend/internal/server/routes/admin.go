@@ -374,6 +374,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.GET("/upstream-billing-probe/settings", h.Admin.Account.GetUpstreamBillingProbeSettings)
 		accounts.PUT("/upstream-billing-probe/settings", h.Admin.Account.UpdateUpstreamBillingProbeSettings)
 		accounts.POST("/upstream-billing-probe/batch", h.Admin.Account.ProbeUpstreamBillingBatch)
+		accounts.POST("/copilot-billing-pat/validate", h.Admin.OpenAIOAuth.ValidateCopilotBillingPAT)
 		accounts.GET("/ollama-cloud-usage/settings", h.Admin.Account.GetOllamaCloudUsageSettings)
 		accounts.PUT("/ollama-cloud-usage/settings", h.Admin.Account.UpdateOllamaCloudUsageSettings)
 		accounts.GET("/:id", h.Admin.Account.GetByID)
@@ -472,6 +473,9 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		openai.POST("/generate-auth-url", h.Admin.OpenAIOAuth.GenerateAuthURL)
 		openai.POST("/copilot/flows", h.Admin.OpenAIOAuth.StartCopilotOAuth)
 		openai.POST("/copilot/flows/:id/poll", h.Admin.OpenAIOAuth.PollCopilotOAuth)
+		openai.DELETE("/copilot/flows/:id", h.Admin.OpenAIOAuth.CancelCopilotOAuth)
+		openai.POST("/copilot/accounts", h.Admin.OpenAIOAuth.CreateCopilotFromGitHubToken)
+		openai.POST("/copilot/billing-pat/validate", h.Admin.OpenAIOAuth.ValidateCopilotBillingPAT)
 		openai.POST("/exchange-code", h.Admin.OpenAIOAuth.ExchangeCode)
 		openai.POST("/refresh-token", h.Admin.OpenAIOAuth.RefreshToken)
 		openai.POST("/accounts/:id/refresh", h.Admin.OpenAIOAuth.RefreshAccountToken)
@@ -487,6 +491,9 @@ func registerOpenAIOAuthRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		providerOAuth.POST("/flows", h.Admin.OpenAIOAuth.StartCopilotOAuth)
 		providerOAuth.POST("/flows/:id/poll", h.Admin.OpenAIOAuth.PollCopilotOAuth)
+		providerOAuth.DELETE("/flows/:id", h.Admin.OpenAIOAuth.CancelCopilotOAuth)
+		providerOAuth.POST("/accounts", h.Admin.OpenAIOAuth.CreateCopilotFromGitHubToken)
+		providerOAuth.POST("/billing-pat/validate", h.Admin.OpenAIOAuth.ValidateCopilotBillingPAT)
 	}
 }
 

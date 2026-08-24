@@ -16,6 +16,11 @@
 .quota-window.legacy { grid-template-columns: 42px 80px 70px minmax(0, 1fr); }
 .quota-stats { display: flex; flex-wrap: wrap; gap: 4px; padding-left: 48px; }
 .quota-stats span { padding: 3px 6px; color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); border-radius: 5px; font-size: .71rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.account-today-stats { padding-left: 0; }
+.today-stats-loading { display: flex; align-items: center; gap: 4px; }
+.today-stats-loading span { width: 48px; height: 20px; border-radius: 5px; background: color-mix(in srgb, var(--muted) 18%, transparent); animation: quota-pulse 1.4s ease-in-out infinite; }
+.today-stats-loading span:nth-child(2) { width: 40px; }
+.today-stats-loading span:nth-child(3) { width: 58px; }
 .quota-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding-top: 2px; }
 .quota-actions button { display: inline-flex; min-height: 25px; padding: 2px 4px; align-items: center; gap: 3px; color: #669cff; background: transparent; border: 0; border-radius: 4px; font-size: .74rem; font-weight: 650; }
 .quota-actions button:hover:not(:disabled) { background: color-mix(in srgb, #669cff 14%, transparent); }
@@ -32,4 +37,4 @@
 .quota-error { color: var(--danger); }
 .quota-feedback { color: #2c9a71; }
 @keyframes quota-pulse { 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .quota-loading span { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .quota-loading span, .today-stats-loading span { animation: none; } }

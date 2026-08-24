@@ -70,6 +70,21 @@ func (s *duplicateAccountRepoStub) FindByExtraField(_ context.Context, key strin
 	return matches, nil
 }
 
+func (s *duplicateAccountRepoStub) BindGroups(_ context.Context, accountID int64, groupIDs []int64) error {
+	clonedIDs := append([]int64(nil), groupIDs...)
+	groups := accountGroupsForCreate(groupIDs)
+	for i := range groups {
+		groups[i].AccountID = accountID
+	}
+	s.groupsOf[accountID] = clonedIDs
+	s.accountGroupsOf[accountID] = groups
+	if account := s.accounts[accountID]; account != nil {
+		account.GroupIDs = append([]int64(nil), clonedIDs...)
+		account.AccountGroups = append([]AccountGroup(nil), groups...)
+	}
+	return nil
+}
+
 func TestDuplicateAccountCopiesConfigurationAndResetsRuntimeState(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
@@ -323,4 +338,60 @@ func TestDuplicateAccountReturnsExistingCopyForSameOperationKey(t *testing.T) {
 	require.NotEqual(t, first.ID, otherAdminCopy.ID)
 	require.Len(t, repo.accounts, 3)
 	require.NotEmpty(t, first.Extra[duplicateAccountOperationIDExtraKey])
+}
+
+func TestCreateAccountReturnsCommittedAccountForSameIdempotencyKey(t *testing.T) {
+	ctx := context.Background()
+	repo := newDuplicateAccountRepoStub()
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	newInput := func() *CreateAccountInput {
+		return &CreateAccountInput{
+			Name:                  "Copilot durable create",
+			Platform:              PlatformOpenAI,
+			Type:                  AccountTypeOAuth,
+			Credentials:           map[string]any{"oauth_profile": CopilotOAuthProfile, "access_token": "token"},
+			GroupIDs:              []int64{7, 3},
+			Concurrency:           8,
+			Priority:              100,
+			IdempotencyKey:        "copilot-device:7:stable-flow",
+			SkipMixedChannelCheck: true,
+		}
+	}
+
+	first, err := svc.CreateAccount(ctx, newInput())
+	require.NoError(t, err)
+	// Simulate an ambiguous/lost HTTP response: the caller retries with the
+	// same server-owned operation key instead of trusting the first result.
+	second, err := svc.CreateAccount(ctx, newInput())
+	require.NoError(t, err)
+
+	require.Equal(t, first.ID, second.ID)
+	require.Len(t, repo.accounts, 1)
+	require.Equal(t, []int64{7, 3}, second.GroupIDs)
+	require.Equal(t, []int64{7, 3}, repo.groupsOf[first.ID])
+	require.NotEmpty(t, second.Extra[AccountCreateOperationIDExtraKey])
+}
+
+func TestCreateAccountAtomicFailureLeavesNoAccountOrGroups(t *testing.T) {
+	ctx := context.Background()
+	repo := newDuplicateAccountRepoStub()
+	repo.atomicCreateErr = errors.New("group transaction failed")
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+
+	_, err := svc.CreateAccount(ctx, &CreateAccountInput{
+		Name:                  "Copilot atomic create",
+		Platform:              PlatformOpenAI,
+		Type:                  AccountTypeOAuth,
+		Credentials:           map[string]any{"oauth_profile": CopilotOAuthProfile, "access_token": "token"},
+		GroupIDs:              []int64{7, 3},
+		Concurrency:           8,
+		Priority:              100,
+		IdempotencyKey:        "copilot-device:7:failed-flow",
+		SkipMixedChannelCheck: true,
+	})
+
+	require.ErrorContains(t, err, "group transaction failed")
+	require.Empty(t, repo.accounts)
+	require.Empty(t, repo.groupsOf)
+	require.Empty(t, repo.accountGroupsOf)
 }

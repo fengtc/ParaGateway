@@ -1,0 +1,82 @@
+.admin-error-toolbar {
+    display: flex;
+    padding: 0 0 14px;
+    align-items: end;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.admin-error-filters {
+    display: grid;
+    min-width: 0;
+    flex: 1 1 auto;
+    grid-template-columns: minmax(240px, 2fr) repeat(2, minmax(120px, 1fr));
+    gap: 10px;
+}
+
+.admin-error-filters .filter-field { min-width: 0; }
+.admin-error-filters input,
+.admin-error-filters select { width: 100%; min-width: 0; }
+
+.admin-error-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 10px;
+}
+
+.admin-error-actions .result-count { margin-left: 0; padding-bottom: 0; }
+.admin-error-table { min-width: 1180px; }
+.admin-error-table .clickable-row { cursor: pointer; }
+
+.table-sort-button {
+    padding: 0;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    font: inherit;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
+.table-sort-button:hover { color: var(--ink); }
+.table-sort-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.error-message-cell {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-error-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 15px 24px;
+}
+
+.admin-error-detail-grid > div { display: grid; min-width: 0; gap: 4px; }
+.admin-error-detail-grid small,
+.admin-error-detail-section > small { color: var(--muted); font-size: .72rem; font-weight: 650; }
+.admin-error-detail-grid strong { min-width: 0; color: var(--ink); font-size: .8rem; font-weight: 600; overflow-wrap: anywhere; }
+.admin-error-detail-grid code { white-space: normal; overflow-wrap: anywhere; }
+.admin-error-detail-section { margin-top: 18px; }
+.admin-error-detail-section p { margin: 5px 0 0; color: var(--ink); font-size: .8rem; overflow-wrap: anywhere; }
+.admin-error-detail-section pre { max-height: 40vh; margin: 6px 0 0; padding: 12px; overflow: auto; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 6px; font-size: .72rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (max-width: 760px) {
+    .admin-error-table { min-width: 0; }
+}
+
+@media (max-width: 850px) {
+    .admin-error-toolbar { align-items: stretch; flex-direction: column; }
+    .admin-error-actions { justify-content: flex-start; }
+}
+
+@media (max-width: 620px) {
+    .admin-error-filters { grid-template-columns: 1fr; }
+    .admin-error-detail-grid { grid-template-columns: 1fr; }
+    .admin-error-actions { flex-wrap: wrap; }
+    .admin-error-actions .result-count { width: 100%; }
+}

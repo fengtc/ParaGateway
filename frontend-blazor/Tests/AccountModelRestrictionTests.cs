@@ -15,7 +15,8 @@ public sealed class AccountModelRestrictionTests
     [InlineData("antigravity", "oauth", true)]
     [InlineData("anthropic", "oauth", false)]
     [InlineData("gemini", "oauth", false)]
-    [InlineData("copilot", "oauth", false)]
+    [InlineData("copilot", "oauth", true)]
+    [InlineData("copilot", "apikey", true)]
     public void VisibilityMatchesOfficialAccountTypeRules(string platform, string type, bool expected)
     {
         Assert.Equal(expected, AccountModelRestrictions.ShouldShow(platform, type));

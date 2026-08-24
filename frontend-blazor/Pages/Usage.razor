@@ -6,7 +6,9 @@
 
 @if (IsAdminRoute)
 {
-    <AdminUsagePanel />
+    <AdminUsagePanel InitialUserId="@QueryUserId"
+                     InitialStartDate="@QueryStartDate"
+                     InitialEndDate="@QueryEndDate" />
 }
 else
 {
@@ -14,5 +16,14 @@ else
 }
 
 @code {
+    [Parameter, SupplyParameterFromQuery(Name = "user_id")]
+    public long? QueryUserId { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "start_date")]
+    public string? QueryStartDate { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "end_date")]
+    public string? QueryEndDate { get; set; }
+
     private bool IsAdminRoute => new Uri(Navigation.Uri).AbsolutePath.TrimEnd('/').Equals("/admin/usage", StringComparison.OrdinalIgnoreCase);
 }

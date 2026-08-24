@@ -84,6 +84,54 @@ func TestMergePreservingSensitiveCreds_NonSensitiveDeletionAllowed(t *testing.T)
 	require.NotContains(t, out, "project_id", "非敏感键 incoming 不传 = 删除")
 }
 
+func TestMergePreservingGitHubCopilotCreds_PreservesServerMetadata(t *testing.T) {
+	existing := map[string]any{
+		"oauth_profile":       CopilotOAuthProfile,
+		"base_url":            CopilotAPIBaseURL,
+		"expires_at":          "2030-01-01T00:00:00Z",
+		"refresh_at":          "2029-12-31T23:59:00Z",
+		"github_login":        "octocat",
+		"github_user_id":      "42",
+		"github_access_token": "github-secret",
+		"access_token":        "copilot-secret",
+		"billing_pat":         "billing-secret",
+		"billing_username":    "old-user",
+		"model_mapping":       map[string]any{"gpt-old": "gpt-old"},
+		"obsolete":            "remove-me",
+	}
+	incoming := map[string]any{
+		"model_mapping": map[string]any{"gpt-new": "gpt-new"},
+	}
+
+	out := MergePreservingGitHubCopilotCreds(existing, incoming)
+
+	for _, key := range githubCopilotServerCredentialKeys {
+		require.Equal(t, existing[key], out[key], key)
+	}
+	require.Equal(t, "github-secret", out["github_access_token"])
+	require.Equal(t, "copilot-secret", out["access_token"])
+	require.Equal(t, "billing-secret", out["billing_pat"])
+	require.Equal(t, map[string]any{"gpt-new": "gpt-new"}, out["model_mapping"])
+	require.NotContains(t, out, "billing_username", "editable billing username may be removed")
+	require.NotContains(t, out, "obsolete")
+}
+
+func TestMergePreservingGitHubCopilotCreds_AllowsExplicitMetadataRotation(t *testing.T) {
+	existing := map[string]any{
+		"oauth_profile": CopilotOAuthProfile,
+		"base_url":      CopilotAPIBaseURL,
+	}
+	incoming := map[string]any{
+		"oauth_profile": CopilotOAuthProfile,
+		"base_url":      "https://api.individual.githubcopilot.com",
+	}
+
+	out := MergePreservingGitHubCopilotCreds(existing, incoming)
+
+	require.Equal(t, CopilotOAuthProfile, out["oauth_profile"])
+	require.Equal(t, "https://api.individual.githubcopilot.com", out["base_url"])
+}
+
 func TestIsSensitiveCredentialKey(t *testing.T) {
 	require.True(t, IsSensitiveCredentialKey("refresh_token"))
 	require.True(t, IsSensitiveCredentialKey("api_key"))

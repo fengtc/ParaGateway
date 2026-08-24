@@ -2399,6 +2399,30 @@ func (r *accountRepository) ClearTempUnschedulable(ctx context.Context, id int64
 	return nil
 }
 
+func (r *accountRepository) ClearTempUnschedulableUnlessReason(ctx context.Context, id int64, protectedReason string) (bool, error) {
+	result, err := r.sql.ExecContext(ctx, `
+		UPDATE accounts
+		SET temp_unschedulable_until = NULL,
+			temp_unschedulable_reason = NULL,
+			updated_at = NOW()
+		WHERE id = $1
+			AND deleted_at IS NULL
+			AND COALESCE(temp_unschedulable_reason, '') <> $2
+	`, id, protectedReason)
+	if err != nil {
+		return false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected == 0 {
+		return false, err
+	}
+	if err := enqueueSchedulerOutbox(ctx, r.sql, service.SchedulerOutboxEventAccountChanged, &id, nil, nil); err != nil {
+		logger.LegacyPrintf("repository.account", "[SchedulerOutbox] enqueue conditional clear temp unschedulable failed: account=%d err=%v", id, err)
+	}
+	r.syncSchedulerAccountSnapshot(ctx, id)
+	return true, nil
+}
+
 func (r *accountRepository) ClearRateLimit(ctx context.Context, id int64) error {
 	_, err := r.client.Account.Update().
 		Where(dbaccount.IDEQ(id)).

@@ -1,0 +1,75 @@
+.admin-usage-tabs {
+    display: flex;
+    min-height: 45px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--line);
+}
+
+.admin-usage-tabs button {
+    display: inline-flex;
+    min-width: max-content;
+    min-height: 44px;
+    padding: 10px 15px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    font-size: .8rem;
+    font-weight: 650;
+    letter-spacing: 0;
+}
+
+.admin-usage-tabs button:hover { color: var(--ink); }
+.admin-usage-tabs button.active { color: #087f5b; border-bottom-color: #087f5b; }
+.admin-usage-tabs button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+.admin-usage-filter-bar {
+    display: flex;
+    padding: 14px 0 16px;
+    align-items: end;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.admin-usage-filter-grid {
+    display: grid;
+    min-width: 0;
+    flex: 1 1 auto;
+    grid-template-columns: repeat(4, minmax(140px, 1fr)) minmax(88px, .5fr);
+    gap: 10px;
+}
+
+.admin-usage-filter-grid .filter-field { min-width: 0; }
+.admin-usage-filter-grid input,
+.admin-usage-filter-grid select { width: 100%; min-width: 0; }
+
+.admin-usage-filter-actions {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.admin-usage-filter-actions .result-count { margin-left: 4px; padding-bottom: 0; }
+
+@media (max-width: 1080px) {
+    .admin-usage-filter-bar { align-items: stretch; flex-direction: column; }
+    .admin-usage-filter-grid { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+    .admin-usage-filter-actions { justify-content: flex-start; }
+}
+
+@media (max-width: 700px) {
+    .admin-usage-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .admin-usage-filter-actions { flex-wrap: wrap; }
+    .admin-usage-filter-actions .result-count { width: 100%; margin-left: 0; }
+}
+
+@media (max-width: 460px) {
+    .admin-usage-filter-grid { grid-template-columns: 1fr; }
+    .admin-usage-filter-actions .button { flex: 1 1 auto; }
+}

@@ -52,6 +52,12 @@ type GrokOAuthRefreshMutationRepository interface {
 	SetGrokOAuthRefreshTempUnschedulableIfCredentialsUnchanged(ctx context.Context, id int64, expectedCredentials map[string]any, expectedProxyID *int64, until time.Time, reason string) (bool, error)
 }
 
+// TempUnschedulableConditionalClearRepository prevents a successful token
+// refresh from clearing a newer, independently-created scheduling pause.
+type TempUnschedulableConditionalClearRepository interface {
+	ClearTempUnschedulableUnlessReason(ctx context.Context, id int64, protectedReason string) (bool, error)
+}
+
 // TokenRefreshService OAuth token自动刷新服务
 // 定期检查并刷新即将过期的token
 type TokenRefreshService struct {
@@ -1174,19 +1180,23 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 			s.notifyAccountSchedulingBlockCleared(account.ID)
 		}
 	}
-	// 刷新成功后清除临时不可调度状态（处理 OAuth 401 恢复场景）
-	if account.TempUnschedulableUntil != nil && time.Now().Before(*account.TempUnschedulableUntil) {
-		if clearErr := s.accountRepo.ClearTempUnschedulable(ctx, account.ID); clearErr != nil {
+	// 刷新成功后清除 OAuth 401 等临时不可调度状态。Copilot 的月度
+	// quota_exceeded 与短期 access token 刷新无关，必须保留到下月重置。
+	if account.TempUnschedulableUntil != nil &&
+		time.Now().Before(*account.TempUnschedulableUntil) &&
+		!isCopilotMonthlyQuotaPause(account) {
+		cleared, clearErr := s.clearRefreshTempUnschedulable(ctx, account.ID)
+		if clearErr != nil {
 			slog.Warn("token_refresh.clear_temp_unschedulable_failed",
 				"account_id", account.ID,
 				"error", clearErr,
 			)
-		} else {
+		} else if cleared {
 			slog.Info("token_refresh.cleared_temp_unschedulable", "account_id", account.ID)
 			s.notifyAccountSchedulingBlockCleared(account.ID)
 		}
 		// 同步清除 Redis 缓存，避免调度器读到过期的临时不可调度状态
-		if s.tempUnschedCache != nil {
+		if cleared && s.tempUnschedCache != nil {
 			if clearErr := s.tempUnschedCache.DeleteTempUnsched(ctx, account.ID); clearErr != nil {
 				slog.Warn("token_refresh.clear_temp_unsched_cache_failed",
 					"account_id", account.ID,
@@ -1204,6 +1214,23 @@ func (s *TokenRefreshService) postRefreshActions(ctx context.Context, account *A
 	if account != nil && account.Platform == PlatformGrok && accountGrokNeedsReauth(account) {
 		clearGrokNeedsReauthExtra(ctx, s.accountRepo, account.ID)
 	}
+}
+
+func isCopilotMonthlyQuotaPause(account *Account) bool {
+	return account != nil &&
+		account.IsGitHubCopilot() &&
+		strings.TrimSpace(account.TempUnschedulableReason) == CopilotMonthlyQuotaExceededReason
+}
+
+func (s *TokenRefreshService) clearRefreshTempUnschedulable(ctx context.Context, accountID int64) (bool, error) {
+	repo, ok := s.accountRepo.(TempUnschedulableConditionalClearRepository)
+	if !ok {
+		// A refresh pause naturally expires. Fail closed when the repository
+		// cannot atomically protect a concurrently-written monthly quota pause.
+		slog.Warn("token_refresh.conditional_temp_unschedulable_clear_unavailable", "account_id", accountID)
+		return false, nil
+	}
+	return repo.ClearTempUnschedulableUnlessReason(ctx, accountID, CopilotMonthlyQuotaExceededReason)
 }
 
 func (s *TokenRefreshService) postRefreshStateSyncWithCleanup(parent context.Context, account *Account) {

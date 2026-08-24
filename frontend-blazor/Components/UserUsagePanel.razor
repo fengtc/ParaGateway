@@ -16,7 +16,7 @@
         </article>
         <article class="usage-stat-card">
             <span class="usage-stat-icon green"><Icon Name="dollar" Size="20" /></span>
-            <div><small>总费用</small><strong class="cost-value">$@FormatCost(stats?.TotalActualCost ?? 0, 4)</strong><span>标准费用 <s>$@FormatCost(stats?.TotalCost ?? 0, 4)</s></span></div>
+            <div><small>总费用</small><strong class="cost-value">$@FormatCost(stats?.TotalActualCost ?? 0)</strong><span>标准费用 <s>$@FormatCost(stats?.TotalCost ?? 0)</s></span></div>
         </article>
         <article class="usage-stat-card">
             <span class="usage-stat-icon violet"><Icon Name="clock" Size="20" /></span>
@@ -230,7 +230,7 @@
                                     @if (IsUsageColumnVisible("stream")) { <td><span class="tag @RequestTypeClass(row)">@RequestTypeLabel(row)</span></td> }
                                     @if (IsUsageColumnVisible("billing_mode")) { <td><span class="tag @BillingModeClass(row)">@BillingModeLabel(row)</span></td> }
                                     @if (IsUsageColumnVisible("tokens")) { <td>@TokenCell(row)</td> }
-                                    @if (IsUsageColumnVisible("cost")) { <td><span class="actual-cost" title="标准费用 $@FormatCost(row.TotalCost, 8)；倍率 @row.RateMultiplier.ToString("0.###", CultureInfo.InvariantCulture)x">$@FormatCost(row.ActualCost, 6)</span>@if (row.LongContextBillingApplied) { <span class="mini-badge amber">x2</span> }</td> }
+                                    @if (IsUsageColumnVisible("cost")) { <td><span class="actual-cost" title="标准费用 $@FormatCost(row.TotalCost)；倍率 @row.RateMultiplier.ToString("0.###", CultureInfo.InvariantCulture)x">$@FormatCost(row.ActualCost)</span>@if (row.LongContextBillingApplied) { <span class="mini-badge amber">x2</span> }</td> }
                                     @if (IsUsageColumnVisible("latency")) { <td class="latency-cell"><small>首字 @(row.FirstTokenMs.HasValue ? FormatDuration(row.FirstTokenMs.Value) : "-")</small><small>总计 @FormatDuration(row.DurationMs ?? 0)</small></td> }
                                     <td><time datetime="@row.CreatedAt.ToString("O")">@row.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</time></td>
                                     @if (IsUsageColumnVisible("user_agent")) { <td class="user-agent-cell" title="@row.UserAgent">@(string.IsNullOrWhiteSpace(row.UserAgent) ? "-" : row.UserAgent)</td> }
@@ -649,7 +649,7 @@
     private static string Display(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
     private static string FormatInteger(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
     private static string FormatTokens(long value) => value switch { >= 1_000_000_000 => $"{value / 1_000_000_000d:0.##}B", >= 1_000_000 => $"{value / 1_000_000d:0.##}M", >= 1_000 => $"{value / 1_000d:0.##}K", _ => value.ToString("N0", CultureInfo.InvariantCulture) };
-    private static string FormatCost(double value, int decimals) => value.ToString($"0.{new string('0', decimals)}", CultureInfo.InvariantCulture);
+    private static string FormatCost(double value) => value.ToString("0.00", CultureInfo.InvariantCulture);
     private static string FormatDuration(double milliseconds) => milliseconds < 1000 ? $"{milliseconds:0}ms" : $"{milliseconds / 1000:0.00}s";
 
     private sealed record ColumnOption(string Key, string Label);

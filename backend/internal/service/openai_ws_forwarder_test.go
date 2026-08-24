@@ -167,6 +167,39 @@ func TestOpenAIWSPayloadTransientStatus_Explicit529IsNotModelTransient(t *testin
 	require.Zero(t, openAIWSPayloadTransientStatus(payload))
 }
 
+type copilotWSQuotaAccountRepo struct {
+	AccountRepository
+	calls  int
+	until  time.Time
+	reason string
+}
+
+func (r *copilotWSQuotaAccountRepo) SetTempUnschedulable(_ context.Context, _ int64, until time.Time, reason string) error {
+	r.calls++
+	r.until = until
+	r.reason = reason
+	return nil
+}
+
+func TestOpenAIWSTerminalEvent_CopilotQuotaExceededPausesUntilNextUTCMonth(t *testing.T) {
+	copilotBillingGuardCache.Clear()
+	t.Cleanup(copilotBillingGuardCache.Clear)
+	repo := &copilotWSQuotaAccountRepo{}
+	svc := &OpenAIGatewayService{}
+	svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := newCopilotGatewayTestAccount()
+	account.ID = 5204
+	payload := []byte(`{"type":"response.failed","response":{"error":{"status_code":402,"code":"quota_exceeded","message":"monthly quota exhausted"}}}`)
+
+	terminalEvent := svc.handleOpenAIWSTerminalTransientFailure(context.Background(), account, "gpt-5.5", http.Header{}, payload)
+
+	require.Equal(t, "response.failed", terminalEvent)
+	require.Equal(t, 1, repo.calls)
+	require.Equal(t, CopilotMonthlyQuotaExceededReason, repo.reason)
+	require.Equal(t, nextCopilotMonthlyQuotaReset(time.Now().UTC()), repo.until)
+	require.Equal(t, CopilotMonthlyQuotaExceededReason, account.TempUnschedulableReason)
+}
+
 func TestOpenAIWSDial5xxRecordsModelTransient(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	svc.rateLimitService = NewRateLimitService(transientCooldownAccountRepo{}, nil, &config.Config{}, nil, nil)

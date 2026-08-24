@@ -2,7 +2,7 @@
 @inject ToastService Toasts
 @inject IJSRuntime JS
 
-@if (AccountModelRestrictions.ShouldShow(Model.Platform, Model.Type))
+@if (AccountModelRestrictions.ShouldShow(EffectivePlatform, Model.Type))
 {
     <section class="model-restriction-editor" data-testid="model-restriction-editor">
         <div class="model-restriction-heading">
@@ -12,7 +12,7 @@
             </div>
         </div>
 
-        @if (AccountModelRestrictions.SupportsWhitelist(Model.Platform))
+        @if (AccountModelRestrictions.SupportsWhitelist(EffectivePlatform))
         {
             <div class="model-mode-tabs" role="tablist" aria-label="模型限制方式">
                 <button type="button" role="tab" aria-selected="@(Model.ModelRestrictionMode == "whitelist")" class="@(Model.ModelRestrictionMode == "whitelist" ? "selected" : string.Empty)" @onclick='() => SelectMode("whitelist")'>
@@ -24,7 +24,7 @@
             </div>
         }
 
-        @if (Model.ModelRestrictionMode == "whitelist" && AccountModelRestrictions.SupportsWhitelist(Model.Platform))
+        @if (Model.ModelRestrictionMode == "whitelist" && AccountModelRestrictions.SupportsWhitelist(EffectivePlatform))
         {
             <div class="model-selector" role="button" tabindex="0" aria-expanded="@modelsOpen" @onclick="ToggleModels" @onkeydown="SelectorKeyDown">
                 @if (Model.AllowedModels.Count == 0)
@@ -113,13 +113,17 @@
 @code {
     [Parameter, EditorRequired] public AccountInput Model { get; set; } = new();
     [Parameter] public string? AccountId { get; set; }
+    [Parameter] public string? RestrictionPlatformOverride { get; set; }
 
     private bool modelsOpen;
     private bool syncing;
     private string search = string.Empty;
     private string customModel = string.Empty;
-    private IReadOnlyList<ModelMappingPreset> Presets => AccountModelRestrictions.PresetsFor(Model.Platform, Model.Type);
-    private IEnumerable<string> FilteredModels => AccountModelRestrictions.ModelsFor(Model.Platform, Model.Type)
+    private string EffectivePlatform => string.IsNullOrWhiteSpace(RestrictionPlatformOverride)
+        ? Model.Platform
+        : RestrictionPlatformOverride.Trim().ToLowerInvariant();
+    private IReadOnlyList<ModelMappingPreset> Presets => AccountModelRestrictions.PresetsFor(EffectivePlatform, Model.Type);
+    private IEnumerable<string> FilteredModels => AccountModelRestrictions.ModelsFor(EffectivePlatform, Model.Type)
         .Where(model => string.IsNullOrWhiteSpace(search) || model.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase));
     private bool CanSync => !string.IsNullOrWhiteSpace(AccountId)
         || (string.Equals(Model.Type, "apikey", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(Model.ApiKey));
@@ -149,7 +153,7 @@
 
     private void FillRelated()
     {
-        AddModels(AccountModelRestrictions.ModelsFor(Model.Platform, Model.Type));
+        AddModels(AccountModelRestrictions.ModelsFor(EffectivePlatform, Model.Type));
         Toasts.Success($"已填入 {Model.AllowedModels.Count} 个相关模型");
     }
 

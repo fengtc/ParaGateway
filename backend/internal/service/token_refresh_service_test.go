@@ -111,6 +111,19 @@ func (r *tokenRefreshAccountRepo) ClearTempUnschedulable(ctx context.Context, id
 	return nil
 }
 
+func (r *tokenRefreshAccountRepo) ClearTempUnschedulableUnlessReason(_ context.Context, id int64, protectedReason string) (bool, error) {
+	account := r.accountsByID[id]
+	if account != nil && account.TempUnschedulableReason == protectedReason {
+		return false, nil
+	}
+	r.clearTempCalls++
+	if account != nil {
+		account.TempUnschedulableUntil = nil
+		account.TempUnschedulableReason = ""
+	}
+	return true, nil
+}
+
 func (r *tokenRefreshAccountRepo) SetTempUnschedulable(ctx context.Context, id int64, until time.Time, reason string) error {
 	r.setTempUnschedCalls++
 	r.lastTempUnschedReason = reason
@@ -1627,4 +1640,67 @@ func TestPathA_DBUpdateFailed(t *testing.T) {
 	require.ErrorIs(t, err, errOAuthRefreshCredentialPersist)
 	require.Equal(t, 1, repo.updateCalls)  // DB 更新被尝试
 	require.Equal(t, 0, invalidator.calls) // DB 失败时不应触发缓存失效
+}
+
+func TestTokenRefreshService_CopilotRefreshPreservesMonthlyQuotaPause(t *testing.T) {
+	repo := &tokenRefreshAccountRepo{}
+	invalidator := &tokenCacheInvalidatorStub{}
+	tempCache := &tempUnschedCacheStub{}
+	cfg := &config.Config{
+		TokenRefresh: config.TokenRefreshConfig{
+			MaxRetries:          1,
+			RetryBackoffSeconds: 0,
+		},
+	}
+	service := NewTokenRefreshService(repo, nil, nil, nil, nil, invalidator, nil, cfg, tempCache)
+	until := nextCopilotMonthlyQuotaReset(time.Now().UTC())
+	account := newCopilotGatewayTestAccount()
+	account.ID = 106
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = CopilotMonthlyQuotaExceededReason
+	repo.accountsByID = map[int64]*Account{account.ID: account}
+	refresher := &tokenRefresherStub{
+		credentials: map[string]any{
+			"oauth_profile":       CopilotOAuthProfile,
+			"github_access_token": "github-token",
+			"access_token":        "new-copilot-token",
+			"base_url":            CopilotAPIBaseURL,
+		},
+	}
+
+	err := service.refreshWithRetry(context.Background(), account, refresher, refresher, time.Hour)
+
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.updateCalls)
+	require.Zero(t, repo.clearTempCalls)
+	require.Zero(t, tempCache.deleteCalls)
+	require.Equal(t, CopilotMonthlyQuotaExceededReason, account.TempUnschedulableReason)
+	require.Equal(t, until, *account.TempUnschedulableUntil)
+}
+
+func TestTokenRefreshService_StaleSnapshotCannotClearConcurrentCopilotMonthlyQuotaPause(t *testing.T) {
+	until := nextCopilotMonthlyQuotaReset(time.Now().UTC())
+	durable := newCopilotGatewayTestAccount()
+	durable.ID = 107
+	durable.TempUnschedulableUntil = &until
+	durable.TempUnschedulableReason = CopilotMonthlyQuotaExceededReason
+
+	stale := newCopilotGatewayTestAccount()
+	stale.ID = durable.ID
+	staleUntil := time.Now().Add(10 * time.Minute)
+	stale.TempUnschedulableUntil = &staleUntil
+	stale.TempUnschedulableReason = "OAuth 401"
+
+	repo := &tokenRefreshAccountRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{durable.ID: durable},
+		},
+	}
+	service := &TokenRefreshService{accountRepo: repo}
+
+	service.postRefreshActions(context.Background(), stale)
+
+	require.Zero(t, repo.clearTempCalls)
+	require.Equal(t, CopilotMonthlyQuotaExceededReason, durable.TempUnschedulableReason)
+	require.Equal(t, until, *durable.TempUnschedulableUntil)
 }

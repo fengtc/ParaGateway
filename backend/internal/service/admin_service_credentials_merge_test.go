@@ -115,3 +115,64 @@ func TestUpdateAccount_EmptyCredentialsSkipsUpdate(t *testing.T) {
 	require.Equal(t, "rt-existing", repo.account.Credentials["refresh_token"], "空 credentials 不应触碰已有 token")
 	require.Equal(t, "renamed", repo.account.Name)
 }
+
+func TestUpdateAccount_CopilotBillingPATFallsBackToGitHubLogin(t *testing.T) {
+	accountID := int64(205)
+	repo := &updateAccountCredsRepoStub{
+		account: &Account{
+			ID:       accountID,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+			Credentials: map[string]any{
+				"oauth_profile":       CopilotOAuthProfile,
+				"github_login":        "octocat",
+				"github_access_token": "github-token",
+				"access_token":        "copilot-token",
+				"billing_pat":         "billing-token",
+				"billing_username":    "old-user",
+			},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	_, err := svc.UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
+		Credentials: map[string]any{
+			"billing_username": "",
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.updateCalls)
+	require.Equal(t, "octocat", repo.account.Credentials["billing_username"])
+	require.Equal(t, "billing-token", repo.account.Credentials["billing_pat"])
+}
+
+func TestUpdateAccount_CopilotBillingPATRequiresResolvableUsername(t *testing.T) {
+	accountID := int64(206)
+	repo := &updateAccountCredsRepoStub{
+		account: &Account{
+			ID:       accountID,
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Status:   StatusActive,
+			Credentials: map[string]any{
+				"oauth_profile":       CopilotOAuthProfile,
+				"github_access_token": "github-token",
+				"access_token":        "copilot-token",
+				"billing_pat":         "billing-token",
+			},
+		},
+	}
+	svc := &adminServiceImpl{accountRepo: repo}
+
+	_, err := svc.UpdateAccount(context.Background(), accountID, &UpdateAccountInput{
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{"gpt-5": "gpt-5"},
+		},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "billing_username is required")
+	require.Zero(t, repo.updateCalls)
+}

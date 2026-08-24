@@ -1,3 +1,4 @@
+using ParaGateway.Frontend.Services;
 using Xunit;
 
 namespace ParaGateway.Frontend.Tests;
@@ -133,8 +134,8 @@ public sealed class AccountPageParityTests
     public void AccountShellUsesOfficialTitleDescription()
     {
         var layout = Read("Layout", "MainLayout.razor");
-        Assert.Contains("new(\"上游账号\", \"管理官方平台账号、认证凭据、分组与调度状态\")", layout, StringComparison.Ordinal);
-        Assert.Contains("new(\"上游账号\", \"管理独立的 OpenAI、Claude 兼容上游连接与调度策略\")", layout, StringComparison.Ordinal);
+        Assert.Contains("new(\"账号管理\", \"管理官方平台账号、认证凭据、分组与调度状态\")", layout, StringComparison.Ordinal);
+        Assert.Contains("new(\"兼容上游连接\", \"管理独立的 OpenAI、Claude 兼容连接与调度策略\")", layout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -161,6 +162,64 @@ public sealed class AccountPageParityTests
         Assert.DoesNotContain("StartOpenAIOAuthAsync(redirectUri)", markup, StringComparison.Ordinal);
         Assert.Contains("RedirectUri = platform == \"grok\"", markup, StringComparison.Ordinal);
         Assert.Contains("localhost:1455", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CopilotCreateAndEditFlowsKeepTheCustomizedAccountContract()
+    {
+        var create = Read("Components", "NativeAccountCreateModal.razor");
+        var edit = Read("Pages", "Providers.razor");
+        var client = Read("Services", "ApiClient.cs");
+
+        foreach (var value in new[]
+        {
+            "Device OAuth", "GitHub Token", "GitHub Billing 用户名", "Billing PAT",
+            "AI Credits 月额度", "安全余量（AI Credits）", "关闭 Billing API 预防停调度",
+            "Api.StartCopilotOAuthAsync", "Api.CreateCopilotAccountAsync",
+            "Api.ValidateCopilotBillingPatAsync", "Api.CancelCopilotOAuthAsync",
+            "CancelCopilotFlowBestEffortAsync", "ClearCopilotSensitiveInputs",
+            "Notes = string.IsNullOrWhiteSpace(form.Notes)",
+            "platform == \"copilot\" ? \"openai\" : platform",
+            "new(\"copilot\", \"GitHub Copilot\", \"zap\")",
+            "copilotPollingGeneration", "IsCopilotFlowCurrent",
+            "var pollingTask = copilotPollingTask",
+            "await copilotPollGate.WaitAsync();"
+        })
+        {
+            Assert.Contains(value, create, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("id=\"native-copilot-github-token\" type=\"password\"", create, StringComparison.Ordinal);
+        Assert.Contains("id=\"native-copilot-billing-pat\" type=\"password\"", create, StringComparison.Ordinal);
+        Assert.Contains("min=\"0\" step=\"1\" value=\"@form.BillingSafetyMargin\"", create, StringComparison.Ordinal);
+        var closeStart = create.IndexOf("private async Task CloseAsync()", StringComparison.Ordinal);
+        var closeEnd = create.IndexOf("private async Task BackToFirstStepAsync()", closeStart, StringComparison.Ordinal);
+        Assert.True(closeStart >= 0 && closeEnd > closeStart);
+        Assert.Contains("ClearCopilotSensitiveInputs();", create[closeStart..closeEnd], StringComparison.Ordinal);
+        var disposeStart = create.IndexOf("public async ValueTask DisposeAsync()", StringComparison.Ordinal);
+        var disposeEnd = create.IndexOf("private sealed record PlatformOption", disposeStart, StringComparison.Ordinal);
+        Assert.True(disposeStart >= 0 && disposeEnd > disposeStart);
+        var disposeBody = create[disposeStart..disposeEnd];
+        Assert.True(disposeBody.IndexOf("await pollingTask", StringComparison.Ordinal)
+            < disposeBody.IndexOf("await CancelCopilotFlowBestEffortAsync();", StringComparison.Ordinal));
+        Assert.Contains("oauth_profile", edit, StringComparison.Ordinal);
+        Assert.Contains("BillingUsername = editingIsCopilot ? ReadCopilotBillingUsername(account)", edit, StringComparison.Ordinal);
+        Assert.Contains("ReadCredential(row, \"github_login\")", edit, StringComparison.Ordinal);
+        Assert.Contains("HasBillingPat = editingIsCopilot && HasCredentialStatus", edit, StringComparison.Ordinal);
+        Assert.DoesNotContain("BillingPat = editingIsCopilot ? ReadCredential", edit, StringComparison.Ordinal);
+        Assert.Contains("RestrictionPlatformOverride=\"@(editingIsCopilot ? \"copilot\" : null)\"", edit, StringComparison.Ordinal);
+        Assert.Contains("<input id=\"account-copilot-billing-username\"", edit, StringComparison.Ordinal);
+        Assert.Contains("<input id=\"account-copilot-billing-pat\" type=\"password\"", edit, StringComparison.Ordinal);
+        Assert.DoesNotContain("<InputText id=\"account-copilot-billing-", edit, StringComparison.Ordinal);
+        Assert.Contains("留空表示保留原值", edit, StringComparison.Ordinal);
+        Assert.Contains("/admin/accounts/copilot-billing-pat/validate", client, StringComparison.Ordinal);
+        Assert.Contains("credentials[\"oauth_profile\"] = \"github_copilot\"", client, StringComparison.Ordinal);
+        Assert.Contains("ValidateCopilotEditBillingIdentity(input);", client, StringComparison.Ordinal);
+
+        var fingerprintStart = edit.IndexOf("private string EditorConnectionFingerprint()", StringComparison.Ordinal);
+        var fingerprintEnd = edit.IndexOf("private void ExpiryChanged", fingerprintStart, StringComparison.Ordinal);
+        Assert.True(fingerprintStart >= 0 && fingerprintEnd > fingerprintStart);
+        Assert.DoesNotContain("form.BillingPat", edit[fingerprintStart..fingerprintEnd], StringComparison.Ordinal);
     }
 
     [Fact]
@@ -197,6 +256,46 @@ public sealed class AccountPageParityTests
         Assert.Contains("openai_capabilities", page, StringComparison.Ordinal);
         Assert.Contains("openai_responses_mode", page, StringComparison.Ordinal);
         Assert.Contains("LongContextInheritedCount", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AllAccountUsageWindowsRenderTodayAccountAndUserCosts()
+    {
+        var page = Read("Pages", "Providers.razor");
+        var quotaCell = Read("Components", "AccountQuotaUsageCell.razor");
+
+        Assert.Contains("TodayStats=\"@(todayStats.TryGetValue(row.Id, out var usageTodayStats) ? usageTodayStats : null)\"", page, StringComparison.Ordinal);
+        Assert.Contains("TodayStatsLoading=\"@todayStatsLoading\"", page, StringComparison.Ordinal);
+        Assert.Contains("!IsColumnVisible(\"today\") && !IsColumnVisible(\"usage\")", page, StringComparison.Ordinal);
+        Assert.Contains("var todayStats = TodayStats ?? new AccountTodayStatsDto();", quotaCell, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShowsTodayStatsInUsageWindow", quotaCell, StringComparison.Ordinal);
+        Assert.DoesNotContain("!TodayStatsLoading && TodayStats is null", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("UiFormat.Usd(0)", page, StringComparison.Ordinal);
+
+        foreach (var value in new[] { "Requests req", "FormatCompact(todayStats.Tokens)", "A @UiFormat.Usd(todayStats.Cost)", "U @UiFormat.Usd(todayStats.UserCost)" })
+        {
+            Assert.Contains(value, quotaCell, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("A @UiFormat.Usd(stats.Cost)", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("var stats = item.Window.WindowStats ?? new AccountUsageWindowStatsDto();", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("\"openai\" => account.Type == \"oauth\"", page, StringComparison.Ordinal);
+        Assert.Contains("U @UiFormat.Usd(stats.UserCost)", quotaCell, StringComparison.Ordinal);
+        Assert.DoesNotContain("UiFormat.Usd(todayStats.StandardCost)", quotaCell, StringComparison.Ordinal);
+        Assert.DoesNotContain("UiFormat.Usd(stats.StandardCost)", quotaCell, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0, "$0.00")]
+    [InlineData(0.0049, "$0.00")]
+    [InlineData(0.00001234, "$0.00")]
+    [InlineData(1.239, "$1.24")]
+    [InlineData(1234.5, "$1,234.50")]
+    public void AccountUsageCostsRenderWithTwoDecimals(double value, string expected)
+    {
+        Assert.Equal(expected, UiFormat.Usd(value));
+        Assert.Equal("$0.00", UiFormat.Money(4_900));
+        Assert.Equal("$1,234.50", UiFormat.Money(1_234_500_000));
     }
 
     [Fact]

@@ -1088,6 +1088,25 @@ public sealed class AdminDashboardRankingItemDto
     [JsonPropertyName("tokens")] public long Tokens { get; set; }
 }
 
+public sealed class AdminDashboardUserBreakdownQueryDto
+{
+    public string StartDate { get; set; } = string.Empty;
+    public string EndDate { get; set; } = string.Empty;
+    public string Timezone { get; set; } = string.Empty;
+    public long? UserId { get; set; }
+    public long? ApiKeyId { get; set; }
+    public long? AccountId { get; set; }
+    public long? GroupId { get; set; }
+    public string Model { get; set; } = string.Empty;
+    public string ModelSource { get; set; } = "requested";
+    public string Endpoint { get; set; } = string.Empty;
+    public string EndpointType { get; set; } = "inbound";
+    public string RequestType { get; set; } = string.Empty;
+    public bool? Stream { get; set; }
+    public int? BillingType { get; set; }
+    public string SortBy { get; set; } = string.Empty;
+    public int Limit { get; set; } = 50;
+}
 public sealed class AdminDashboardUserBreakdownResponseDto
 {
     [JsonPropertyName("users")] public List<AdminDashboardUserBreakdownItemDto> Users { get; set; } = [];
@@ -2299,6 +2318,15 @@ public sealed class AccountInput : IValidatableObject
     public bool ProbeEnabled { get; set; }
     public bool RateSyncEnabled { get; set; }
     public List<long> GroupIds { get; set; } = [];
+    [JsonIgnore] public string BillingUsername { get; set; } = string.Empty;
+    [JsonIgnore] public string BillingPat { get; set; } = string.Empty;
+    [JsonIgnore] public bool HasBillingPat { get; set; }
+    [JsonIgnore, Range(0.000001, double.MaxValue, ErrorMessage = "AI Credits 月额度必须大于 0")]
+    public double BillingCreditLimit { get; set; } = 20_000;
+    [JsonIgnore, Range(0, double.MaxValue, ErrorMessage = "安全余量不能小于 0")]
+    public double BillingSafetyMargin { get; set; } = 200;
+    [JsonIgnore] public bool BillingAutoPauseDisabled { get; set; }
+    [JsonIgnore] public bool IsCopilotProfile { get; set; }
     [JsonIgnore] public bool IsEditing { get; set; }
     [JsonIgnore] public string ModelRestrictionMode { get; set; } = "whitelist";
     [JsonIgnore] public List<string> AllowedModels { get; set; } = [];
@@ -3579,11 +3607,63 @@ public sealed class ProviderOAuthFlowDto
     public DateTimeOffset? CompletedAt { get; set; }
 }
 
-public sealed class CopilotOAuthStartRequest
+public class CopilotAccountSettingsRequest
 {
     [Required(ErrorMessage = "请输入账号名称")]
     [MaxLength(100, ErrorMessage = "账号名称不能超过 100 个字符")]
+    [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("notes")] public string? Notes { get; set; }
+    [JsonPropertyName("proxy_id")] public long? ProxyId { get; set; }
+    [JsonPropertyName("concurrency")] public int Concurrency { get; set; } = 8;
+    [JsonPropertyName("load_factor")] public int? LoadFactor { get; set; }
+    [JsonPropertyName("priority")] public int Priority { get; set; } = 100;
+    [JsonPropertyName("rate_multiplier")] public double RateMultiplier { get; set; } = 1;
+    [JsonPropertyName("group_ids")] public List<long> GroupIds { get; set; } = [];
+    [JsonPropertyName("expires_at")] public long? ExpiresAt { get; set; }
+    [JsonPropertyName("auto_pause_on_expired")] public bool AutoPauseOnExpired { get; set; } = true;
+    [JsonPropertyName("schedulable")] public bool? Schedulable { get; set; }
+    [JsonPropertyName("model_mapping")] public Dictionary<string, string> ModelMapping { get; set; } = [];
+    [JsonPropertyName("billing_username")] public string BillingUsername { get; set; } = string.Empty;
+    [JsonPropertyName("billing_pat")] public string BillingPat { get; set; } = string.Empty;
+    [JsonPropertyName("billing_credit_limit")] public double BillingCreditLimit { get; set; } = 20_000;
+    [JsonPropertyName("billing_safety_margin")] public double BillingSafetyMargin { get; set; } = 200;
+    [JsonPropertyName("billing_auto_pause_disabled")] public bool BillingAutoPauseDisabled { get; set; }
+}
+
+public sealed class CopilotOAuthStartRequest : CopilotAccountSettingsRequest;
+
+public sealed class CopilotManualCreateRequest : CopilotAccountSettingsRequest
+{
+    [Required(ErrorMessage = "请输入 GitHub Token")]
+    [JsonPropertyName("github_token")]
+    public string GithubToken { get; set; } = string.Empty;
+}
+
+public sealed class CopilotBillingPatValidationRequest
+{
+    [Required(ErrorMessage = "请输入 GitHub Billing 用户名")]
+    [JsonPropertyName("username")]
+    public string Username { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "请输入 Billing PAT")]
+    [JsonPropertyName("token")]
+    public string BillingPat { get; set; } = string.Empty;
+
+    [JsonPropertyName("proxy_id")]
+    public long? ProxyId { get; set; }
+}
+
+public sealed class CopilotBillingPatValidationDto
+{
+    public bool Valid { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public Dictionary<string, JsonElement>? Period { get; set; }
+    [JsonPropertyName("items_count")] public int ItemsCount { get; set; }
+    [JsonPropertyName("gross_quantity")] public double GrossQuantity { get; set; }
+    [JsonPropertyName("gross_amount")] public double GrossAmount { get; set; }
+    [JsonPropertyName("net_amount")] public double NetAmount { get; set; }
 }
 
 public sealed class OfficialOAuthStartRequest
@@ -3605,9 +3685,10 @@ public sealed class CopilotOAuthFlowDto
     [JsonPropertyName("next_poll_at")] public DateTimeOffset NextPollAt { get; set; }
     [JsonPropertyName("provider_account_id")] public long? ProviderAccountId { get; set; }
     [JsonPropertyName("completed_at")] public DateTimeOffset? CompletedAt { get; set; }
-    // The Go admin endpoint returns the normal account DTO (credentials are
-    // already redacted server-side), not the Worker provider DTO.
-    public AccountDto? Provider { get; set; }
+    // The Go admin endpoint returns the numeric-ID account DTO. Convert it for
+    // the Blazor account UI only after the redacted response is deserialized.
+    [JsonPropertyName("provider")] public GoAccount? ProviderAccount { get; set; }
+    [JsonIgnore] public AccountDto? Provider => ProviderAccount is null ? null : AccountDto.From(ProviderAccount);
 }
 
 public sealed class ModelDto
@@ -3822,6 +3903,24 @@ public sealed class UserUsageQuery
     public string SortOrder { get; set; } = "desc";
 }
 
+public sealed class AdminUsageQuery
+{
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 20;
+    public long? UserId { get; set; }
+    public long? ApiKeyId { get; set; }
+    public long? AccountId { get; set; }
+    public long? GroupId { get; set; }
+    public string Model { get; set; } = string.Empty;
+    public string RequestType { get; set; } = string.Empty;
+    public int? BillingType { get; set; }
+    public string BillingMode { get; set; } = string.Empty;
+    public string StartDate { get; set; } = string.Empty;
+    public string EndDate { get; set; } = string.Empty;
+    public string Timezone { get; set; } = string.Empty;
+    public string SortBy { get; set; } = "created_at";
+    public string SortOrder { get; set; } = "desc";
+}
 public sealed class UserUsageStatsDto
 {
     public string? Period { get; set; }

@@ -285,6 +285,74 @@
     grid-column: 1 / -1;
 }
 
+.native-copilot-token {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.native-copilot-billing {
+    display: grid;
+    overflow: hidden;
+    gap: 14px;
+    padding: 13px;
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+}
+
+.native-section-heading {
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.native-section-heading > div {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+}
+
+.native-section-heading strong {
+    color: var(--ink);
+    font-size: .83rem;
+}
+
+.native-section-heading small {
+    color: var(--muted);
+    font-size: .7rem;
+    line-height: 1.45;
+}
+
+.native-copilot-billing-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 14px;
+}
+
+.native-secret-action {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+
+.native-secret-action .button {
+    min-height: var(--form-control-height);
+    white-space: nowrap;
+}
+
+.native-copilot-validation {
+    grid-column: 1 / -1;
+}
+
+.native-copilot-guard-toggle {
+    min-height: 0;
+    margin: 0 -13px -13px;
+    border-top: 1px solid var(--line);
+    border-bottom: 0;
+}
+
 .native-options-section {
     display: grid;
     overflow: hidden;
@@ -649,6 +717,7 @@
     .native-category-grid.category-count-3,
     .native-credentials-grid,
     .native-provider-options,
+    .native-copilot-billing-grid,
     .native-settings-grid,
     .native-group-picker,
     .native-rule-row {
@@ -658,6 +727,19 @@
     .native-provider-options > .native-field:last-child:nth-child(odd),
     .native-rule-wide {
         grid-column: auto;
+    }
+
+    .native-section-heading {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .native-section-heading .button {
+        justify-content: center;
+    }
+
+    .native-secret-action {
+        grid-template-columns: minmax(0, 1fr);
     }
 
     .native-option-row {

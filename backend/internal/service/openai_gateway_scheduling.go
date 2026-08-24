@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -1413,6 +1414,11 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 		if platform == PlatformGrok {
 			accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 		}
+		accounts, err = s.hydrateCopilotBillingAccountsForScheduling(ctx, accounts)
+		if err != nil {
+			return nil, err
+		}
+		prefetchCopilotBillingGuards(ctx, accounts)
 		return accounts, nil
 	}
 	var accounts []Account
@@ -1431,7 +1437,94 @@ func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, grou
 	if platform == PlatformGrok {
 		accounts = s.filterGrokFreeQuotaAccountsForOpenAI(ctx, accounts)
 	}
+	prefetchCopilotBillingGuards(ctx, accounts)
 	return accounts, nil
+}
+
+// hydrateCopilotBillingAccountsForScheduling replaces Copilot metadata entries
+// with request-local full account copies before Billing guard prefetch and the
+// scheduler's TopK filter. Secrets stay in the existing full-account cache and
+// are never projected into the scheduler metadata payload.
+func (s *OpenAIGatewayService) hydrateCopilotBillingAccountsForScheduling(
+	ctx context.Context,
+	accounts []Account,
+) ([]Account, error) {
+	if len(accounts) == 0 || s == nil || s.schedulerSnapshot == nil {
+		return accounts, nil
+	}
+
+	indices := make([]int, 0)
+	for i := range accounts {
+		if accounts[i].IsGitHubCopilot() {
+			indices = append(indices, i)
+		}
+	}
+	if len(indices) == 0 {
+		return accounts, nil
+	}
+
+	hydrated := make([]*Account, len(accounts))
+	hydrationReasons := make([]string, len(accounts))
+	jobs := make(chan int, len(indices))
+	for _, index := range indices {
+		jobs <- index
+	}
+	close(jobs)
+
+	workerCount := min(copilotBillingPrefetchConcurrency, len(indices))
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				if ctx.Err() != nil {
+					hydrationReasons[index] = "request_canceled"
+					continue
+				}
+				account, err := s.schedulerSnapshot.GetAccount(ctx, accounts[index].ID)
+				if err != nil {
+					hydrationReasons[index] = "lookup_failed"
+					continue
+				}
+				if account == nil {
+					hydrationReasons[index] = "not_found"
+					continue
+				}
+				if account.ID != accounts[index].ID {
+					hydrationReasons[index] = "id_mismatch"
+					continue
+				}
+				if !account.IsGitHubCopilot() {
+					hydrationReasons[index] = "oauth_profile_changed"
+					continue
+				}
+				copyForRequest := *account
+				hydrated[index] = &copyForRequest
+			}
+		}()
+	}
+	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	filtered := make([]Account, 0, len(accounts))
+	for i := range accounts {
+		if !accounts[i].IsGitHubCopilot() {
+			filtered = append(filtered, accounts[i])
+			continue
+		}
+		if hydrated[i] == nil {
+			slog.Warn("copilot_billing_account_hydration_failed",
+				"account_id", accounts[i].ID,
+				"reason", hydrationReasons[i],
+			)
+			continue
+		}
+		filtered = append(filtered, *hydrated[i])
+	}
+	return filtered, nil
 }
 
 func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accountID int64, maxConcurrency int) (*AcquireResult, error) {
@@ -1474,6 +1567,9 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccountBeforeProfit(
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(fresh, requestedModel) {
+		return nil
+	}
+	if skip, _, _ := shouldSkipCopilotAccountForBilling(ctx, fresh); skip {
 		return nil
 	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, fresh) {
@@ -1522,6 +1618,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, account) {
 			return nil
 		}
+		if skip, _, _ := shouldSkipCopilotAccountForBilling(ctx, account); skip {
+			return nil
+		}
 		if !parentHealthyForShadow(account, s.parentAccountLookup(ctx)) {
 			return nil
 		}
@@ -1545,6 +1644,9 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDBBeforeProfit(ct
 		return nil
 	}
 	if s.isOpenAIAccountRequestRuntimeBlocked(latest, requestedModel) {
+		return nil
+	}
+	if skip, _, _ := shouldSkipCopilotAccountForBilling(ctx, latest); skip {
 		return nil
 	}
 	if s.isOpenAIAccountBlockedBySchedulingThreshold(ctx, latest) {

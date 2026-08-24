@@ -4,7 +4,9 @@ namespace ParaGateway.Frontend.Services;
 
 public static class UiFormat
 {
-    public static string Money(long micros) => (micros / 1_000_000m).ToString("$#,##0.00####", CultureInfo.InvariantCulture);
+    public static string Money(long micros) => (micros / 1_000_000m).ToString("$#,##0.00", CultureInfo.InvariantCulture);
+
+    public static string Usd(double value) => value.ToString("$#,##0.00", CultureInfo.InvariantCulture);
 
     public static string Integer(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
 

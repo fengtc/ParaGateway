@@ -3,11 +3,16 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -168,8 +173,124 @@ func TestCopilotChatUnsupportedAPIRetriesResponsesOnce(t *testing.T) {
 	require.Equal(t, "claude-sonnet-4-6", gjson.Get(recorder.Body.String(), "model").String())
 }
 
+func TestCopilotBillingGuardPrefetchBoundsConcurrencyAndWarmsAllCandidates(t *testing.T) {
+	copilotBillingGuardCache.Clear()
+	t.Cleanup(copilotBillingGuardCache.Clear)
+
+	const accountCount = 20
+	accounts := make([]Account, 0, accountCount)
+	for i := range accountCount {
+		account := newCopilotGatewayTestAccount()
+		account.ID = int64(1300 + i)
+		account.Credentials["billing_username"] = "octocat"
+		account.Credentials["billing_pat"] = fmt.Sprintf("billing-token-%d", i)
+		accounts = append(accounts, *account)
+	}
+
+	var calls atomic.Int32
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	fetch := func(context.Context, string, string, string, int, int) (float64, error) {
+		calls.Add(1)
+		current := active.Add(1)
+		for {
+			observed := maxActive.Load()
+			if current <= observed || maxActive.CompareAndSwap(observed, current) {
+				break
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+		active.Add(-1)
+		return 100, nil
+	}
+
+	startedAt := time.Now()
+	prefetchCopilotBillingGuardsWithFetcher(context.Background(), accounts, copilotBillingPrefetchConcurrency, fetch)
+	elapsed := time.Since(startedAt)
+
+	require.EqualValues(t, accountCount, calls.Load())
+	require.Greater(t, maxActive.Load(), int32(1))
+	require.LessOrEqual(t, maxActive.Load(), int32(copilotBillingPrefetchConcurrency))
+	require.Less(t, elapsed, 300*time.Millisecond)
+}
+
+func TestCopilotBillingGuardPrefetchFiltersCandidatesAndCachesFailures(t *testing.T) {
+	copilotBillingGuardCache.Clear()
+	t.Cleanup(copilotBillingGuardCache.Clear)
+
+	valid := newCopilotGatewayTestAccount()
+	valid.ID = 1401
+	valid.Credentials["billing_username"] = "valid"
+	valid.Credentials["billing_pat"] = "billing-token-valid"
+
+	failing := newCopilotGatewayTestAccount()
+	failing.ID = 1402
+	failing.Credentials["billing_username"] = "failing"
+	failing.Credentials["billing_pat"] = "billing-token-failing"
+
+	nonCopilot := newCopilotGatewayTestAccount()
+	nonCopilot.ID = 1403
+	nonCopilot.Credentials["oauth_profile"] = "chatgpt"
+	nonCopilot.Credentials["billing_username"] = "non-copilot"
+	nonCopilot.Credentials["billing_pat"] = "billing-token-non-copilot"
+
+	disabled := newCopilotGatewayTestAccount()
+	disabled.ID = 1404
+	disabled.Credentials["billing_username"] = "disabled"
+	disabled.Credentials["billing_pat"] = "billing-token-disabled"
+	disabled.Extra = map[string]any{"billing_auto_pause_disabled": true}
+
+	missingCredentials := newCopilotGatewayTestAccount()
+	missingCredentials.ID = 1405
+	missingCredentials.Credentials["billing_username"] = ""
+	missingCredentials.Credentials["billing_pat"] = ""
+
+	accounts := []Account{*valid, *failing, *nonCopilot, *disabled, *missingCredentials}
+	var calls atomic.Int32
+	var calledUsers sync.Map
+	fetch := func(_ context.Context, username, _ string, _ string, _ int, _ int) (float64, error) {
+		calls.Add(1)
+		calledUsers.Store(username, true)
+		if username == "failing" {
+			return 0, errors.New("billing unavailable")
+		}
+		return 100, nil
+	}
+
+	prefetchCopilotBillingGuardsWithFetcher(context.Background(), accounts, copilotBillingPrefetchConcurrency, fetch)
+	prefetchCopilotBillingGuardsWithFetcher(context.Background(), accounts, copilotBillingPrefetchConcurrency, fetch)
+
+	require.EqualValues(t, 2, calls.Load())
+	_, validCalled := calledUsers.Load("valid")
+	require.True(t, validCalled)
+	_, failingCalled := calledUsers.Load("failing")
+	require.True(t, failingCalled)
+	for _, username := range []string{"non-copilot", "disabled", ""} {
+		_, called := calledUsers.Load(username)
+		require.False(t, called)
+	}
+}
 func TestCopilotChatOtherBadRequestDoesNotRetryResponses(t *testing.T) {
 	require.False(t, isCopilotUnsupportedAPIForModel(http.StatusBadRequest, []byte(`{"error":{"code":"invalid_request"}}`)))
 	require.False(t, isCopilotUnsupportedAPIForModel(http.StatusUnauthorized, []byte(`{"error":{"code":"unsupported_api_for_model"}}`)))
 	require.True(t, isCopilotUnsupportedAPIForModel(http.StatusBadRequest, []byte(`{"error":{"code":"unsupported_api_for_model"}}`)))
+}
+
+func TestCopilotBillingGuardExcludesAuthoritativeExhaustionBeforeTopK(t *testing.T) {
+	copilotBillingGuardCache.Clear()
+	t.Cleanup(copilotBillingGuardCache.Clear)
+
+	account := newCopilotGatewayTestAccount()
+	account.ID = 1501
+	require.True(t, markCopilotBillingGuardExhausted(account))
+
+	scheduler := &defaultOpenAIAccountScheduler{service: &OpenAIGatewayService{}}
+	compatible, reason := scheduler.isAccountRequestCompatibleReason(
+		context.Background(),
+		account,
+		OpenAIAccountScheduleRequest{RequestedModel: "gpt-5.6-sol"},
+	)
+
+	require.False(t, compatible)
+	require.Equal(t, "copilot_billing_credit_limited", reason)
 }

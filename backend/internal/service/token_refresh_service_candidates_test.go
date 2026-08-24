@@ -99,6 +99,13 @@ func (r *tokenRefreshCandidateRepo) ClearTempUnschedulable(context.Context, int6
 	return nil
 }
 
+func (r *tokenRefreshCandidateRepo) ClearTempUnschedulableUnlessReason(ctx context.Context, id int64, _ string) (bool, error) {
+	if err := r.ClearTempUnschedulable(ctx, id); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 type tokenRefreshTestRefresher struct {
 	err error
 }

@@ -863,6 +863,7 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 }
 
 func buildSchedulerMetadataAccount(account service.Account) service.Account {
+	isGitHubCopilot := account.IsGitHubCopilot()
 	return service.Account{
 		ID:                            account.ID,
 		Name:                          account.Name,
@@ -893,8 +894,8 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 		QuotaDimension:                account.QuotaDimension,
 		AccountGroups:                 filterSchedulerAccountGroups(account.AccountGroups),
 		GroupIDs:                      filterSchedulerGroupIDs(account.GroupIDs, account.AccountGroups),
-		Credentials:                   filterSchedulerCredentials(account.Credentials),
-		Extra:                         filterSchedulerExtra(account.Extra),
+		Credentials:                   filterSchedulerCredentials(account.Credentials, isGitHubCopilot),
+		Extra:                         filterSchedulerExtra(account.Extra, isGitHubCopilot),
 	}
 }
 
@@ -954,11 +955,14 @@ func filterSchedulerGroupIDs(groupIDs []int64, accountGroups []service.AccountGr
 	return filtered
 }
 
-func filterSchedulerCredentials(credentials map[string]any) map[string]any {
+func filterSchedulerCredentials(credentials map[string]any, isGitHubCopilot bool) map[string]any {
 	if len(credentials) == 0 {
 		return nil
 	}
 	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type"}
+	if isGitHubCopilot {
+		keys = append(keys, "oauth_profile")
+	}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {
@@ -971,7 +975,7 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	return filtered
 }
 
-func filterSchedulerExtra(extra map[string]any) map[string]any {
+func filterSchedulerExtra(extra map[string]any, isGitHubCopilot bool) map[string]any {
 	if len(extra) == 0 {
 		return nil
 	}
@@ -1021,6 +1025,9 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		service.UpstreamBillingProbeExtraKey,
 		service.GrokMediaEligibleExtraKey,
 		"grok_billing_snapshot",
+	}
+	if isGitHubCopilot {
+		keys = append(keys, "billing_credit_limit", "billing_safety_margin", "billing_auto_pause_disabled")
 	}
 	filtered := make(map[string]any)
 	for _, key := range keys {

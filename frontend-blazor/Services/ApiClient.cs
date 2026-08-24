@@ -453,19 +453,41 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         string model,
         string modelSource = "requested",
         int limit = 50,
-        string? timezone = null)
+        string? timezone = null) =>
+        GetAdminDashboardUserBreakdownAsync(new AdminDashboardUserBreakdownQueryDto
+        {
+            StartDate = startDate,
+            EndDate = endDate,
+            Model = model,
+            ModelSource = modelSource,
+            Limit = limit,
+            Timezone = timezone ?? string.Empty
+        });
+
+    public Task<AdminDashboardUserBreakdownResponseDto> GetAdminDashboardUserBreakdownAsync(AdminDashboardUserBreakdownQueryDto filter)
     {
-        var normalizedSource = modelSource is "upstream" or "mapping" ? modelSource : "requested";
+        var normalizedSource = filter.ModelSource.Trim().ToLowerInvariant() is "upstream" or "mapping"
+            ? filter.ModelSource.Trim().ToLowerInvariant()
+            : "requested";
         var query = new List<string>
         {
-            $"start_date={Uri.EscapeDataString(startDate)}",
-            $"end_date={Uri.EscapeDataString(endDate)}",
-            $"model={Uri.EscapeDataString(model.Trim())}",
+            $"start_date={Uri.EscapeDataString(filter.StartDate.Trim())}",
+            $"end_date={Uri.EscapeDataString(filter.EndDate.Trim())}",
             $"model_source={Uri.EscapeDataString(normalizedSource)}",
-            $"limit={Math.Clamp(limit, 1, 200)}"
+            $"limit={Math.Clamp(filter.Limit, 1, 200)}"
         };
-        if (!string.IsNullOrWhiteSpace(timezone))
-            query.Add($"timezone={Uri.EscapeDataString(timezone)}");
+        if (!string.IsNullOrWhiteSpace(filter.Timezone)) query.Add($"timezone={Uri.EscapeDataString(filter.Timezone.Trim())}");
+        if (!string.IsNullOrWhiteSpace(filter.Model)) query.Add($"model={Uri.EscapeDataString(filter.Model.Trim())}");
+        if (!string.IsNullOrWhiteSpace(filter.Endpoint)) query.Add($"endpoint={Uri.EscapeDataString(filter.Endpoint.Trim())}");
+        if (!string.IsNullOrWhiteSpace(filter.EndpointType)) query.Add($"endpoint_type={Uri.EscapeDataString(filter.EndpointType.Trim())}");
+        if (!string.IsNullOrWhiteSpace(filter.RequestType)) query.Add($"request_type={Uri.EscapeDataString(filter.RequestType.Trim())}");
+        if (!string.IsNullOrWhiteSpace(filter.SortBy)) query.Add($"sort_by={Uri.EscapeDataString(filter.SortBy.Trim())}");
+        if (filter.UserId is > 0) query.Add($"user_id={filter.UserId.Value}");
+        if (filter.ApiKeyId is > 0) query.Add($"api_key_id={filter.ApiKeyId.Value}");
+        if (filter.AccountId is > 0) query.Add($"account_id={filter.AccountId.Value}");
+        if (filter.GroupId is > 0) query.Add($"group_id={filter.GroupId.Value}");
+        if (filter.Stream.HasValue) query.Add($"stream={filter.Stream.Value.ToString().ToLowerInvariant()}");
+        if (filter.BillingType.HasValue) query.Add($"billing_type={filter.BillingType.Value}");
 
         return SendAsync<AdminDashboardUserBreakdownResponseDto>(HttpMethod.Get,
             $"{ApiPrefix}/admin/dashboard/user-breakdown?{string.Join("&", query)}");
@@ -817,6 +839,7 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
     {
         var credentials = BuildCredentials(input, requireCredentials: true);
         var extra = ParseObject(input.ExtraJson, "账号扩展配置") ?? new(StringComparer.OrdinalIgnoreCase);
+        AddCopilotBillingExtra(extra, input);
         var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["name"] = input.Name.Trim(), ["platform"] = input.Platform, ["type"] = input.Type,
@@ -837,6 +860,7 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
     {
         var credentials = BuildCredentials(input, requireCredentials: false);
         var extra = ParseObject(input.ExtraJson, "账号扩展配置") ?? new(StringComparer.OrdinalIgnoreCase);
+        AddCopilotBillingExtra(extra, input);
         var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["name"] = input.Name.Trim(), ["notes"] = string.IsNullOrWhiteSpace(input.Notes) ? null : input.Notes.Trim(),
@@ -1921,9 +1945,39 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
     public Task<PagedEnvelope<OpsErrorLogDto>> GetAdminOpsErrorsAsync(string kind, OpsErrorListQueryDto filter)
     {
         var resource = string.Equals(kind, "upstream", StringComparison.OrdinalIgnoreCase) ? "upstream-errors" : "request-errors";
+        return SendAsync<PagedEnvelope<OpsErrorLogDto>>(HttpMethod.Get,
+            $"{ApiPrefix}/admin/ops/{resource}?{BuildAdminOpsErrorQuery(filter)}");
+    }
+
+    public Task<PagedEnvelope<OpsErrorLogDto>> GetAdminOpsErrorLogsAsync(OpsErrorListQueryDto filter) =>
+        SendAsync<PagedEnvelope<OpsErrorLogDto>>(HttpMethod.Get,
+            $"{ApiPrefix}/admin/ops/errors?{BuildAdminOpsErrorQuery(filter)}");
+
+    public Task<OpsErrorDetailDto> GetAdminOpsErrorLogDetailAsync(long id) =>
+        SendAsync<OpsErrorDetailDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/errors/{id}");
+
+    public Task<OpsErrorDetailDto> GetAdminOpsErrorDetailAsync(string kind, long id)
+    {
+        var resource = string.Equals(kind, "upstream", StringComparison.OrdinalIgnoreCase) ? "upstream-errors" : "request-errors";
+        return SendAsync<OpsErrorDetailDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/{resource}/{id}");
+    }
+
+    public Task<PagedEnvelope<OpsErrorDetailDto>> GetAdminOpsCorrelatedUpstreamErrorsAsync(long requestErrorId, int page = 1, int pageSize = 100, bool includeDetail = true)
+    {
+        var query = $"page={Math.Max(1, page)}&page_size={Math.Clamp(pageSize, 1, 500)}{(includeDetail ? "&include_detail=1" : string.Empty)}";
+        return SendAsync<PagedEnvelope<OpsErrorDetailDto>>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/request-errors/{requestErrorId}/upstream-errors?{query}");
+    }
+
+    public Task<JsonElement> ResolveAdminOpsErrorAsync(string kind, long id, bool resolved) =>
+        SendAsync<JsonElement>(HttpMethod.Put, $"{ApiPrefix}/admin/ops/{(string.Equals(kind, "upstream", StringComparison.OrdinalIgnoreCase) ? "upstream-errors" : "request-errors")}/{id}/resolve", new { resolved });
+
+    private static string BuildAdminOpsErrorQuery(OpsErrorListQueryDto filter)
+    {
         var query = new List<string>
         {
-            $"page={Math.Max(1, filter.Page)}", $"page_size={Math.Clamp(filter.PageSize, 1, 500)}", $"view={Uri.EscapeDataString(filter.View)}"
+            $"page={Math.Max(1, filter.Page)}",
+            $"page_size={Math.Clamp(filter.PageSize, 1, 500)}",
+            $"view={Uri.EscapeDataString(string.IsNullOrWhiteSpace(filter.View) ? "errors" : filter.View)}"
         };
         AddOpsTimeQuery(query, filter.TimeRange, filter.StartTime, filter.EndTime);
         AddOpsQuery(query, "platform", filter.Platform);
@@ -1942,24 +1996,8 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         if (filter.StatusCodesOther) query.Add("status_codes_other=1");
         AddOpsQuery(query, "sort_by", filter.SortBy);
         AddOpsQuery(query, "sort_order", filter.SortOrder);
-        return SendAsync<PagedEnvelope<OpsErrorLogDto>>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/{resource}?{string.Join("&", query)}");
+        return string.Join("&", query);
     }
-
-    public Task<OpsErrorDetailDto> GetAdminOpsErrorDetailAsync(string kind, long id)
-    {
-        var resource = string.Equals(kind, "upstream", StringComparison.OrdinalIgnoreCase) ? "upstream-errors" : "request-errors";
-        return SendAsync<OpsErrorDetailDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/{resource}/{id}");
-    }
-
-    public Task<PagedEnvelope<OpsErrorDetailDto>> GetAdminOpsCorrelatedUpstreamErrorsAsync(long requestErrorId, int page = 1, int pageSize = 100, bool includeDetail = true)
-    {
-        var query = $"page={Math.Max(1, page)}&page_size={Math.Clamp(pageSize, 1, 500)}{(includeDetail ? "&include_detail=1" : string.Empty)}";
-        return SendAsync<PagedEnvelope<OpsErrorDetailDto>>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/request-errors/{requestErrorId}/upstream-errors?{query}");
-    }
-
-    public Task<JsonElement> ResolveAdminOpsErrorAsync(string kind, long id, bool resolved) =>
-        SendAsync<JsonElement>(HttpMethod.Put, $"{ApiPrefix}/admin/ops/{(string.Equals(kind, "upstream", StringComparison.OrdinalIgnoreCase) ? "upstream-errors" : "request-errors")}/{id}/resolve", new { resolved });
-
     private static void AddOpsTimeQuery(List<string> query, string? timeRange, DateTimeOffset? start, DateTimeOffset? end)
     {
         if (string.Equals(timeRange, "custom", StringComparison.OrdinalIgnoreCase))
@@ -2848,15 +2886,33 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
     /// verification URL.
     /// </summary>
     public Task<CopilotOAuthFlowDto> StartCopilotOAuthAsync(string name) =>
-        SendAsync<CopilotOAuthFlowDto>(HttpMethod.Post, $"{ApiPrefix}/admin/openai/copilot/flows", new
-        {
-            name = name.Trim()
-        });
+        StartCopilotOAuthAsync(new CopilotOAuthStartRequest { Name = name.Trim() });
+
+    public Task<CopilotOAuthFlowDto> StartCopilotOAuthAsync(CopilotOAuthStartRequest request) =>
+        SendAsync<CopilotOAuthFlowDto>(HttpMethod.Post, $"{ApiPrefix}/admin/openai/copilot/flows", request);
 
     /// <summary>Polls a server-side GitHub Copilot device authorization flow.</summary>
     public Task<CopilotOAuthFlowDto> PollCopilotOAuthAsync(string flowId) =>
         SendAsync<CopilotOAuthFlowDto>(HttpMethod.Post,
             $"{ApiPrefix}/admin/openai/copilot/flows/{Uri.EscapeDataString(flowId)}/poll");
+    public Task CancelCopilotOAuthAsync(string flowId) =>
+        SendAsync(HttpMethod.Delete, $"{ApiPrefix}/admin/openai/copilot/flows/{Uri.EscapeDataString(flowId)}");
+
+
+    public async Task<AccountDto> CreateCopilotAccountAsync(CopilotManualCreateRequest request)
+    {
+        var account = await SendAsync<GoAccount>(
+            HttpMethod.Post,
+            $"{ApiPrefix}/admin/openai/copilot/accounts",
+            request);
+        return AccountDto.From(account);
+    }
+
+    public Task<CopilotBillingPatValidationDto> ValidateCopilotBillingPatAsync(CopilotBillingPatValidationRequest request) =>
+        SendAsync<CopilotBillingPatValidationDto>(
+            HttpMethod.Post,
+            $"{ApiPrefix}/admin/accounts/copilot-billing-pat/validate",
+            request);
 
     public Task<OfficialOAuthStartDto> StartGeminiOAuthAsync(string oauthType = "code_assist", string? projectId = null, string? tierId = null) =>
         SendAsync<OfficialOAuthStartDto>(HttpMethod.Post, $"{ApiPrefix}/admin/gemini/oauth/auth-url", new { oauth_type = oauthType, project_id = projectId, tier_id = tierId });
@@ -2926,11 +2982,19 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
 
     private static Dictionary<string, object?>? BuildCredentials(AccountInput input, bool requireCredentials)
     {
+        ValidateCopilotEditBillingIdentity(input);
         var credentials = ParseObject(input.CredentialsJson, "账号凭据") ?? new(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(input.ApiKey)) credentials["api_key"] = input.ApiKey.Trim();
         if (!string.IsNullOrWhiteSpace(input.AccessToken)) credentials["access_token"] = input.AccessToken.Trim();
         if (!string.IsNullOrWhiteSpace(input.RefreshToken)) credentials["refresh_token"] = input.RefreshToken.Trim();
         if (!string.IsNullOrWhiteSpace(input.BaseUrl)) credentials["base_url"] = input.BaseUrl.Trim();
+        if (input.IsCopilotProfile)
+        {
+            credentials["oauth_profile"] = "github_copilot";
+            credentials["billing_username"] = input.BillingUsername.Trim();
+            if (!string.IsNullOrWhiteSpace(input.BillingPat))
+                credentials["billing_pat"] = input.BillingPat.Trim();
+        }
         if (input.Platform is "kimi" or "zhipu" or "deepseek")
         {
             credentials["account_mode"] = input.AccountMode;
@@ -2959,6 +3023,23 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
             throw new ApiException("账号凭据不能为空。", HttpStatusCode.BadRequest);
         }
         return credentials.Count == 0 ? null : credentials;
+    }
+
+    private static void ValidateCopilotEditBillingIdentity(AccountInput input)
+    {
+        if (!input.IsEditing || !input.IsCopilotProfile) return;
+        var billingPatWillRemain = input.HasBillingPat || !string.IsNullOrWhiteSpace(input.BillingPat);
+        if (billingPatWillRemain && string.IsNullOrWhiteSpace(input.BillingUsername))
+            throw new ApiException("已配置或输入 Billing PAT 时必须填写 GitHub Billing 用户名。", HttpStatusCode.BadRequest);
+    }
+
+    private static void AddCopilotBillingExtra(Dictionary<string, object?> extra, AccountInput input)
+    {
+        if (!input.IsCopilotProfile) return;
+        extra["billing_credit_limit"] = input.BillingCreditLimit;
+        extra["billing_safety_margin"] = input.BillingSafetyMargin;
+        if (input.BillingAutoPauseDisabled) extra["billing_auto_pause_disabled"] = true;
+        else extra.Remove("billing_auto_pause_disabled");
     }
 
     private static Dictionary<string, object?>? BuildModelRestrictionCredentials(AccountInput input, bool includeEmpty)
@@ -3017,10 +3098,37 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         ApplyJsonIfPresent(payload, key, json, label);
     }
 
-    public async Task<PagedResult<UsageRecordDto>> GetUsageAsync(int page, int pageSize)
+    public Task<PagedResult<UsageRecordDto>> GetUsageAsync(int page, int pageSize) =>
+        GetUsageAsync(new AdminUsageQuery { Page = page, PageSize = pageSize });
+
+    public async Task<PagedResult<UsageRecordDto>> GetUsageAsync(AdminUsageQuery filter)
     {
-        var raw = await SendAsync<PagedEnvelope<GoUsageLog>>(HttpMethod.Get, $"{ApiPrefix}/admin/usage?page={page}&page_size={pageSize}");
+        var raw = await SendAsync<PagedEnvelope<GoUsageLog>>(HttpMethod.Get,
+            $"{ApiPrefix}/admin/usage?{BuildAdminUsageQuery(filter)}");
         return PagedResult<UsageRecordDto>.From(raw);
+    }
+
+    private static string BuildAdminUsageQuery(AdminUsageQuery value)
+    {
+        var query = new List<string>
+        {
+            $"page={Math.Max(1, value.Page)}",
+            $"page_size={Math.Clamp(value.PageSize, 1, 100)}",
+            $"sort_by={Uri.EscapeDataString(string.IsNullOrWhiteSpace(value.SortBy) ? "created_at" : value.SortBy)}",
+            $"sort_order={(string.Equals(value.SortOrder, "asc", StringComparison.OrdinalIgnoreCase) ? "asc" : "desc")}"
+        };
+        AddUserUsageQuery(query, "start_date", value.StartDate);
+        AddUserUsageQuery(query, "end_date", value.EndDate);
+        AddUserUsageQuery(query, "timezone", value.Timezone);
+        AddUserUsageQuery(query, "model", value.Model);
+        AddUserUsageQuery(query, "request_type", value.RequestType);
+        AddUserUsageQuery(query, "billing_mode", value.BillingMode);
+        if (value.UserId is > 0) query.Add($"user_id={value.UserId.Value}");
+        if (value.ApiKeyId is > 0) query.Add($"api_key_id={value.ApiKeyId.Value}");
+        if (value.AccountId is > 0) query.Add($"account_id={value.AccountId.Value}");
+        if (value.GroupId is > 0) query.Add($"group_id={value.GroupId.Value}");
+        if (value.BillingType.HasValue) query.Add($"billing_type={value.BillingType.Value}");
+        return string.Join("&", query);
     }
 
     public async Task<PagedResult<UsageRecordDto>> GetMyUsageAsync(int page, int pageSize)

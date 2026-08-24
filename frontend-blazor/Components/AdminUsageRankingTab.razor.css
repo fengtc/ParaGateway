@@ -1,0 +1,59 @@
+.admin-ranking-toolbar {
+    display: flex;
+    min-height: 58px;
+    padding: 8px 0 14px;
+    align-items: end;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.admin-ranking-toolbar > p { margin: 0 0 8px; color: var(--muted); font-size: .75rem; }
+.admin-ranking-toolbar > div { display: flex; align-items: end; gap: 14px; }
+.admin-ranking-toolbar .result-count { margin-left: 0; padding-bottom: 9px; }
+.admin-ranking-toolbar select { min-width: 110px; }
+
+.admin-ranking-table { min-width: 1050px; }
+.admin-ranking-table .ranking-row { cursor: pointer; }
+.admin-ranking-table .numeric-cell { text-align: right; font-variant-numeric: tabular-nums; }
+
+.ranking-sort-button {
+    padding: 0;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    font: inherit;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
+.ranking-sort-button:hover { color: var(--ink); }
+.ranking-sort-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.rank-badge {
+    display: inline-flex;
+    width: 26px;
+    height: 26px;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    border-radius: 50%;
+    font-size: .72rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.rank-badge.first { color: #8a5a00; background: #fff2bf; }
+.rank-badge.second { color: #4f5965; background: #e8edf1; }
+.rank-badge.third { color: #8b4b2c; background: #f8dfd0; }
+.ranking-total { color: var(--ink); font-weight: 700; }
+.ranking-cost { color: #087f5b; font-weight: 700; white-space: nowrap; }
+
+@media (max-width: 760px) {
+    .admin-ranking-table { min-width: 0; }
+}
+
+@media (max-width: 700px) {
+    .admin-ranking-toolbar { align-items: stretch; flex-direction: column; }
+    .admin-ranking-toolbar > div { justify-content: space-between; }
+}

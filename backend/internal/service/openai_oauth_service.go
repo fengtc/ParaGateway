@@ -363,7 +363,13 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	}
 
 	var proxyURL string
-	if account.ProxyID != nil && s.proxyRepo != nil {
+	if account.IsGitHubCopilot() {
+		var err error
+		proxyURL, err = s.resolveCopilotProxyURL(ctx, account.ProxyID)
+		if err != nil {
+			return nil, err
+		}
+	} else if account.ProxyID != nil && s.proxyRepo != nil {
 		proxy, err := s.proxyRepo.GetByID(ctx, *account.ProxyID)
 		if err == nil && proxy != nil {
 			proxyURL = proxy.URL()
@@ -382,7 +388,7 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 		if strings.TrimSpace(githubToken) == "" {
 			return nil, infraerrors.New(http.StatusBadRequest, "COPILOT_GITHUB_TOKEN_MISSING", "Copilot 账号缺少 GitHub OAuth Token")
 		}
-		copilotToken, err := s.ExchangeCopilotToken(ctx, githubToken)
+		copilotToken, err := s.exchangeCopilotTokenWithProxy(ctx, githubToken, proxyURL)
 		if err != nil {
 			return nil, err
 		}

@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +19,8 @@ type openAISnapshotCacheStub struct {
 	SchedulerCache
 	snapshotAccounts []*Account
 	accountsByID     map[int64]*Account
+	getAccountCalls  *atomic.Int32
+	getAccountErrors map[int64]error
 }
 
 type schedulerTestOpenAIAccountRepo struct {
@@ -308,6 +311,12 @@ func (s *openAISnapshotCacheStub) GetSnapshot(ctx context.Context, bucket Schedu
 }
 
 func (s *openAISnapshotCacheStub) GetAccount(ctx context.Context, accountID int64) (*Account, error) {
+	if s.getAccountCalls != nil {
+		s.getAccountCalls.Add(1)
+	}
+	if err := s.getAccountErrors[accountID]; err != nil {
+		return nil, err
+	}
 	if s.accountsByID == nil {
 		return nil, nil
 	}
@@ -3040,6 +3049,132 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTopKFallback
 	}
 }
 
+func TestOpenAIGatewayService_ListSchedulableAccountsHydratesCopilotBillingInputsOnlyInRequest(t *testing.T) {
+	copilotBillingGuardCache.Clear()
+	t.Cleanup(copilotBillingGuardCache.Clear)
+
+	groupID := int64(109)
+	proxyID := int64(901)
+	metadata := &Account{
+		ID:          36901,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		GroupIDs:    []int64{groupID},
+		Credentials: map[string]any{
+			"oauth_profile": CopilotOAuthProfile,
+		},
+		Extra: map[string]any{
+			"billing_credit_limit":  20000.0,
+			"billing_safety_margin": 200.0,
+		},
+	}
+	full := *metadata
+	full.Credentials = map[string]any{
+		"oauth_profile":    CopilotOAuthProfile,
+		"billing_username": "octocat",
+		"billing_pat":      "request-local-billing-token",
+	}
+	full.ProxyID = &proxyID
+	full.Proxy = &Proxy{
+		ID:       proxyID,
+		Protocol: "http",
+		Host:     "127.0.0.1",
+		Port:     8080,
+		Username: "proxy-user",
+		Password: "proxy-password",
+	}
+
+	now := time.Now().UTC()
+	copilotBillingGuardCache.Store(
+		copilotBillingGuardCacheKey(full.ID, "request-local-billing-token", now),
+		copilotBillingGuardCacheEntry{usedCredits: 0, expiresAt: now.Add(time.Hour)},
+	)
+	var getAccountCalls atomic.Int32
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{metadata},
+		accountsByID:     map[int64]*Account{full.ID: &full},
+		getAccountCalls:  &getAccountCalls,
+	}
+	svc := &OpenAIGatewayService{
+		schedulerSnapshot: &SchedulerSnapshotService{cache: snapshotCache},
+	}
+
+	accounts, err := svc.listSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	require.EqualValues(t, 1, getAccountCalls.Load())
+	require.Equal(t, "request-local-billing-token", accounts[0].GetCredential("billing_pat"))
+	require.NotNil(t, accounts[0].Proxy)
+	require.Equal(t, full.Proxy.URL(), accounts[0].Proxy.URL())
+	require.Empty(t, metadata.GetCredential("billing_pat"))
+	require.Nil(t, metadata.Proxy)
+}
+
+func TestOpenAIGatewayService_ListSchedulableAccountsDoesNotHydrateOtherOAuthProfiles(t *testing.T) {
+	groupID := int64(109)
+	metadata := &Account{
+		ID:          36902,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		GroupIDs:    []int64{groupID},
+		Credentials: map[string]any{
+			"oauth_profile": "chatgpt",
+		},
+	}
+	var getAccountCalls atomic.Int32
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{metadata},
+		accountsByID:     map[int64]*Account{metadata.ID: metadata},
+		getAccountCalls:  &getAccountCalls,
+	}
+	svc := &OpenAIGatewayService{
+		schedulerSnapshot: &SchedulerSnapshotService{cache: snapshotCache},
+	}
+
+	accounts, err := svc.listSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI)
+	require.NoError(t, err)
+	require.Len(t, accounts, 1)
+	require.Zero(t, getAccountCalls.Load())
+}
+
+func TestOpenAIGatewayService_ListSchedulableAccountsExcludesCopilotWhenHydrationFails(t *testing.T) {
+	groupID := int64(109)
+	metadata := &Account{
+		ID:          36903,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		GroupIDs:    []int64{groupID},
+		Credentials: map[string]any{
+			"oauth_profile": CopilotOAuthProfile,
+		},
+	}
+	var getAccountCalls atomic.Int32
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{metadata},
+		getAccountCalls:  &getAccountCalls,
+	}
+	svc := &OpenAIGatewayService{
+		schedulerSnapshot: &SchedulerSnapshotService{
+			cache:       snapshotCache,
+			accountRepo: schedulerTestOpenAIAccountRepo{},
+		},
+	}
+
+	accounts, err := svc.listSchedulableAccounts(context.Background(), &groupID, PlatformOpenAI)
+	require.NoError(t, err)
+	require.Empty(t, accounts)
+	require.EqualValues(t, 1, getAccountCalls.Load())
+}
+
 // Regression: TopK initial filter must drop quota-auto-paused accounts. Otherwise
 // the candidate pool is filled with paused accounts, healthy accounts fall outside
 // TopK, and the scheduler returns "no available accounts" even though healthy ones
@@ -3114,6 +3249,118 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTopKExcludes
 	// Only the healthy account should ever enter the candidate pool; the paused one
 	// must be filtered out at the initial-filter stage.
 	require.Equal(t, 1, decision.CandidateCount)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTopKExcludesCopilotBillingExhaustedSnapshot(t *testing.T) {
+	copilotBillingGuardCache.Clear()
+	t.Cleanup(copilotBillingGuardCache.Clear)
+
+	ctx := context.Background()
+	groupID := int64(111)
+	metadataExhausted := &Account{
+		ID:          37101,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		GroupIDs:    []int64{groupID},
+		Credentials: map[string]any{"oauth_profile": CopilotOAuthProfile},
+		Extra: map[string]any{
+			"billing_credit_limit":  20000.0,
+			"billing_safety_margin": 200.0,
+		},
+	}
+	metadataHealthy := &Account{
+		ID:          37102,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		GroupIDs:    []int64{groupID},
+		Credentials: map[string]any{"oauth_profile": CopilotOAuthProfile},
+		Extra: map[string]any{
+			"billing_credit_limit":  20000.0,
+			"billing_safety_margin": 200.0,
+		},
+	}
+	fullExhausted := *metadataExhausted
+	fullExhausted.Credentials = map[string]any{
+		"oauth_profile":    CopilotOAuthProfile,
+		"billing_username": "exhausted-user",
+		"billing_pat":      "exhausted-token",
+	}
+	fullHealthy := *metadataHealthy
+	fullHealthy.Credentials = map[string]any{
+		"oauth_profile":    CopilotOAuthProfile,
+		"billing_username": "healthy-user",
+		"billing_pat":      "healthy-token",
+	}
+	fullAccounts := []Account{fullExhausted, fullHealthy}
+
+	now := time.Now().UTC()
+	copilotBillingGuardCache.Store(
+		copilotBillingGuardCacheKey(fullExhausted.ID, "exhausted-token", now),
+		copilotBillingGuardCacheEntry{usedCredits: 19800, expiresAt: now.Add(time.Hour)},
+	)
+	copilotBillingGuardCache.Store(
+		copilotBillingGuardCacheKey(fullHealthy.ID, "healthy-token", now),
+		copilotBillingGuardCacheEntry{usedCredits: 0, expiresAt: now.Add(time.Hour)},
+	)
+
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.LBTopK = 1
+	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Priority = 0.4
+	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Load = 1.0
+	cfg.Gateway.OpenAIWS.SchedulerScoreWeights.Queue = 1.0
+	concurrencyCache := schedulerTestConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			fullExhausted.ID: {AccountID: fullExhausted.ID, LoadRate: 0, WaitingCount: 0},
+			fullHealthy.ID:   {AccountID: fullHealthy.ID, LoadRate: 90, WaitingCount: 5},
+		},
+		acquireResults: map[int64]bool{
+			fullHealthy.ID: true,
+		},
+	}
+	snapshotCache := &openAISnapshotCacheStub{
+		snapshotAccounts: []*Account{metadataExhausted, metadataHealthy},
+		accountsByID: map[int64]*Account{
+			fullExhausted.ID: &fullExhausted,
+			fullHealthy.ID:   &fullHealthy,
+		},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: fullAccounts},
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                cfg,
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		schedulerSnapshot:  &SchedulerSnapshotService{cache: snapshotCache},
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, decision, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, fullHealthy.ID, selection.Account.ID)
+	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
+	require.Equal(t, 1, decision.CandidateCount)
+	require.Equal(t, 1, decision.TopK)
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}

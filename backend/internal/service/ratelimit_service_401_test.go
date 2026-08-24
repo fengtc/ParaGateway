@@ -333,3 +333,77 @@ func TestRateLimitService_HandleUpstreamError_OAuth401NoRefreshTokenSetsError(t 
 		require.Len(t, invalidator.accounts, 1)
 	})
 }
+
+func TestRateLimitService_CopilotQuotaExceededPausesUntilNextUTCMonth(t *testing.T) {
+	copilotBillingGuardCache.Clear()
+	t.Cleanup(copilotBillingGuardCache.Clear)
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := newCopilotGatewayTestAccount()
+	account.ID = 2884
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusPaymentRequired,
+		http.Header{},
+		[]byte(`{"error":{"code":"quota_exceeded","message":"monthly quota exhausted"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Zero(t, repo.setErrorCalls, "monthly quota exhaustion must remain recoverable")
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, CopilotMonthlyQuotaExceededReason, repo.lastTempReason)
+	require.Equal(t, CopilotMonthlyQuotaExceededReason, account.TempUnschedulableReason)
+	require.NotNil(t, account.TempUnschedulableUntil)
+	require.Equal(t, time.UTC, account.TempUnschedulableUntil.Location())
+	require.Equal(t, 1, account.TempUnschedulableUntil.Day())
+	require.Equal(t, 0, account.TempUnschedulableUntil.Hour())
+	require.True(t, account.TempUnschedulableUntil.After(time.Now().UTC()))
+}
+
+func TestRateLimitService_CopilotOther402KeepsGenericErrorBehavior(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := newCopilotGatewayTestAccount()
+	account.ID = 2885
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusPaymentRequired,
+		http.Header{},
+		[]byte(`{"error":{"code":"billing_issue","message":"payment required"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Zero(t, repo.tempCalls)
+}
+
+func TestRateLimitService_NonCopilotQuotaExceededKeepsGenericErrorBehavior(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	account := &Account{
+		ID:       2886,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "regular-openai-token",
+		},
+	}
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusPaymentRequired,
+		http.Header{},
+		[]byte("{\"error\":{\"code\":\"quota_exceeded\",\"message\":\"monthly quota exhausted\"}}"),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 1, repo.setErrorCalls)
+	require.Zero(t, repo.tempCalls)
+	require.Empty(t, account.TempUnschedulableReason)
+	require.Nil(t, account.TempUnschedulableUntil)
+}

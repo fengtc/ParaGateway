@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -25,9 +26,78 @@ type OpenAIOAuthHandler struct {
 	rateLimitService   openAIAccountStateRecoverer
 }
 
+type CopilotAccountSettingsRequest struct {
+	Name                     string            `json:"name" binding:"required"`
+	Notes                    *string           `json:"notes"`
+	ProxyID                  *int64            `json:"proxy_id"`
+	Concurrency              *int              `json:"concurrency"`
+	LoadFactor               *int              `json:"load_factor"`
+	Priority                 *int              `json:"priority"`
+	RateMultiplier           *float64          `json:"rate_multiplier"`
+	GroupIDs                 []int64           `json:"group_ids"`
+	ExpiresAt                *int64            `json:"expires_at"`
+	AutoPauseOnExpired       *bool             `json:"auto_pause_on_expired"`
+	Schedulable              *bool             `json:"schedulable"`
+	ModelMapping             map[string]string `json:"model_mapping"`
+	BillingUsername          string            `json:"billing_username"`
+	BillingPAT               string            `json:"billing_pat"`
+	BillingCreditLimit       *float64          `json:"billing_credit_limit"`
+	BillingSafetyMargin      *float64          `json:"billing_safety_margin"`
+	BillingAutoPauseDisabled *bool             `json:"billing_auto_pause_disabled"`
+}
+
+func (r CopilotAccountSettingsRequest) serviceSettings() service.CopilotAccountSettings {
+	concurrency := 8
+	if r.Concurrency != nil {
+		concurrency = *r.Concurrency
+	}
+	priority := 100
+	if r.Priority != nil {
+		priority = *r.Priority
+	}
+	return service.CopilotAccountSettings{
+		Name:                     r.Name,
+		Notes:                    r.Notes,
+		ProxyID:                  r.ProxyID,
+		Concurrency:              concurrency,
+		LoadFactor:               r.LoadFactor,
+		Priority:                 priority,
+		RateMultiplier:           r.RateMultiplier,
+		GroupIDs:                 r.GroupIDs,
+		ExpiresAt:                r.ExpiresAt,
+		AutoPauseOnExpired:       r.AutoPauseOnExpired,
+		Schedulable:              r.Schedulable,
+		ModelMapping:             r.ModelMapping,
+		BillingUsername:          r.BillingUsername,
+		BillingPAT:               r.BillingPAT,
+		BillingCreditLimit:       r.BillingCreditLimit,
+		BillingSafetyMargin:      r.BillingSafetyMargin,
+		BillingAutoPauseDisabled: r.BillingAutoPauseDisabled,
+	}
+}
+
 // CopilotOAuthStartRequest starts the GitHub device authorization flow.
 type CopilotOAuthStartRequest struct {
-	Name string `json:"name" binding:"required"`
+	CopilotAccountSettingsRequest
+}
+
+type CopilotManualTokenCreateRequest struct {
+	CopilotAccountSettingsRequest
+	GitHubToken string `json:"github_token" binding:"required"`
+}
+
+type CopilotBillingPATValidateRequest struct {
+	Username   string `json:"username" binding:"required"`
+	Token      string `json:"token"`
+	BillingPAT string `json:"billing_pat"`
+	ProxyID    *int64 `json:"proxy_id"`
+}
+
+func (r CopilotBillingPATValidateRequest) token() string {
+	if token := strings.TrimSpace(r.Token); token != "" {
+		return token
+	}
+	return strings.TrimSpace(r.BillingPAT)
 }
 
 type CopilotOAuthPollRequest struct {
@@ -170,7 +240,15 @@ func (h *OpenAIOAuthHandler) StartCopilotOAuth(c *gin.Context) {
 		response.Unauthorized(c, "管理员登录状态无效")
 		return
 	}
-	result, err := h.openaiOAuthService.StartCopilotOAuthFlow(c.Request.Context(), subject.UserID, req.Name)
+	if err := h.validateCopilotGroupIDs(c.Request.Context(), req.GroupIDs); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := h.openaiOAuthService.StartCopilotOAuthFlowWithSettings(
+		c.Request.Context(),
+		subject.UserID,
+		req.serviceSettings(),
+	)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -192,18 +270,28 @@ func (h *OpenAIOAuthHandler) PollCopilotOAuth(c *gin.Context) {
 		response.Unauthorized(c, "管理员登录状态无效")
 		return
 	}
-	result, err := h.openaiOAuthService.PollCopilotOAuthFlow(
+	result, err := h.openaiOAuthService.PollCopilotOAuthFlowWithSettings(
 		c.Request.Context(),
 		subject.UserID,
 		req.FlowID,
-		func(ctx context.Context, name string, credentials map[string]any) (*service.Account, error) {
+		func(ctx context.Context, settings service.CopilotAccountSettings, credentials, extra map[string]any) (*service.Account, error) {
 			return h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
-				Name:        strings.TrimSpace(name),
-				Platform:    service.PlatformOpenAI,
-				Type:        service.AccountTypeOAuth,
-				Credentials: credentials,
-				Concurrency: 8,
-				Priority:    100,
+				Name:               strings.TrimSpace(settings.Name),
+				Notes:              settings.Notes,
+				Platform:           service.PlatformOpenAI,
+				Type:               service.AccountTypeOAuth,
+				Credentials:        credentials,
+				Extra:              extra,
+				ProxyID:            settings.ProxyID,
+				Concurrency:        settings.Concurrency,
+				LoadFactor:         settings.LoadFactor,
+				Priority:           settings.Priority,
+				RateMultiplier:     settings.RateMultiplier,
+				GroupIDs:           settings.GroupIDs,
+				ExpiresAt:          settings.ExpiresAt,
+				AutoPauseOnExpired: settings.AutoPauseOnExpired,
+				Schedulable:        settings.Schedulable,
+				IdempotencyKey:     settings.IdempotencyKey,
 			})
 		},
 	)
@@ -212,6 +300,115 @@ func (h *OpenAIOAuthHandler) PollCopilotOAuth(c *gin.Context) {
 		return
 	}
 	response.Success(c, copilotOAuthFlowResponse(result))
+}
+
+// CancelCopilotOAuth cancels a server-side device flow owned by the current
+// administrator and clears its retained credentials.
+// DELETE /api/v1/admin/openai/copilot/flows/:id
+func (h *OpenAIOAuthHandler) CancelCopilotOAuth(c *gin.Context) {
+	var req CopilotOAuthPollRequest
+	if err := c.ShouldBindUri(&req); err != nil {
+		response.BadRequest(c, "Invalid flow ID")
+		return
+	}
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "管理员登录状态无效")
+		return
+	}
+	if err := h.openaiOAuthService.CancelCopilotOAuthFlow(subject.UserID, req.FlowID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"cancelled": true})
+}
+
+// CreateCopilotFromGitHubToken validates and creates a Copilot account without
+// exposing GitHub or Copilot credentials in the response.
+// POST /api/v1/admin/openai/copilot/accounts
+func (h *OpenAIOAuthHandler) CreateCopilotFromGitHubToken(c *gin.Context) {
+	var req CopilotManualTokenCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	if err := h.validateCopilotGroupIDs(c.Request.Context(), req.GroupIDs); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	account, err := h.openaiOAuthService.CreateCopilotAccountFromGitHubToken(
+		c.Request.Context(),
+		req.serviceSettings(),
+		req.GitHubToken,
+		func(ctx context.Context, settings service.CopilotAccountSettings, credentials, extra map[string]any) (*service.Account, error) {
+			return h.adminService.CreateAccount(ctx, &service.CreateAccountInput{
+				Name:               strings.TrimSpace(settings.Name),
+				Notes:              settings.Notes,
+				Platform:           service.PlatformOpenAI,
+				Type:               service.AccountTypeOAuth,
+				Credentials:        credentials,
+				Extra:              extra,
+				ProxyID:            settings.ProxyID,
+				Concurrency:        settings.Concurrency,
+				LoadFactor:         settings.LoadFactor,
+				Priority:           settings.Priority,
+				RateMultiplier:     settings.RateMultiplier,
+				GroupIDs:           settings.GroupIDs,
+				ExpiresAt:          settings.ExpiresAt,
+				AutoPauseOnExpired: settings.AutoPauseOnExpired,
+				Schedulable:        settings.Schedulable,
+			})
+		},
+	)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Created(c, dto.AccountFromService(account))
+}
+
+// ValidateCopilotBillingPAT verifies the PAT through the selected proxy and
+// returns aggregate usage only.
+// POST /api/v1/admin/openai/copilot/billing-pat/validate
+func (h *OpenAIOAuthHandler) ValidateCopilotBillingPAT(c *gin.Context) {
+	var req CopilotBillingPATValidateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.openaiOAuthService.ValidateCopilotBillingPAT(
+		c.Request.Context(),
+		req.Username,
+		req.token(),
+		req.ProxyID,
+	)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *OpenAIOAuthHandler) validateCopilotGroupIDs(ctx context.Context, groupIDs []int64) error {
+	for _, groupID := range groupIDs {
+		if groupID <= 0 {
+			return service.ErrGroupNotFound
+		}
+		group, err := h.adminService.GetGroup(ctx, groupID)
+		if err != nil {
+			return err
+		}
+		if group == nil {
+			return service.ErrGroupNotFound
+		}
+		if !strings.EqualFold(strings.TrimSpace(group.Platform), service.PlatformOpenAI) {
+			return infraerrors.BadRequest(
+				"COPILOT_GROUP_PLATFORM_MISMATCH",
+				"Copilot 账号只能绑定 OpenAI 平台分组",
+			)
+		}
+	}
+	return nil
 }
 
 func copilotOAuthFlowResponse(result *service.CopilotOAuthFlowResult) *CopilotOAuthFlowResponse {

@@ -3,7 +3,7 @@
     <div class="distribution-legend">
         @foreach (var row in Rows.Take(6))
         {
-            <div><span title="@row.Label">@row.Label</span><strong>@(Metric == "tokens" ? FormatTokens(row.Tokens) : $"${row.Cost:0.######}")</strong></div>
+            <div><span title="@row.Label">@row.Label</span><strong>@(Metric == "tokens" ? FormatTokens(row.Tokens) : UiFormat.Usd(row.Cost))</strong></div>
         }
     </div>
 }

@@ -83,6 +83,160 @@ public sealed class AccountApiClientTests
     }
 
     [Fact]
+    public async Task CopilotDeviceOAuthUsesDedicatedRouteAndFullSettingsContract()
+    {
+        var handler = new AccountHandler(string.Empty);
+        var api = CreateApi(handler);
+
+        var started = await api.StartCopilotOAuthAsync(CreateCopilotRequest<CopilotOAuthStartRequest>());
+
+        Assert.Equal("/api/v1/admin/openai/copilot/flows", handler.LastRequestPath);
+        Assert.Equal("flow-1", started.FlowId);
+        Assert.Equal("ABCD-EFGH", started.UserCode);
+        using (var request = JsonDocument.Parse(handler.LastRequestBody))
+        {
+            AssertCopilotSettingsPayload(request.RootElement);
+            Assert.False(request.RootElement.TryGetProperty("github_token", out _));
+        }
+
+        var polled = await api.PollCopilotOAuthAsync(started.FlowId);
+        Assert.Equal("/api/v1/admin/openai/copilot/flows/flow-1/poll", handler.LastRequestPath);
+        Assert.Equal("completed", polled.Status);
+        Assert.Equal("Copilot 定制账号", polled.Provider?.Name);
+        Assert.DoesNotContain(
+            typeof(CopilotOAuthFlowDto).GetProperties(),
+            property => property.Name.Contains("Token", StringComparison.OrdinalIgnoreCase)
+                || property.Name.Contains("Pat", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CopilotDeviceOAuthCancelUsesDedicatedDeleteRoute()
+    {
+        var handler = new AccountHandler(string.Empty);
+        var api = CreateApi(handler);
+
+        await api.CancelCopilotOAuthAsync("flow-1");
+
+        Assert.Equal("/api/v1/admin/openai/copilot/flows/flow-1", handler.LastRequestPath);
+        Assert.Equal(string.Empty, handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task CopilotManualTokenUsesDedicatedRouteAndFullSettingsContract()
+    {
+        var handler = new AccountHandler(string.Empty);
+        var api = CreateApi(handler);
+        var requestModel = CreateCopilotRequest<CopilotManualCreateRequest>();
+        requestModel.GithubToken = "github-token-test";
+
+        var created = await api.CreateCopilotAccountAsync(requestModel);
+
+        Assert.Equal("/api/v1/admin/openai/copilot/accounts", handler.LastRequestPath);
+        Assert.Equal("Copilot 定制账号", created.Name);
+        Assert.Equal("openai", created.Platform);
+        using var request = JsonDocument.Parse(handler.LastRequestBody);
+        AssertCopilotSettingsPayload(request.RootElement);
+        Assert.Equal("github-token-test", request.RootElement.GetProperty("github_token").GetString());
+    }
+
+    [Fact]
+    public async Task CopilotBillingPatValidationUsesCustomizedAccountRouteAndProxy()
+    {
+        var handler = new AccountHandler(string.Empty);
+        var api = CreateApi(handler);
+
+        var result = await api.ValidateCopilotBillingPatAsync(new CopilotBillingPatValidationRequest
+        {
+            Username = "octocat",
+            BillingPat = "billing-pat-test",
+            ProxyId = 31
+        });
+
+        Assert.True(result.Valid);
+        Assert.Equal("/api/v1/admin/accounts/copilot-billing-pat/validate", handler.LastRequestPath);
+        using var request = JsonDocument.Parse(handler.LastRequestBody);
+        Assert.Equal("octocat", request.RootElement.GetProperty("username").GetString());
+        Assert.Equal("billing-pat-test", request.RootElement.GetProperty("token").GetString());
+        Assert.Equal(31, request.RootElement.GetProperty("proxy_id").GetInt64());
+        Assert.False(request.RootElement.TryGetProperty("billing_pat", out _));
+    }
+
+    [Fact]
+    public async Task CopilotEditKeepsStoredPatWhenBlankAndWritesBillingSettings()
+    {
+        var handler = new AccountHandler(string.Empty);
+        var api = CreateApi(handler);
+        var input = new AccountInput
+        {
+            IsEditing = true,
+            IsCopilotProfile = true,
+            Name = "Copilot 定制账号",
+            Platform = "openai",
+            Type = "oauth",
+            BaseUrl = "https://api.githubcopilot.com",
+            BillingUsername = "octocat",
+            BillingPat = string.Empty,
+            HasBillingPat = true,
+            BillingCreditLimit = 1_000,
+            BillingSafetyMargin = 0,
+            BillingAutoPauseDisabled = true,
+            ExtraJson = """{"preserved":"yes"}""",
+            ModelRestrictionMode = "mapping",
+            ModelMappings = [new ModelMappingInput { From = "claude-*", To = "gpt-4.1" }]
+        };
+
+        await api.UpdateAccountAsync("42", input);
+
+        using (var update = JsonDocument.Parse(handler.LastRequestBody))
+        {
+            var credentials = update.RootElement.GetProperty("credentials");
+            Assert.Equal("github_copilot", credentials.GetProperty("oauth_profile").GetString());
+            Assert.Equal("https://api.githubcopilot.com", credentials.GetProperty("base_url").GetString());
+            Assert.Equal("octocat", credentials.GetProperty("billing_username").GetString());
+            Assert.False(credentials.TryGetProperty("billing_pat", out _));
+            Assert.Equal("gpt-4.1", credentials.GetProperty("model_mapping").GetProperty("claude-*").GetString());
+            var extra = update.RootElement.GetProperty("extra");
+            Assert.Equal("yes", extra.GetProperty("preserved").GetString());
+            Assert.Equal(1_000, extra.GetProperty("billing_credit_limit").GetDouble());
+            Assert.Equal(0, extra.GetProperty("billing_safety_margin").GetDouble());
+            Assert.True(extra.GetProperty("billing_auto_pause_disabled").GetBoolean());
+        }
+
+        input.BillingPat = "replacement-pat-test";
+        input.BillingAutoPauseDisabled = false;
+        await api.UpdateAccountAsync("42", input);
+
+        using var replacement = JsonDocument.Parse(handler.LastRequestBody);
+        Assert.Equal("replacement-pat-test", replacement.RootElement.GetProperty("credentials").GetProperty("billing_pat").GetString());
+        Assert.False(replacement.RootElement.GetProperty("extra").TryGetProperty("billing_auto_pause_disabled", out _));
+    }
+
+    [Theory]
+    [InlineData(true, "")]
+    [InlineData(false, "replacement-pat-test")]
+    public async Task CopilotEditRejectsBillingPatWithoutUsernameBeforeSending(bool hasStoredPat, string replacementPat)
+    {
+        var handler = new AccountHandler(string.Empty);
+        var api = CreateApi(handler);
+
+        var error = await Assert.ThrowsAsync<ApiException>(() => api.UpdateAccountAsync("42", new AccountInput
+        {
+            IsEditing = true,
+            IsCopilotProfile = true,
+            Name = "Copilot 定制账号",
+            Platform = "openai",
+            Type = "oauth",
+            BillingUsername = " ",
+            BillingPat = replacementPat,
+            HasBillingPat = hasStoredPat
+        }));
+
+        Assert.Equal("已配置或输入 Billing PAT 时必须填写 GitHub Billing 用户名。", error.Message);
+        Assert.Equal(string.Empty, handler.LastRequestPath);
+        Assert.Equal(string.Empty, handler.LastRequestBody);
+    }
+
+    [Fact]
     public async Task OfficialAccountCreateAndUpdateExcludeIndependentUpstreamPolicyFields()
     {
         var handler = new AccountHandler("data: {\"type\":\"test_complete\",\"success\":true}\n\n");
@@ -462,6 +616,48 @@ public sealed class AccountApiClientTests
     private static ApiClient CreateApi(HttpMessageHandler handler) =>
         new(new HttpClient(handler) { BaseAddress = new Uri("https://paragateway.test") }, new NullJsRuntime());
 
+    private static T CreateCopilotRequest<T>() where T : CopilotAccountSettingsRequest, new() => new()
+    {
+        Name = "Copilot 定制账号",
+        Notes = "GitHub 专用账号",
+        ProxyId = 31,
+        Concurrency = 12,
+        LoadFactor = 250,
+        Priority = 8,
+        RateMultiplier = 1.25,
+        GroupIds = [3, 5],
+        ExpiresAt = 1_770_000_000,
+        AutoPauseOnExpired = false,
+        Schedulable = false,
+        ModelMapping = new Dictionary<string, string> { ["claude-*"] = "gpt-4.1" },
+        BillingUsername = "octocat",
+        BillingPat = "billing-pat-test",
+        BillingCreditLimit = 1_000,
+        BillingSafetyMargin = 0,
+        BillingAutoPauseDisabled = true
+    };
+
+    private static void AssertCopilotSettingsPayload(JsonElement request)
+    {
+        Assert.Equal("Copilot 定制账号", request.GetProperty("name").GetString());
+        Assert.Equal("GitHub 专用账号", request.GetProperty("notes").GetString());
+        Assert.Equal(31, request.GetProperty("proxy_id").GetInt64());
+        Assert.Equal(12, request.GetProperty("concurrency").GetInt32());
+        Assert.Equal(250, request.GetProperty("load_factor").GetInt32());
+        Assert.Equal(8, request.GetProperty("priority").GetInt32());
+        Assert.Equal(1.25, request.GetProperty("rate_multiplier").GetDouble());
+        Assert.Equal([3L, 5L], request.GetProperty("group_ids").EnumerateArray().Select(item => item.GetInt64()).ToArray());
+        Assert.Equal(1_770_000_000, request.GetProperty("expires_at").GetInt64());
+        Assert.False(request.GetProperty("auto_pause_on_expired").GetBoolean());
+        Assert.False(request.GetProperty("schedulable").GetBoolean());
+        Assert.Equal("gpt-4.1", request.GetProperty("model_mapping").GetProperty("claude-*").GetString());
+        Assert.Equal("octocat", request.GetProperty("billing_username").GetString());
+        Assert.Equal("billing-pat-test", request.GetProperty("billing_pat").GetString());
+        Assert.Equal(1_000, request.GetProperty("billing_credit_limit").GetDouble());
+        Assert.Equal(0, request.GetProperty("billing_safety_margin").GetDouble());
+        Assert.True(request.GetProperty("billing_auto_pause_disabled").GetBoolean());
+    }
+
     private static void AssertOfficialAccountPayloadDoesNotContainUpstreamPolicy(string body)
     {
         using var request = JsonDocument.Parse(body);
@@ -503,6 +699,31 @@ public sealed class AccountApiClientTests
             if (request.Method == HttpMethod.Post && path == "/api/v1/admin/openai/generate-auth-url")
             {
                 return JsonResponse("{\"code\":0,\"message\":\"success\",\"data\":{\"auth_url\":\"https://auth.openai.com/oauth/authorize?client_id=codex-client&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=state-1\",\"session_id\":\"openai-session-1\"}}");
+            }
+
+            if (request.Method == HttpMethod.Post && path == "/api/v1/admin/openai/copilot/flows")
+            {
+                return CopilotFlowResponse("pending", includeProvider: false);
+            }
+
+            if (request.Method == HttpMethod.Post && path == "/api/v1/admin/openai/copilot/flows/flow-1/poll")
+            {
+                return CopilotFlowResponse("completed", includeProvider: true);
+            }
+
+            if (request.Method == HttpMethod.Delete && path == "/api/v1/admin/openai/copilot/flows/flow-1")
+            {
+                return JsonResponse("{\"code\":0,\"message\":\"success\",\"data\":{\"cancelled\":true}}");
+            }
+
+            if (request.Method == HttpMethod.Post && path == "/api/v1/admin/openai/copilot/accounts")
+            {
+                return CopilotAccountResponse();
+            }
+
+            if (request.Method == HttpMethod.Post && path == "/api/v1/admin/accounts/copilot-billing-pat/validate")
+            {
+                return JsonResponse("{\"code\":0,\"message\":\"success\",\"data\":{\"valid\":true,\"username\":\"octocat\",\"period\":{},\"items_count\":2,\"gross_quantity\":125,\"gross_amount\":4.25,\"net_amount\":0}}");
             }
 
             if (request.Method == HttpMethod.Post && path == "/api/v1/admin/accounts/exchange-code")
@@ -608,6 +829,17 @@ public sealed class AccountApiClientTests
 
         private static HttpResponseMessage OfficialAccountResponse() =>
             JsonResponse("{\"code\":0,\"message\":\"success\",\"data\":{\"id\":42,\"name\":\"runtime-policy\",\"platform\":\"openai\",\"type\":\"apikey\",\"status\":\"active\",\"schedulable\":true,\"concurrency\":8,\"priority\":100}}");
+
+        private static HttpResponseMessage CopilotAccountResponse() =>
+            JsonResponse("{\"code\":0,\"message\":\"success\",\"data\":{\"id\":43,\"name\":\"Copilot 定制账号\",\"platform\":\"openai\",\"type\":\"oauth\",\"status\":\"active\",\"schedulable\":true,\"concurrency\":12,\"priority\":8,\"credentials\":{\"oauth_profile\":\"github_copilot\"},\"credentials_status\":{\"has_access_token\":true,\"has_billing_pat\":true}}}");
+
+        private static HttpResponseMessage CopilotFlowResponse(string status, bool includeProvider)
+        {
+            var provider = includeProvider
+                ? ",\"provider\":{\"id\":43,\"name\":\"Copilot 定制账号\",\"platform\":\"openai\",\"type\":\"oauth\",\"status\":\"active\",\"schedulable\":true,\"concurrency\":12,\"priority\":8,\"credentials\":{\"oauth_profile\":\"github_copilot\"},\"credentials_status\":{\"has_access_token\":true,\"has_billing_pat\":true}}"
+                : string.Empty;
+            return JsonResponse($"{{\"code\":0,\"message\":\"success\",\"data\":{{\"flow_id\":\"flow-1\",\"profile\":\"github_copilot\",\"status\":\"{status}\",\"user_code\":\"ABCD-EFGH\",\"verification_uri\":\"https://github.com/login/device\",\"expires_at\":\"2026-08-24T12:00:00Z\",\"interval_seconds\":5,\"next_poll_at\":\"2026-08-24T11:00:05Z\"{provider}}}}}");
+        }
 
         private static HttpResponseMessage AccountStatsResponse() =>
             JsonResponse("""

@@ -317,3 +317,185 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.Len(t, adminSvc.createdAccounts, 1)
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
 }
+
+func TestNormalizeLegacyCopilotImportPreservesAccountFieldsAndCredentials(t *testing.T) {
+	notes := "legacy account"
+	proxyKey := "https|proxy.example|443|user|pass"
+	rateMultiplier := 1.25
+	expiresAt := int64(1_800_000_000)
+	item := DataAccount{
+		Name:                          "legacy-copilot",
+		Notes:                         &notes,
+		Platform:                      "copilot",
+		Type:                          service.AccountTypeAPIKey,
+		Credentials:                   map[string]any{"github_token": "  gh-legacy\t", "billing_username": "octocat", "billing_pat": "billing-secret", "base_url": "https://api.individual.githubcopilot.com", "model_mapping": map[string]any{"claude-*": "claude-sonnet-4"}, "custom": "preserved"},
+		Extra:                         map[string]any{"billing_credit_limit": 20000.0, "billing_safety_margin": 200.0},
+		ProxyKey:                      &proxyKey,
+		Concurrency:                   7,
+		Priority:                      13,
+		Weight:                        90,
+		RPMLimit:                      21,
+		CircuitBreakerThreshold:       3,
+		CircuitBreakerCooldownSeconds: 60,
+		RateMultiplier:                &rateMultiplier,
+		ExpiresAt:                     &expiresAt,
+	}
+	originalCredentials := item.Credentials
+
+	require.NoError(t, normalizeLegacyCopilotImport(&item))
+	require.Equal(t, service.PlatformOpenAI, item.Platform)
+	require.Equal(t, service.AccountTypeOAuth, item.Type)
+	require.Equal(t, "gh-legacy", item.Credentials["github_access_token"])
+	require.Equal(t, service.CopilotOAuthProfile, item.Credentials["oauth_profile"])
+	require.NotContains(t, item.Credentials, "github_token")
+	require.Equal(t, "  gh-legacy\t", originalCredentials["github_token"])
+	require.NotContains(t, originalCredentials, "github_access_token")
+	require.NotContains(t, originalCredentials, "oauth_profile")
+	for key, want := range map[string]any{
+		"billing_username": "octocat",
+		"billing_pat":      "billing-secret",
+		"base_url":         "https://api.individual.githubcopilot.com",
+		"custom":           "preserved",
+	} {
+		require.Equal(t, want, item.Credentials[key], key)
+	}
+	require.Equal(t, map[string]any{"claude-*": "claude-sonnet-4"}, item.Credentials["model_mapping"])
+	require.Equal(t, map[string]any{"billing_credit_limit": 20000.0, "billing_safety_margin": 200.0}, item.Extra)
+	require.Equal(t, notes, *item.Notes)
+	require.Equal(t, proxyKey, *item.ProxyKey)
+	require.Equal(t, 7, item.Concurrency)
+	require.Equal(t, 13, item.Priority)
+	require.Equal(t, 90, item.Weight)
+	require.Equal(t, 21, item.RPMLimit)
+	require.Equal(t, 3, item.CircuitBreakerThreshold)
+	require.Equal(t, 60, item.CircuitBreakerCooldownSeconds)
+	require.Equal(t, rateMultiplier, *item.RateMultiplier)
+	require.Equal(t, expiresAt, *item.ExpiresAt)
+}
+
+func TestNormalizeLegacyCopilotImportRejectsMalformedLegacyRecords(t *testing.T) {
+	canonicalSecret := "canonical-secret-must-not-echo"
+	tests := []struct {
+		name string
+		item DataAccount
+		want string
+	}{
+		{
+			name: "missing github token",
+			item: DataAccount{Platform: "copilot", Type: service.AccountTypeAPIKey, Credentials: map[string]any{}},
+			want: "non-empty github_token",
+		},
+		{
+			name: "wrong type",
+			item: DataAccount{Platform: "copilot", Type: service.AccountTypeOAuth, Credentials: map[string]any{"github_token": "gh-legacy"}},
+			want: "type apikey",
+		},
+		{
+			name: "canonical access token already present",
+			item: DataAccount{Platform: "copilot", Type: service.AccountTypeAPIKey, Credentials: map[string]any{"github_token": "gh-legacy", "github_access_token": canonicalSecret}},
+			want: "contains canonical OAuth credentials",
+		},
+		{
+			name: "canonical OAuth profile already present",
+			item: DataAccount{Platform: "copilot", Type: service.AccountTypeAPIKey, Credentials: map[string]any{"github_token": "gh-legacy", "oauth_profile": canonicalSecret}},
+			want: "contains canonical OAuth credentials",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := normalizeLegacyCopilotImport(&tt.item)
+			require.ErrorContains(t, err, tt.want)
+			require.NotContains(t, err.Error(), canonicalSecret)
+			require.Equal(t, "copilot", tt.item.Platform)
+		})
+	}
+}
+
+func TestNormalizeLegacyCopilotImportLeavesNonLegacyAccountUntouched(t *testing.T) {
+	item := DataAccount{
+		Name:        "ordinary-openai",
+		Platform:    service.PlatformOpenAI,
+		Type:        service.AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-normal", "github_token": "unrelated-value"},
+		Extra:       map[string]any{"preserved": true},
+	}
+	want := item
+
+	require.NoError(t, normalizeLegacyCopilotImport(&item))
+	require.Equal(t, want, item)
+}
+
+func TestImportDataLegacyCopilotNormalizesAndRejectsMalformedRecordsWithoutEchoingSecrets(t *testing.T) {
+	router, adminSvc := setupAccountDataRouter()
+	dataPayload := map[string]any{
+		"data": map[string]any{
+			"type":    dataType,
+			"version": dataVersion,
+			"proxies": []map[string]any{},
+			"accounts": []map[string]any{
+				{
+					"name":     "legacy-valid",
+					"platform": "copilot",
+					"type":     "apikey",
+					"credentials": map[string]any{
+						"github_token":     "gh-import-secret",
+						"billing_username": "octocat",
+						"billing_pat":      "billing-import-secret",
+						"base_url":         "https://api.individual.githubcopilot.com",
+						"model_mapping":    map[string]any{"claude-*": "claude-sonnet-4"},
+					},
+					"extra":       map[string]any{"billing_credit_limit": 1000.0},
+					"concurrency": 4,
+					"priority":    9,
+				},
+				{
+					"name":        "legacy-invalid",
+					"platform":    "copilot",
+					"type":        "apikey",
+					"credentials": map[string]any{"billing_pat": "must-not-echo"},
+				},
+			},
+		},
+	}
+
+	body, err := json.Marshal(dataPayload)
+	require.NoError(t, err)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotContains(t, rec.Body.String(), "gh-import-secret")
+	require.NotContains(t, rec.Body.String(), "billing-import-secret")
+	require.NotContains(t, rec.Body.String(), "must-not-echo")
+
+	var response struct {
+		Code int `json:"code"`
+		Data struct {
+			AccountCreated int               `json:"account_created"`
+			AccountFailed  int               `json:"account_failed"`
+			Errors         []DataImportError `json:"errors"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.Equal(t, 0, response.Code)
+	require.Equal(t, 1, response.Data.AccountCreated)
+	require.Equal(t, 1, response.Data.AccountFailed)
+	require.Len(t, response.Data.Errors, 1)
+	require.Equal(t, "legacy-invalid", response.Data.Errors[0].Name)
+	require.Contains(t, response.Data.Errors[0].Message, "non-empty github_token")
+
+	require.Len(t, adminSvc.createdAccounts, 1)
+	created := adminSvc.createdAccounts[0]
+	require.Equal(t, service.PlatformOpenAI, created.Platform)
+	require.Equal(t, service.AccountTypeOAuth, created.Type)
+	require.Equal(t, "gh-import-secret", created.Credentials["github_access_token"])
+	require.Equal(t, service.CopilotOAuthProfile, created.Credentials["oauth_profile"])
+	require.NotContains(t, created.Credentials, "github_token")
+	require.Equal(t, "octocat", created.Credentials["billing_username"])
+	require.Equal(t, "billing-import-secret", created.Credentials["billing_pat"])
+	require.Equal(t, "https://api.individual.githubcopilot.com", created.Credentials["base_url"])
+	require.Equal(t, map[string]any{"claude-*": "claude-sonnet-4"}, created.Credentials["model_mapping"])
+	require.Equal(t, map[string]any{"billing_credit_limit": 1000.0}, created.Extra)
+}

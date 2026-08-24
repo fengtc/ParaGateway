@@ -1,0 +1,246 @@
+@using System.Globalization
+@inject ApiClient Api
+
+<div class="admin-error-toolbar">
+    <div class="admin-error-filters">
+        <div class="filter-field compact wide">
+            <label for="admin-usage-error-search">搜索</label>
+            <input id="admin-usage-error-search" type="search" placeholder="消息、请求 ID、用户或模型" @bind="search" />
+        </div>
+        <div class="filter-field compact">
+            <label for="admin-usage-error-status">状态码</label>
+            <select id="admin-usage-error-status" @bind="statusCodes">
+                <option value="">全部状态码</option>
+                <option value="400">400</option>
+                <option value="401">401</option>
+                <option value="403">403</option>
+                <option value="404">404</option>
+                <option value="408">408</option>
+                <option value="422">422</option>
+                <option value="429">429</option>
+                <option value="500">500</option>
+                <option value="502">502</option>
+                <option value="503">503</option>
+                <option value="504">504</option>
+            </select>
+        </div>
+        <div class="filter-field compact">
+            <label for="admin-usage-error-page-size">每页</label>
+            <select id="admin-usage-error-page-size" value="@pageSize" @onchange="PageSizeChangedAsync">
+                <option value="20">20 条</option>
+                <option value="50">50 条</option>
+                <option value="100">100 条</option>
+            </select>
+        </div>
+    </div>
+    <div class="admin-error-actions">
+        <button type="button" class="button secondary" disabled="@loading" @onclick="ApplyLocalFiltersAsync"><Icon Name="search" Size="16" /> 筛选</button>
+        <span class="result-count">共 @UiFormat.Integer(errors.Total) 条错误</span>
+    </div>
+</div>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入错误请求" />
+}
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else if (errors.Items.Count == 0)
+{
+    <EmptyState Title="暂无错误请求" Description="所选范围内没有符合条件的失败请求。" />
+}
+else
+{
+    <div class="data-table-wrap admin-error-table-wrap">
+        <table class="data-table admin-error-table">
+            <thead>
+                <tr>
+                    <th><button type="button" class="table-sort-button" @onclick='() => ChangeSortAsync("created_at")'>时间@(SortIndicator("created_at"))</button></th>
+                    <th>用户 / Key</th>
+                    <th><button type="button" class="table-sort-button" @onclick='() => ChangeSortAsync("model")'>模型@(SortIndicator("model"))</button></th>
+                    <th><button type="button" class="table-sort-button" @onclick='() => ChangeSortAsync("status_code")'>状态@(SortIndicator("status_code"))</button></th>
+                    <th>阶段 / 来源</th>
+                    <th>错误消息</th>
+                    <th>账号 / 分组</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in errors.Items)
+                {
+                    <tr class="clickable-row" @key="item.Id" @onclick="() => OpenDetailAsync(item.Id)">
+                        <td data-label="时间">@UiFormat.DateTime(item.CreatedAt)</td>
+                        <td data-label="用户 / Key"><span class="primary-cell">@Display(item.UserEmail)</span><small>@Display(item.ApiKeyName)</small></td>
+                        <td data-label="模型"><span class="primary-cell">@DisplayModel(item)</span><small>@Display(item.Platform)</small></td>
+                        <td data-label="状态"><span class="status-badge @StatusClass(item.StatusCode)">@item.StatusCode</span></td>
+                        <td data-label="阶段 / 来源"><span class="primary-cell">@Display(item.Phase)</span><small>@ErrorSource(item)</small></td>
+                        <td data-label="错误消息" class="error-message-cell" title="@item.Message">@Display(item.Message)</td>
+                        <td data-label="账号 / 分组"><span class="primary-cell">@Display(item.AccountName)</span><small>@Display(item.GroupName)</small></td>
+                        <td data-label="操作">
+                            <button type="button" class="icon-button" title="查看错误详情" aria-label="查看错误详情" @onclick:stopPropagation="true" @onclick="() => OpenDetailAsync(item.Id)"><Icon Name="eye" Size="16" /></button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <nav class="pagination" aria-label="错误请求分页">
+        <button type="button" class="icon-button" title="上一页" aria-label="上一页" disabled="@(page <= 1 || loading)" @onclick="PreviousAsync"><Icon Name="chevron-left" Size="17" /></button>
+        <span>第 @(page) / @TotalPages 页</span>
+        <button type="button" class="icon-button" title="下一页" aria-label="下一页" disabled="@(page >= TotalPages || loading)" @onclick="NextAsync"><Icon Name="chevron-right" Size="17" /></button>
+    </nav>
+}
+
+<AppModal Open="@(detailId is not null)" Title="错误请求详情" MaxWidth="900px" OnClose="CloseDetail">
+    <ChildContent>
+        @if (detailLoading)
+        {
+            <LoadingState Text="正在载入错误详情" />
+        }
+        else if (detailError is not null)
+        {
+            <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@detailError</span></div>
+        }
+        else if (detail is not null)
+        {
+            <div class="admin-error-detail-grid">
+                <div><small>时间</small><strong>@UiFormat.DateTime(detail.CreatedAt)</strong></div>
+                <div><small>状态码</small><strong><span class="status-badge @StatusClass(detail.StatusCode)">@detail.StatusCode</span></strong></div>
+                <div><small>用户</small><strong>@Display(detail.UserEmail)</strong></div>
+                <div><small>API Key</small><strong>@Display(detail.ApiKeyName)</strong></div>
+                <div><small>请求模型</small><strong>@DisplayModel(detail)</strong></div>
+                <div><small>上游模型</small><strong>@Display(detail.UpstreamModel)</strong></div>
+                <div><small>平台</small><strong>@Display(detail.Platform)</strong></div>
+                <div><small>账号 / 分组</small><strong>@Display(detail.AccountName) / @Display(detail.GroupName)</strong></div>
+                <div><small>阶段 / 来源</small><strong>@Display(detail.Phase) / @ErrorSource(detail)</strong></div>
+                <div><small>请求 ID</small><strong><code title="@detail.RequestId">@Display(detail.RequestId)</code></strong></div>
+                <div><small>入口端点</small><strong>@Display(detail.InboundEndpoint)</strong></div>
+                <div><small>客户端 IP</small><strong>@Display(detail.ClientIp)</strong></div>
+                @if (detail.UpstreamStatusCode.HasValue)
+                {
+                    <div><small>上游状态码</small><strong>@detail.UpstreamStatusCode</strong></div>
+                }
+                @if (detail.UpstreamLatencyMs.HasValue)
+                {
+                    <div><small>上游耗时</small><strong>@detail.UpstreamLatencyMs ms</strong></div>
+                }
+                @if (detail.TimeToFirstTokenMs.HasValue)
+                {
+                    <div><small>首 Token</small><strong>@detail.TimeToFirstTokenMs ms</strong></div>
+                }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(detail.Message))
+            {
+                <div class="admin-error-detail-section"><small>错误消息</small><p>@detail.Message</p></div>
+            }
+            @if (!string.IsNullOrWhiteSpace(detail.UpstreamErrorMessage) || !string.IsNullOrWhiteSpace(detail.UpstreamErrorDetail))
+            {
+                <div class="admin-error-detail-section"><small>上游错误</small><p>@Display(detail.UpstreamErrorMessage) @detail.UpstreamErrorDetail</p></div>
+            }
+            @if (!string.IsNullOrWhiteSpace(detail.ErrorBody))
+            {
+                <div class="admin-error-detail-section"><small>响应正文</small><pre>@detail.ErrorBody</pre></div>
+            }
+        }
+    </ChildContent>
+    <Footer><button type="button" class="button secondary" @onclick="CloseDetail">关闭</button></Footer>
+</AppModal>
+
+@code {
+    [Parameter, EditorRequired] public string StartDate { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string EndDate { get; set; } = string.Empty;
+    [Parameter] public long? UserId { get; set; }
+    [Parameter] public string Model { get; set; } = string.Empty;
+
+    private PagedEnvelope<OpsErrorLogDto> errors = new();
+    private OpsErrorDetailDto? detail;
+    private long? detailId;
+    private int page = 1;
+    private int pageSize = 20;
+    private string search = string.Empty;
+    private string statusCodes = string.Empty;
+    private string sortBy = "created_at";
+    private string sortOrder = "desc";
+    private bool loading = true;
+    private bool detailLoading;
+    private string? error;
+    private string? detailError;
+    private int TotalPages => Math.Max(1, errors.Pages > 0 ? errors.Pages : (int)Math.Ceiling(errors.Total / (double)pageSize));
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            errors = await Api.GetAdminOpsErrorLogsAsync(new OpsErrorListQueryDto
+            {
+                Page = page,
+                PageSize = pageSize,
+                TimeRange = "custom",
+                StartTime = LocalBoundary(StartDate),
+                EndTime = LocalBoundary(EndDate, 1),
+                UserId = UserId,
+                Model = Model,
+                Search = search.Trim(),
+                StatusCodes = statusCodes,
+                View = "all",
+                SortBy = sortBy,
+                SortOrder = sortOrder
+            });
+            if (errors.Page > 0) page = errors.Page;
+        }
+        catch (ApiException ex) { error = ex.Message; }
+        finally { loading = false; }
+    }
+
+    private async Task ApplyLocalFiltersAsync() { page = 1; await LoadAsync(); }
+    private async Task PageSizeChangedAsync(ChangeEventArgs args) { if (int.TryParse(args.Value?.ToString(), out var value)) pageSize = value; page = 1; await LoadAsync(); }
+    private async Task PreviousAsync() { if (page <= 1) return; page--; await LoadAsync(); }
+    private async Task NextAsync() { if (page >= TotalPages) return; page++; await LoadAsync(); }
+
+    private async Task ChangeSortAsync(string column)
+    {
+        if (sortBy == column) sortOrder = sortOrder == "desc" ? "asc" : "desc";
+        else { sortBy = column; sortOrder = "desc"; }
+        page = 1;
+        await LoadAsync();
+    }
+
+    private async Task OpenDetailAsync(long id)
+    {
+        detailId = id;
+        detail = null;
+        detailError = null;
+        detailLoading = true;
+        try { detail = await Api.GetAdminOpsErrorLogDetailAsync(id); }
+        catch (ApiException ex) { detailError = ex.Message; }
+        finally { detailLoading = false; }
+    }
+
+    private void CloseDetail()
+    {
+        detailId = null;
+        detail = null;
+        detailError = null;
+    }
+
+    private static DateTimeOffset LocalBoundary(string value, int days = 0)
+    {
+        var date = DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+            ? parsed.AddDays(days)
+            : DateOnly.FromDateTime(DateTime.Now).AddDays(days);
+        var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        return new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local));
+    }
+
+    private string SortIndicator(string column) => sortBy == column ? (sortOrder == "desc" ? " ↓" : " ↑") : string.Empty;
+    private static string DisplayModel(OpsErrorLogDto value) => Display(string.IsNullOrWhiteSpace(value.RequestedModel) ? value.Model : value.RequestedModel);
+    private static string ErrorSource(OpsErrorLogDto value) => Display(string.IsNullOrWhiteSpace(value.ErrorOwner) ? value.ErrorSource : $"{value.ErrorOwner} / {value.ErrorSource}");
+    private static string StatusClass(int statusCode) => statusCode >= 500 ? "danger" : statusCode == 429 ? "warning" : "neutral";
+    private static string Display(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
+}

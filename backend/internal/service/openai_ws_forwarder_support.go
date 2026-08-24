@@ -235,6 +235,9 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 	if status == 0 {
 		status = int(gjson.GetBytes(payload, "error.status").Int())
 	}
+	if (status == 0 || status == http.StatusPaymentRequired) && isCopilotMonthlyQuotaExceededResponse(payload) {
+		return http.StatusPaymentRequired
+	}
 	if shouldCooldownOpenAITransientUpstreamError(status, payload) {
 		return status
 	}
@@ -512,6 +515,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	if paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, account); paused {
 		return 0, nil, "", nil
 	}
+	if skip, _, _ := shouldSkipCopilotAccountForBilling(ctx, account); skip {
+		return 0, nil, "", nil
+	}
 	// 分组利润控制：与 quota auto-pause 同语义——利润不合格是暂时
 	// 状态（上游倍率/高峰随时间变化），只跳过本次复用、落回普通调度，不删除
 	// 绑定（倍率恢复后可继续按 previous_response_id 粘连）。
@@ -539,6 +545,9 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 			return 0, nil, "", nil
 		}
 		if paused, _ := shouldAutoPauseOpenAIAccountByQuota(ctx, latest); paused {
+			return 0, nil, "", nil
+		}
+		if skip, _, _ := shouldSkipCopilotAccountForBilling(ctx, latest); skip {
 			return 0, nil, "", nil
 		}
 		// 利润门对最新账号状态复检一次，语义同上：跳过复用、不删绑定。

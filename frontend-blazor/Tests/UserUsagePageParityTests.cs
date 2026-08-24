@@ -130,12 +130,29 @@ public sealed class UserUsagePageParityTests
     }
 
     [Fact]
+    public void UsagePagesDisplayCostsWithTwoDecimalsAndKeepCsvPrecision()
+    {
+        var page = ReadSource("Components", "UserUsagePanel.razor");
+        var legend = ReadSource("Components", "DistributionLegend.razor");
+        var keyUsage = ReadSource("Pages", "KeyUsage.razor");
+
+        Assert.Contains("private static string FormatCost(double value) => value.ToString(\"0.00\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("FormatCost(stats?.TotalActualCost ?? 0,", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("FormatCost(row.ActualCost,", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("FormatCost(row.TotalCost,", page, StringComparison.Ordinal);
+        Assert.Contains("UiFormat.Usd(row.Cost)", legend, StringComparison.Ordinal);
+        Assert.Equal(2, keyUsage.Split("DisplayFormat=\"0.00\"", StringSplitOptions.None).Length - 1);
+        Assert.DoesNotContain("DisplayFormat=\"0.########\"", keyUsage, StringComparison.Ordinal);
+        Assert.Contains("0.00000000", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AdminAndUserRoutesUsePathInsteadOfRole()
     {
         var page = ReadSource("Pages", "Usage.razor");
 
         Assert.Contains("AbsolutePath.TrimEnd('/').Equals(\"/admin/usage\"", page, StringComparison.Ordinal);
-        Assert.Contains("<AdminUsagePanel />", page, StringComparison.Ordinal);
+        Assert.Contains("<AdminUsagePanel InitialUserId=", page, StringComparison.Ordinal);
         Assert.Contains("<UserUsagePanel />", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Auth.User?.IsAdmin", page, StringComparison.Ordinal);
     }

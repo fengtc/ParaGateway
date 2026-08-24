@@ -65,6 +65,7 @@ func (s *adminServiceImpl) GetAccountsByIDs(ctx context.Context, ids []int64) ([
 
 const maxAccountNameRunes = 100
 const duplicateAccountOperationIDExtraKey = "duplicate_operation_id"
+const AccountCreateOperationIDExtraKey = "account_create_operation_id"
 
 func duplicateAccountName(sourceName string) string {
 	const suffix = " (Copy)"
@@ -447,6 +448,10 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	delete(accountExtra, OllamaCloudUsageAutoRefreshExtraKey)
 	delete(accountExtra, OllamaCloudUsageSnapshotExtraKey)
 	accountExtra = prepareCodexFingerprintExtraForCreate(input.Platform, input.Type, accountExtra)
+	schedulable := true
+	if input.Schedulable != nil {
+		schedulable = *input.Schedulable
+	}
 	account := &Account{
 		Name:                          input.Name,
 		Notes:                         normalizeAccountNotes(input.Notes),
@@ -462,7 +467,7 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 		CircuitBreakerThreshold:       input.CircuitBreakerThreshold,
 		CircuitBreakerCooldownSeconds: input.CircuitBreakerCooldownSeconds,
 		Status:                        StatusActive,
-		Schedulable:                   true,
+		Schedulable:                   schedulable,
 	}
 	if input.ProbeEnabled != nil && *input.ProbeEnabled {
 		if !isUpstreamBillingProbeAccount(account) {
@@ -505,6 +510,64 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 	return account, nil
 }
 
+func accountCreateOperationID(idempotencyKey string) string {
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if idempotencyKey == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte("admin.accounts.create\x00" + idempotencyKey))
+	return fmt.Sprintf("%x", digest)
+}
+
+func (s *adminServiceImpl) findAccountByCreateOperationID(ctx context.Context, operationID string) (*Account, error) {
+	if operationID == "" {
+		return nil, nil
+	}
+	accounts, err := s.accountRepo.FindByExtraField(ctx, AccountCreateOperationIDExtraKey, operationID)
+	if err != nil {
+		return nil, fmt.Errorf("find created account operation: %w", err)
+	}
+	if len(accounts) == 0 {
+		return nil, nil
+	}
+	account := accounts[0]
+	return &account, nil
+}
+
+func accountGroupsForCreate(groupIDs []int64) []AccountGroup {
+	groups := make([]AccountGroup, 0, len(groupIDs))
+	for i, groupID := range groupIDs {
+		groups = append(groups, AccountGroup{GroupID: groupID, Priority: i + 1})
+	}
+	return groups
+}
+
+func (s *adminServiceImpl) ensureCreatedAccountPrivacy(account *Account) {
+	if account == nil || account.Type != AccountTypeOAuth {
+		return
+	}
+	switch account.Platform {
+	case PlatformOpenAI:
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("create_account_openai_privacy_panic", "account_id", account.ID, "recover", r)
+				}
+			}()
+			s.EnsureOpenAIPrivacy(context.Background(), account)
+		}()
+	case PlatformAntigravity:
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("create_account_antigravity_privacy_panic", "account_id", account.ID, "recover", r)
+				}
+			}()
+			s.EnsureAntigravityPrivacy(context.Background(), account)
+		}()
+	}
+}
+
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
 	if _, suppliedInternalCiphertext := input.Credentials[wifClientSecretCiphertextKey]; suppliedInternalCiphertext {
 		return nil, infraerrors.BadRequest("WIF_CIPHERTEXT_INPUT_FORBIDDEN", "WIF ciphertext is managed by the server and cannot be supplied by clients")
@@ -541,6 +604,28 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 	}
 
+	operationID := accountCreateOperationID(input.IdempotencyKey)
+	if operationID != "" {
+		if accountExtra == nil {
+			accountExtra = make(map[string]any, 1)
+		}
+		accountExtra[AccountCreateOperationIDExtraKey] = operationID
+		existing, err := s.findAccountByCreateOperationID(ctx, operationID)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			if len(groupIDs) > 0 {
+				if err := s.accountRepo.BindGroups(ctx, existing.ID, groupIDs); err != nil {
+					return nil, err
+				}
+				existing.GroupIDs = append([]int64(nil), groupIDs...)
+			}
+			s.ensureCreatedAccountPrivacy(existing)
+			return existing, nil
+		}
+	}
+
 	// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
 		return nil, err
@@ -560,14 +645,21 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 			return nil, err
 		}
 	}
-	if err := s.accountRepo.Create(ctx, account); err != nil {
-		return nil, err
-	}
-
-	// 绑定分组
-	if len(groupIDs) > 0 {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
+	groups := accountGroupsForCreate(groupIDs)
+	if s.accountDuplicateRepo != nil {
+		if err := s.accountDuplicateRepo.CreateWithAccountGroups(ctx, account, groups); err != nil {
 			return nil, err
+		}
+	} else {
+		if err := s.accountRepo.Create(ctx, account); err != nil {
+			return nil, err
+		}
+
+		// 绑定分组
+		if len(groupIDs) > 0 {
+			if err := s.accountRepo.BindGroups(ctx, account.ID, groupIDs); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -610,6 +702,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	previousCircuitBreakerThreshold := account.EffectiveCircuitBreakerThreshold()
 	previousCircuitBreakerCooldownSeconds := int(account.EffectiveCircuitBreakerCooldown() / time.Second)
 	wasWIF := account.IsWIF()
+	wasGitHubCopilot := account.IsGitHubCopilot()
 	previousWIFCredentialBoundary := wifCredentialBoundary(account)
 	var normalizedExtra map[string]any
 	if input.Extra != nil {
@@ -667,13 +760,30 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	} else if len(input.Credentials) > 0 {
 		// 敏感子键采用"incoming 没提供就保留"的合并语义：前端响应已脱敏，
 		// 全对象 PUT 编辑时不会再带回 token，避免覆盖时清空已有凭证。
-		account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+		if wasGitHubCopilot && account.Type == AccountTypeOAuth {
+			account.Credentials = MergePreservingGitHubCopilotCreds(account.Credentials, input.Credentials)
+		} else {
+			account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+		}
 		// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 		if err := NormalizeHeaderOverrideCredentials(account.Credentials); err != nil {
 			return nil, err
 		}
 		// Strip SSO/password residue that must never sit next to OAuth tokens.
 		account.Credentials = SanitizeStoredCredentials(account.Platform, account.Credentials)
+	}
+	if wasGitHubCopilot && strings.TrimSpace(account.GetCredential("billing_pat")) != "" {
+		billingUsername := strings.TrimSpace(account.GetCredential("billing_username"))
+		if billingUsername == "" {
+			billingUsername = strings.TrimSpace(account.GetCredential("github_login"))
+		}
+		if billingUsername == "" {
+			return nil, infraerrors.BadRequest(
+				"COPILOT_BILLING_USERNAME_REQUIRED",
+				"billing_username is required when billing_pat is configured",
+			)
+		}
+		account.Credentials["billing_username"] = billingUsername
 	}
 	// Extra 使用 map：需要区分“未提供(nil)”与“显式清空({})”。
 	// 关闭配额限制时前端会删除 quota_* 键并提交 extra:{}，此时也必须落库。

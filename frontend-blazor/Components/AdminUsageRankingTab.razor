@@ -1,0 +1,130 @@
+@using System.Globalization
+@inject ApiClient Api
+
+<div class="admin-ranking-toolbar">
+    <p>按 Token 或费用查看当前筛选范围内的用户消耗</p>
+    <div>
+        @if (!loading && ranking.Users.Count > 0)
+        {
+            <span class="result-count">共 @UiFormat.Integer(ranking.Users.Count) 位用户</span>
+        }
+        <div class="filter-field compact">
+            <label for="admin-usage-ranking-limit">显示范围</label>
+            <select id="admin-usage-ranking-limit" value="@limit" @onchange="LimitChangedAsync">
+                <option value="20">Top 20</option>
+                <option value="50">Top 50</option>
+                <option value="100">Top 100</option>
+                <option value="200">Top 200</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+@if (loading)
+{
+    <LoadingState Text="正在载入用户排行" />
+}
+else if (error is not null)
+{
+    <ErrorState Message="@error" OnRetry="LoadAsync" />
+}
+else if (ranking.Users.Count == 0)
+{
+    <EmptyState Title="暂无排行数据" Description="所选范围内没有可统计的用户用量。" />
+}
+else
+{
+    <div class="data-table-wrap admin-ranking-table-wrap">
+        <table class="data-table admin-ranking-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>用户</th>
+                    <th class="numeric-cell"><button type="button" class="ranking-sort-button" @onclick='() => ChangeSortAsync("requests")'>请求@(SortIndicator("requests"))</button></th>
+                    <th class="numeric-cell"><button type="button" class="ranking-sort-button" @onclick='() => ChangeSortAsync("input_tokens")'>输入 Token@(SortIndicator("input_tokens"))</button></th>
+                    <th class="numeric-cell"><button type="button" class="ranking-sort-button" @onclick='() => ChangeSortAsync("output_tokens")'>输出 Token@(SortIndicator("output_tokens"))</button></th>
+                    <th class="numeric-cell"><button type="button" class="ranking-sort-button" @onclick='() => ChangeSortAsync("cache_tokens")'>缓存 Token@(SortIndicator("cache_tokens"))</button></th>
+                    <th class="numeric-cell"><button type="button" class="ranking-sort-button" @onclick='() => ChangeSortAsync("total_tokens")'>总 Token@(SortIndicator("total_tokens"))</button></th>
+                    <th class="numeric-cell"><button type="button" class="ranking-sort-button" @onclick='() => ChangeSortAsync("actual_cost")'>实际费用@(SortIndicator("actual_cost"))</button></th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (var index = 0; index < ranking.Users.Count; index++)
+                {
+                    var item = ranking.Users[index];
+                    <tr class="ranking-row" @key="item.UserId" title="查看该用户的用量明细" @onclick="() => SelectUserAsync(item)">
+                        <td data-label="排名"><span class="rank-badge @RankClass(index)">@(index + 1)</span></td>
+                        <td data-label="用户"><span class="primary-cell">@UserLabel(item)</span><small>#@item.UserId</small></td>
+                        <td data-label="请求" class="numeric-cell">@UiFormat.Integer(item.Requests)</td>
+                        <td data-label="输入 Token" class="numeric-cell">@UiFormat.Integer(item.InputTokens)</td>
+                        <td data-label="输出 Token" class="numeric-cell">@UiFormat.Integer(item.OutputTokens)</td>
+                        <td data-label="缓存 Token" class="numeric-cell">@UiFormat.Integer(item.CacheTokens)</td>
+                        <td data-label="总 Token" class="numeric-cell ranking-total">@UiFormat.Integer(item.TotalTokens)</td>
+                        <td data-label="实际费用" class="numeric-cell ranking-cost">$@FormatCost(item.ActualCost)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string StartDate { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string EndDate { get; set; } = string.Empty;
+    [Parameter] public long? UserId { get; set; }
+    [Parameter] public string Model { get; set; } = string.Empty;
+    [Parameter] public EventCallback<AdminDashboardUserBreakdownItemDto> OnSelectUser { get; set; }
+
+    private AdminDashboardUserBreakdownResponseDto ranking = new();
+    private int limit = 50;
+    private string sortBy = "total_tokens";
+    private bool loading = true;
+    private string? error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        error = null;
+        try
+        {
+            ranking = await Api.GetAdminDashboardUserBreakdownAsync(new AdminDashboardUserBreakdownQueryDto
+            {
+                StartDate = StartDate,
+                EndDate = EndDate,
+                Timezone = TimeZoneInfo.Local.Id,
+                UserId = UserId,
+                Model = Model,
+                ModelSource = "requested",
+                SortBy = sortBy,
+                Limit = limit
+            });
+        }
+        catch (ApiException ex)
+        {
+            ranking = new();
+            error = ex.Message;
+        }
+        finally { loading = false; }
+    }
+
+    private async Task LimitChangedAsync(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var value)) limit = Math.Clamp(value, 20, 200);
+        await LoadAsync();
+    }
+
+    private async Task ChangeSortAsync(string column)
+    {
+        if (sortBy == column) return;
+        sortBy = column;
+        await LoadAsync();
+    }
+
+    private Task SelectUserAsync(AdminDashboardUserBreakdownItemDto item) => OnSelectUser.InvokeAsync(item);
+    private string SortIndicator(string column) => sortBy == column ? " ↓" : string.Empty;
+    private static string UserLabel(AdminDashboardUserBreakdownItemDto item) => string.IsNullOrWhiteSpace(item.Email) ? $"用户 #{item.UserId}" : item.Email;
+    private static string RankClass(int index) => index switch { 0 => "first", 1 => "second", 2 => "third", _ => string.Empty };
+    private static string FormatCost(double value) => value.ToString("0.00", CultureInfo.InvariantCulture);
+}

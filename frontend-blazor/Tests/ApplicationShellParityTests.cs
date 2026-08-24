@@ -13,7 +13,7 @@ public sealed class ApplicationShellParityTests
         foreach (var title in new[]
         {
             "运营总览", "账户总览", "运维管理", "用户管理", "内容风控", "提示风控",
-            "请求审计", "分组管理", "订阅管理", "上游账号", "公告管理", "代理管理",
+            "请求审计", "分组管理", "订阅管理", "账号管理", "公告管理", "代理管理",
             "用量明细", "审计日志", "系统设置"
         })
         {
@@ -56,7 +56,7 @@ public sealed class ApplicationShellParityTests
         Assert.DoesNotContain("安全审计", menu, StringComparison.Ordinal);
         Assert.DoesNotContain("nav-group-button", menu, StringComparison.Ordinal);
         Assert.Contains("我的账户", menu, StringComparison.Ordinal);
-        Assert.Contains("上游账号", menu, StringComparison.Ordinal);
+        Assert.Contains("账号管理", menu, StringComparison.Ordinal);
         Assert.Contains("代理管理", menu, StringComparison.Ordinal);
         Assert.Contains("用量明细", menu, StringComparison.Ordinal);
         Assert.Contains("审计日志", menu, StringComparison.Ordinal);

@@ -378,6 +378,11 @@ type CreateAccountInput struct {
 	GroupIDs                      []int64
 	ExpiresAt                     *int64
 	AutoPauseOnExpired            *bool
+	Schedulable                   *bool
+	// IdempotencyKey is server-owned operation identity for recovering an
+	// account when a create response is ambiguous. HTTP account payloads never
+	// bind this field directly.
+	IdempotencyKey                string
 	ProbeEnabled                  *bool
 	// SkipDefaultGroupBind prevents auto-binding to platform default group when GroupIDs is empty.
 	SkipDefaultGroupBind bool

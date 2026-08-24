@@ -1,3 +1,4 @@
+@using System.Globalization
 @inject ApiClient Api
 
 <div class="page-header">
@@ -5,88 +6,270 @@
         <h1>用量记录</h1>
         <p>模型请求、Token 消耗与费用明细</p>
     </div>
-    <button type="button" class="button secondary" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="16" /> 刷新</button>
+    <button type="button" class="button secondary" disabled="@(activeTab == "usage" && loading)" @onclick="RefreshAsync"><Icon Name="refresh" Size="16" /> 刷新</button>
 </div>
 
-<div class="toolbar">
-    <div class="filter-field compact">
-        <label for="admin-usage-page-size">每页</label>
-        <select id="admin-usage-page-size" value="@pageSize" @onchange="PageSizeChangedAsync">
-            <option value="20">20 条</option>
-            <option value="50">50 条</option>
-            <option value="100">100 条</option>
-        </select>
+<div class="admin-usage-tabs" role="tablist" aria-label="用量详情视图">
+    <button type="button" id="admin-usage-tab-usage" role="tab" aria-selected="@(activeTab == "usage" ? "true" : "false")" aria-controls="admin-usage-panel-usage" tabindex="@(activeTab == "usage" ? 0 : -1)" class="@(activeTab == "usage" ? "active" : null)" @onclick='() => SwitchTab("usage")'><Icon Name="file-text" Size="16" /> 用量明细</button>
+    <button type="button" id="admin-usage-tab-errors" role="tab" aria-selected="@(activeTab == "errors" ? "true" : "false")" aria-controls="admin-usage-panel-errors" tabindex="@(activeTab == "errors" ? 0 : -1)" class="@(activeTab == "errors" ? "active" : null)" @onclick='() => SwitchTab("errors")'><Icon Name="alert" Size="16" /> 错误请求</button>
+    <button type="button" id="admin-usage-tab-ranking" role="tab" aria-selected="@(activeTab == "ranking" ? "true" : "false")" aria-controls="admin-usage-panel-ranking" tabindex="@(activeTab == "ranking" ? 0 : -1)" class="@(activeTab == "ranking" ? "active" : null)" @onclick='() => SwitchTab("ranking")'><Icon Name="users" Size="16" /> 用户排行</button>
+</div>
+
+<section class="admin-usage-filter-bar" aria-label="用量筛选">
+    <div class="admin-usage-filter-grid">
+        <div class="filter-field compact">
+            <label for="admin-usage-start-date">开始日期</label>
+            <input id="admin-usage-start-date" type="date" value="@draftStartDate" @onchange="args => draftStartDate = args.Value?.ToString() ?? string.Empty" />
+        </div>
+        <div class="filter-field compact">
+            <label for="admin-usage-end-date">结束日期</label>
+            <input id="admin-usage-end-date" type="date" value="@draftEndDate" @onchange="args => draftEndDate = args.Value?.ToString() ?? string.Empty" />
+        </div>
+        <div class="filter-field compact">
+            <label for="admin-usage-user-id">用户 ID</label>
+            <input id="admin-usage-user-id" type="number" min="1" inputmode="numeric" placeholder="全部用户" @bind="draftUserId" />
+        </div>
+        <div class="filter-field compact">
+            <label for="admin-usage-model">模型</label>
+            <input id="admin-usage-model" type="search" placeholder="全部模型" @bind="draftModel" />
+        </div>
+        @if (activeTab == "usage")
+        {
+            <div class="filter-field compact">
+                <label for="admin-usage-page-size">每页</label>
+                <select id="admin-usage-page-size" value="@pageSize" @onchange="PageSizeChangedAsync">
+                    <option value="20">20 条</option>
+                    <option value="50">50 条</option>
+                    <option value="100">100 条</option>
+                </select>
+            </div>
+        }
     </div>
-    <span class="result-count">共 @UiFormat.Integer(result?.Total ?? 0) 条记录</span>
-</div>
+    <div class="admin-usage-filter-actions">
+        <button type="button" class="button primary" disabled="@loading" @onclick="ApplyFiltersAsync"><Icon Name="search" Size="16" /> 查询</button>
+        <button type="button" class="button secondary" disabled="@loading" @onclick="ResetFiltersAsync"><Icon Name="rotate-ccw" Size="16" /> 重置</button>
+        @if (activeTab == "usage")
+        {
+            <span class="result-count">共 @UiFormat.Integer(result?.Total ?? 0) 条记录</span>
+        }
+    </div>
+</section>
 
-@if (loading)
+@if (filterMessage is not null)
 {
-    <LoadingState Text="正在载入用量记录" />
+    <div class="inline-alert warning" role="alert"><Icon Name="alert" Size="17" /><span>@filterMessage</span></div>
 }
-else if (error is not null)
+
+@if (activeTab == "usage")
 {
-    <ErrorState Message="@error" OnRetry="LoadAsync" />
+    <section id="admin-usage-panel-usage" role="tabpanel" aria-labelledby="admin-usage-tab-usage">
+        @if (loading)
+        {
+            <LoadingState Text="正在载入用量记录" />
+        }
+        else if (error is not null)
+        {
+            <ErrorState Message="@error" OnRetry="LoadUsageAsync" />
+        }
+        else if (result is null || result.Items.Count == 0)
+        {
+            <EmptyState Title="暂无用量记录" Description="所选范围内没有符合条件的 API 请求。" />
+        }
+        else
+        {
+            <div class="data-table-wrap wide-table">
+                <table class="data-table">
+                    <thead>
+                        <tr><th>时间</th><th>用户 / Key</th><th>模型</th><th>输入 Token</th><th>缓存写入</th><th>缓存读取</th><th>输出 Token</th><th>费用</th><th>耗时</th><th>状态</th><th>记录 ID</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in result.Items)
+                        {
+                            <tr @key="item.Id">
+                                <td data-label="时间">@UiFormat.DateTime(item.CreatedAt)</td>
+                                <td data-label="用户 / Key"><span class="primary-cell">@(string.IsNullOrWhiteSpace(item.UserEmail) ? "-" : item.UserEmail)</span><small>@(string.IsNullOrWhiteSpace(item.ApiKeyName) ? ShortId(item.ApiKeyId) : item.ApiKeyName)</small></td>
+                                <td data-label="模型"><span class="primary-cell">@item.PublicModel</span><small>@item.ProviderName</small></td>
+                                <td data-label="输入 Token" class="numeric-cell">@UiFormat.Integer(item.PromptTokens)</td>
+                                <td data-label="缓存写入 Token" class="numeric-cell">@UiFormat.Integer(item.CacheWriteTokens)</td>
+                                <td data-label="缓存读取 Token" class="numeric-cell">@UiFormat.Integer(item.CacheReadTokens)</td>
+                                <td data-label="输出 Token" class="numeric-cell">@UiFormat.Integer(item.CompletionTokens)</td>
+                                <td data-label="费用" class="numeric-cell">@UiFormat.Money(item.CostMicros)</td>
+                                <td data-label="耗时">@(item.DurationMs > 0 ? $"{item.DurationMs:N0} ms" : "-")</td>
+                                <td data-label="状态"><span class="status-badge @(item.Success ? "success" : "danger")" title="@item.ErrorCode">@(item.Success ? "成功" : $"失败 {item.StatusCode}")</span></td>
+                                <td data-label="记录 ID"><code class="request-id" title="@item.Id">@ShortId(item.Id)</code></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <nav class="pagination" aria-label="用量记录分页">
+                <button type="button" class="icon-button" title="上一页" aria-label="上一页" disabled="@(page <= 1 || loading)" @onclick="PreviousAsync"><Icon Name="chevron-left" Size="17" /></button>
+                <span>第 @(page) / @TotalPages 页</span>
+                <button type="button" class="icon-button" title="下一页" aria-label="下一页" disabled="@(page >= TotalPages || loading)" @onclick="NextAsync"><Icon Name="chevron-right" Size="17" /></button>
+            </nav>
+        }
+    </section>
 }
-else if (result is null || result.Items.Count == 0)
+else if (activeTab == "errors")
 {
-    <EmptyState Title="暂无用量记录" Description="API 请求完成后，Token 与费用信息会显示在这里。" />
+    <section id="admin-usage-panel-errors" role="tabpanel" aria-labelledby="admin-usage-tab-errors">
+        <AdminUsageErrorTab @key="contentVersion"
+                            StartDate="@selectedStartDate"
+                            EndDate="@selectedEndDate"
+                            UserId="@selectedUserId"
+                            Model="@selectedModel" />
+    </section>
 }
 else
 {
-    <div class="data-table-wrap wide-table">
-        <table class="data-table">
-            <thead>
-                <tr><th>时间</th><th>用户 / Key</th><th>模型</th><th>输入 Token</th><th>缓存写入</th><th>缓存读取</th><th>输出 Token</th><th>费用</th><th>耗时</th><th>状态</th><th>记录 ID</th></tr>
-            </thead>
-            <tbody>
-                @foreach (var item in result.Items)
-                {
-                    <tr @key="item.Id">
-                        <td data-label="时间">@UiFormat.DateTime(item.CreatedAt)</td>
-                        <td data-label="用户 / Key"><span class="primary-cell">@(string.IsNullOrWhiteSpace(item.UserEmail) ? "-" : item.UserEmail)</span><small>@(string.IsNullOrWhiteSpace(item.ApiKeyName) ? ShortId(item.ApiKeyId) : item.ApiKeyName)</small></td>
-                        <td data-label="模型"><span class="primary-cell">@item.PublicModel</span><small>@item.ProviderName</small></td>
-                        <td data-label="输入 Token" class="numeric-cell">@UiFormat.Integer(item.PromptTokens)</td>
-                        <td data-label="缓存写入 Token" class="numeric-cell">@UiFormat.Integer(item.CacheWriteTokens)</td>
-                        <td data-label="缓存读取 Token" class="numeric-cell">@UiFormat.Integer(item.CacheReadTokens)</td>
-                        <td data-label="输出 Token" class="numeric-cell">@UiFormat.Integer(item.CompletionTokens)</td>
-                        <td data-label="费用" class="numeric-cell">@UiFormat.Money(item.CostMicros)</td>
-                        <td data-label="耗时">@(item.DurationMs > 0 ? $"{item.DurationMs:N0} ms" : "-")</td>
-                        <td data-label="状态"><span class="status-badge @(item.Success ? "success" : "danger")" title="@item.ErrorCode">@(item.Success ? "成功" : $"失败 {item.StatusCode}")</span></td>
-                        <td data-label="记录 ID"><code class="request-id" title="@item.Id">@ShortId(item.Id)</code></td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
-    <nav class="pagination" aria-label="用量记录分页">
-        <button type="button" class="icon-button" title="上一页" aria-label="上一页" disabled="@(page <= 1 || loading)" @onclick="PreviousAsync"><Icon Name="chevron-left" Size="17" /></button>
-        <span>第 @(page) / @TotalPages 页</span>
-        <button type="button" class="icon-button" title="下一页" aria-label="下一页" disabled="@(page >= TotalPages || loading)" @onclick="NextAsync"><Icon Name="chevron-right" Size="17" /></button>
-    </nav>
+    <section id="admin-usage-panel-ranking" role="tabpanel" aria-labelledby="admin-usage-tab-ranking">
+        <AdminUsageRankingTab @key="contentVersion"
+                              StartDate="@selectedStartDate"
+                              EndDate="@selectedEndDate"
+                              UserId="@selectedUserId"
+                              Model="@selectedModel"
+                              OnSelectUser="SelectRankedUserAsync" />
+    </section>
 }
 
 @code {
+    [Parameter] public long? InitialUserId { get; set; }
+    [Parameter] public string? InitialStartDate { get; set; }
+    [Parameter] public string? InitialEndDate { get; set; }
+
     private PagedResult<UsageRecordDto>? result;
     private int page = 1;
     private int pageSize = 20;
     private bool loading = true;
     private string? error;
+    private string? filterMessage;
+    private string activeTab = "usage";
+    private int contentVersion;
+    private string draftStartDate = string.Empty;
+    private string draftEndDate = string.Empty;
+    private string draftUserId = string.Empty;
+    private string draftModel = string.Empty;
+    private string selectedStartDate = string.Empty;
+    private string selectedEndDate = string.Empty;
+    private long? selectedUserId;
+    private string selectedModel = string.Empty;
     private int TotalPages => Math.Max(1, result?.TotalPages > 0 ? result.TotalPages : (int)Math.Ceiling((result?.Total ?? 0) / (double)pageSize));
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override Task OnInitializedAsync()
+    {
+        SetDefaultDates();
+        if (TryParseDate(InitialStartDate, out _)) draftStartDate = InitialStartDate!;
+        if (TryParseDate(InitialEndDate, out _)) draftEndDate = InitialEndDate!;
+        if (InitialUserId is > 0) draftUserId = InitialUserId.Value.ToString(CultureInfo.InvariantCulture);
 
-    private async Task LoadAsync()
+        if (!TryCommitFilters())
+        {
+            SetDefaultDates();
+            _ = TryCommitFilters();
+        }
+        return LoadUsageAsync();
+    }
+
+    private async Task LoadUsageAsync()
     {
         loading = true;
         error = null;
-        try { result = await Api.GetUsageAsync(page, pageSize); if (result.Page > 0) page = result.Page; }
+        try
+        {
+            result = await Api.GetUsageAsync(new AdminUsageQuery
+            {
+                Page = page,
+                PageSize = pageSize,
+                UserId = selectedUserId,
+                Model = selectedModel,
+                StartDate = selectedStartDate,
+                EndDate = selectedEndDate,
+                Timezone = TimeZoneInfo.Local.Id
+            });
+            if (result.Page > 0) page = result.Page;
+        }
         catch (ApiException ex) { error = ex.Message; }
         finally { loading = false; }
     }
 
-    private async Task PageSizeChangedAsync(ChangeEventArgs args) { if (int.TryParse(args.Value?.ToString(), out var size)) pageSize = size; page = 1; await LoadAsync(); }
-    private async Task PreviousAsync() { if (page <= 1) return; page--; await LoadAsync(); }
-    private async Task NextAsync() { if (page >= TotalPages) return; page++; await LoadAsync(); }
+    private void SwitchTab(string tab) => activeTab = tab;
+
+    private Task RefreshAsync()
+    {
+        if (activeTab == "usage") return LoadUsageAsync();
+        contentVersion++;
+        return Task.CompletedTask;
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        if (!TryCommitFilters()) return;
+        page = 1;
+        if (activeTab == "usage") await LoadUsageAsync();
+        else contentVersion++;
+    }
+
+    private async Task ResetFiltersAsync()
+    {
+        SetDefaultDates();
+        draftUserId = string.Empty;
+        draftModel = string.Empty;
+        await ApplyFiltersAsync();
+    }
+
+    private bool TryCommitFilters()
+    {
+        filterMessage = null;
+        if (!TryParseDate(draftStartDate, out var start) || !TryParseDate(draftEndDate, out var end))
+        {
+            filterMessage = "请选择有效的开始和结束日期。";
+            return false;
+        }
+        if (start > end)
+        {
+            filterMessage = "开始日期不能晚于结束日期。";
+            return false;
+        }
+        if (end.DayNumber - start.DayNumber >= 30)
+        {
+            filterMessage = "错误请求接口单次最多查询 30 个自然日，请缩短日期范围。";
+            return false;
+        }
+        if (!string.IsNullOrWhiteSpace(draftUserId)
+            && (!long.TryParse(draftUserId, NumberStyles.None, CultureInfo.InvariantCulture, out var userId) || userId <= 0))
+        {
+            filterMessage = "用户 ID 必须是大于 0 的整数。";
+            return false;
+        }
+
+        selectedStartDate = draftStartDate;
+        selectedEndDate = draftEndDate;
+        selectedUserId = long.TryParse(draftUserId, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedUserId) ? parsedUserId : null;
+        selectedModel = draftModel.Trim();
+        return true;
+    }
+
+    private async Task SelectRankedUserAsync(AdminDashboardUserBreakdownItemDto user)
+    {
+        draftUserId = user.UserId.ToString(CultureInfo.InvariantCulture);
+        selectedUserId = user.UserId;
+        page = 1;
+        activeTab = "usage";
+        await LoadUsageAsync();
+    }
+
+    private void SetDefaultDates()
+    {
+        var now = DateTime.Now;
+        draftStartDate = DateOnly.FromDateTime(now.AddHours(-24)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        draftEndDate = DateOnly.FromDateTime(now).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    private static bool TryParseDate(string? value, out DateOnly date) =>
+        DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+
+    private async Task PageSizeChangedAsync(ChangeEventArgs args) { if (int.TryParse(args.Value?.ToString(), out var size)) pageSize = size; page = 1; await LoadUsageAsync(); }
+    private async Task PreviousAsync() { if (page <= 1) return; page--; await LoadUsageAsync(); }
+    private async Task NextAsync() { if (page >= TotalPages) return; page++; await LoadUsageAsync(); }
     private static string ShortId(string value) => string.IsNullOrWhiteSpace(value) ? "-" : value.Length <= 12 ? value : $"{value[..8]}…";
 }

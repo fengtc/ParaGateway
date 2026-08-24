@@ -25,6 +25,14 @@ public static class AccountModelRestrictions
                 "gpt-4o-audio-preview", "gpt-4o-realtime-preview",
                 "gpt-image-1", "gpt-image-1.5", "gpt-image-2"
             ],
+            ["copilot"] =
+            [
+                "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+                "o4-mini", "o3-mini", "claude-sonnet-4", "claude-sonnet-4-5",
+                "claude-sonnet-4-6", "claude-sonnet-5", "claude-opus-4-5",
+                "claude-opus-4-6", "claude-haiku-4-5", "claude-3.5-sonnet",
+                "gemini-2.0-flash-001"
+            ],
             ["anthropic"] =
             [
                 "claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20240620",
@@ -95,6 +103,13 @@ public static class AccountModelRestrictions
                 new("Opus -> 5.4", "claude-opus-4-6", "gpt-5.4"),
                 new("Sonnet -> 5.4", "claude-sonnet-4-6", "gpt-5.4")
             ],
+            ["copilot"] =
+            [
+                new("GPT-4.1", "gpt-4.1", "gpt-4.1"),
+                new("Sonnet 4.6", "claude-sonnet-4-6", "claude-sonnet-4-6"),
+                new("Opus 4.6", "claude-opus-4-6", "claude-opus-4-6"),
+                new("Gemini Flash", "gemini-2.0-flash-001", "gemini-2.0-flash-001")
+            ],
             ["anthropic"] =
             [
                 new("Sonnet 5", "claude-sonnet-5", "claude-sonnet-5"),
@@ -128,7 +143,8 @@ public static class AccountModelRestrictions
     {
         platform = platform?.Trim().ToLowerInvariant();
         type = type?.Trim().ToLowerInvariant();
-        if (platform is null or "copilot") return false;
+        if (platform is null) return false;
+        if (platform == "copilot") return type is "oauth" or "apikey";
         if (platform == "antigravity") return type is "oauth" or "apikey";
         if (type is "apikey" or "bedrock" or "service_account") return true;
         return type == "oauth" && platform is "openai" or "grok";

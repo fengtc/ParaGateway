@@ -2,16 +2,16 @@
 @inject ApiClient Api
 @inject ToastService Toasts
 
-<PageTitle>上游账号 · ParaGateway</PageTitle>
+<PageTitle>兼容上游连接 · ParaGateway</PageTitle>
 
 <div class="page-header">
     <div>
-        <h1>上游账号</h1>
+        <h1>兼容上游连接</h1>
         <p>独立管理 OpenAI 与 Claude 兼容连接；此处数据不属于“账号管理”。</p>
     </div>
     <div class="page-header-actions">
         <a class="button secondary" href="/admin/accounts"><Icon Name="users" Size="17" /> 账号管理</a>
-        <button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 新建上游账号</button>
+        <button type="button" class="button primary" @onclick="OpenCreate"><Icon Name="plus" Size="17" /> 新建兼容连接</button>
     </div>
 </div>
 
@@ -23,7 +23,7 @@
 <div class="toolbar">
     <div class="search-box">
         <Icon Name="search" Size="17" />
-        <input value="@search" @oninput="SearchChanged" placeholder="搜索名称或 API 地址" aria-label="搜索上游账号" />
+        <input value="@search" @oninput="SearchChanged" placeholder="搜索名称或 API 地址" aria-label="搜索兼容上游连接" />
     </div>
     <select value="@providerFilter" @onchange="ProviderFilterChanged" aria-label="上游类型筛选">
         <option value="">全部类型</option>
@@ -41,7 +41,7 @@
 
 @if (loading)
 {
-    <LoadingState Text="正在载入上游账号" />
+    <LoadingState Text="正在载入兼容上游连接" />
 }
 else if (error is not null)
 {
@@ -49,12 +49,12 @@ else if (error is not null)
 }
 else if (FilteredAccounts.Count == 0)
 {
-    <EmptyState Title="@(string.IsNullOrWhiteSpace(search) ? "还没有上游账号" : "没有匹配的账号")"
+    <EmptyState Title="@(string.IsNullOrWhiteSpace(search) ? "还没有兼容上游连接" : "没有匹配的连接")"
                 Description="@(string.IsNullOrWhiteSpace(search) ? "添加独立的 OpenAI 或 Claude 连接以建立上游池。" : "请调整关键词或筛选条件。")">
         <Action>
             @if (string.IsNullOrWhiteSpace(search))
             {
-                <button type="button" class="button primary small" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> 新建上游账号</button>
+                <button type="button" class="button primary small" @onclick="OpenCreate"><Icon Name="plus" Size="16" /> 新建兼容连接</button>
             }
         </Action>
     </EmptyState>
@@ -128,7 +128,7 @@ else
     </div>
 }
 
-<AppModal Open="editorOpen" Title="@(editingId is null ? "新建上游账号" : "编辑上游账号")" MaxWidth="760px" OnClose="CloseEditor">
+<AppModal Open="editorOpen" Title="@(editingId is null ? "新建兼容上游连接" : "编辑兼容上游连接")" MaxWidth="760px" OnClose="CloseEditor">
     <ChildContent>
         <EditForm id="upstream-account-editor" Model="form" OnValidSubmit="SaveAsync" FormName="upstream-account-editor">
             <DataAnnotationsValidator />
@@ -195,7 +195,7 @@ else
     </Footer>
 </AppModal>
 
-<AppModal Open="deleteOpen" Title="删除上游账号" MaxWidth="480px" OnClose="CloseDelete">
+<AppModal Open="deleteOpen" Title="删除兼容上游连接" MaxWidth="480px" OnClose="CloseDelete">
     <ChildContent>
         <p>确定删除“<strong>@deleting?.Name</strong>”吗？账号将从独立上游池移除，原“账号管理”数据不受影响。</p>
         @if (modalError is not null) { <div class="inline-alert danger"><Icon Name="alert" Size="18" /><span>@modalError</span></div> }
@@ -299,7 +299,7 @@ else
         {
             if (editingId is null) await Api.CreateUpstreamAccountAsync(form);
             else await Api.UpdateUpstreamAccountAsync(editingId, form);
-            editorOpen = false; Toasts.Success(editingId is null ? "上游账号已创建" : "上游账号已更新"); await LoadAsync();
+            editorOpen = false; Toasts.Success(editingId is null ? "兼容上游连接已创建" : "兼容上游连接已更新"); await LoadAsync();
         }
         catch (ApiException ex) { modalError = ex.Message; }
         finally { saving = false; }
@@ -354,7 +354,7 @@ else
     {
         if (deleting is null) return;
         saving = true; modalError = null;
-        try { await Api.DeleteUpstreamAccountAsync(deleting.Id); deleteOpen = false; Toasts.Success("上游账号已删除"); deleting = null; await LoadAsync(); }
+        try { await Api.DeleteUpstreamAccountAsync(deleting.Id); deleteOpen = false; Toasts.Success("兼容上游连接已删除"); deleting = null; await LoadAsync(); }
         catch (ApiException ex) { modalError = ex.Message; }
         finally { saving = false; }
     }

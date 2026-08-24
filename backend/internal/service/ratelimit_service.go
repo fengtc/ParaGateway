@@ -251,6 +251,9 @@ const (
 // 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) ErrorPolicyResult {
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
+	if isAuthoritativeCopilotMonthlyQuotaResponse(account, statusCode, responseBody) {
+		return ErrorPolicyNone
+	}
 	if account.IsCustomErrorCodesEnabled() {
 		if account.ShouldHandleErrorCode(statusCode) {
 			return ErrorPolicyMatched
@@ -279,6 +282,10 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
 	s.maybeHandleOpenAITeamLinkedError(ctx, account, statusCode, responseBody)
+	if isAuthoritativeCopilotMonthlyQuotaResponse(account, statusCode, responseBody) {
+		s.handleCopilotMonthlyQuotaExceeded(ctx, account)
+		return true
+	}
 	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled()
 
 	// 池模式默认不标记本地账号状态；但管理员显式配置的临时不可调度规则优先。
@@ -504,6 +511,56 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	}
 
 	return shouldDisable
+}
+
+func isCopilotMonthlyQuotaExceededResponse(responseBody []byte) bool {
+	for _, path := range []string{"error.code", "response.error.code"} {
+		if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(responseBody, path).String()), "quota_exceeded") {
+			return true
+		}
+	}
+	return false
+}
+
+func isAuthoritativeCopilotMonthlyQuotaResponse(account *Account, statusCode int, responseBody []byte) bool {
+	return account != nil &&
+		account.IsGitHubCopilot() &&
+		statusCode == http.StatusPaymentRequired &&
+		isCopilotMonthlyQuotaExceededResponse(responseBody)
+}
+
+func (s *RateLimitService) handleCopilotMonthlyQuotaExceeded(ctx context.Context, account *Account) {
+	if s == nil || account == nil {
+		return
+	}
+	now := time.Now().UTC()
+	until := nextCopilotMonthlyQuotaReset(now)
+	reason := CopilotMonthlyQuotaExceededReason
+	markCopilotBillingGuardExhausted(account)
+	account.TempUnschedulableUntil = &until
+	account.TempUnschedulableReason = reason
+	s.notifyAccountSchedulingBlocked(account, until, reason)
+
+	if s.accountRepo == nil {
+		slog.Error("copilot_monthly_quota_repo_unavailable", "account_id", account.ID, "until", until)
+		return
+	}
+	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+		slog.Error("copilot_monthly_quota_set_temp_unschedulable_failed", "account_id", account.ID, "until", until, "error", err)
+		return
+	}
+	if s.tempUnschedCache != nil {
+		state := &TempUnschedState{
+			UntilUnix:       until.Unix(),
+			TriggeredAtUnix: now.Unix(),
+			StatusCode:      http.StatusPaymentRequired,
+			RuleIndex:       -1,
+			ErrorMessage:    reason,
+		}
+		if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
+			slog.Warn("copilot_monthly_quota_cache_set_failed", "account_id", account.ID, "error", err)
+		}
+	}
 }
 
 // PreCheckUsage proactively checks local quota before dispatching a request.
@@ -2045,6 +2102,9 @@ func (s *RateLimitService) GetTempUnschedStatus(ctx context.Context, accountID i
 
 func (s *RateLimitService) HandleTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) bool {
 	if account == nil {
+		return false
+	}
+	if isAuthoritativeCopilotMonthlyQuotaResponse(account, statusCode, responseBody) {
 		return false
 	}
 	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
