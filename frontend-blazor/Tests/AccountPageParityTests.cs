@@ -279,10 +279,27 @@ public sealed class AccountPageParityTests
 
         Assert.Contains("A @UiFormat.Usd(stats.Cost)", quotaCell, StringComparison.Ordinal);
         Assert.Contains("var stats = item.Window.WindowStats ?? new AccountUsageWindowStatsDto();", quotaCell, StringComparison.Ordinal);
-        Assert.Contains("\"openai\" => account.Type == \"oauth\"", page, StringComparison.Ordinal);
+        Assert.Contains("\"openai\" => account.Type == \"oauth\" && !IsCopilot(account)", page, StringComparison.Ordinal);
         Assert.Contains("U @UiFormat.Usd(stats.UserCost)", quotaCell, StringComparison.Ordinal);
         Assert.DoesNotContain("UiFormat.Usd(todayStats.StandardCost)", quotaCell, StringComparison.Ordinal);
         Assert.DoesNotContain("UiFormat.Usd(stats.StandardCost)", quotaCell, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CopilotUsesBillingCapacityAndHidesOfficialUsageWindows()
+    {
+        var page = Read("Pages", "Providers.razor");
+        var quotaCell = Read("Components", "AccountQuotaUsageCell.razor");
+        var dto = Read("Models", "Dtos.cs");
+        Assert.Contains("copilot_billing_usage", dto, StringComparison.Ordinal);
+        Assert.Contains("CopilotBillingUsageDto", dto, StringComparison.Ordinal);
+        Assert.Contains("FormatCopilotCredits(CopilotBillingUsed(row)) / @FormatCopilotCredits(CopilotBillingLimit(row)) AI", page, StringComparison.Ordinal);
+        Assert.Contains("DefaultCopilotBillingCreditLimit = 20_000", page, StringComparison.Ordinal);
+        Assert.Contains("@if (IsOfficialUsageAccount && !IsCopilot)", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("\"openai\" => Account.Type == \"oauth\" && !IsCopilot", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("else if (!IsCopilot && HasLegacyQuota)", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("SupportsUsageWindows", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("CopilotBillingUsage", quotaCell, StringComparison.Ordinal);
     }
 
     [Theory]

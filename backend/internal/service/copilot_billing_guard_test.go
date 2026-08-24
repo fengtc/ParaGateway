@@ -51,6 +51,45 @@ func TestValidateCopilotBillingPATParsesCamelCaseUsageAndRedactsPAT(t *testing.T
 	require.NotContains(t, string(payload), "billing-secret")
 }
 
+func TestGetCopilotBillingUsageSnapshotAggregatesAndCaches(t *testing.T) {
+	copilotBillingUsageCache.Clear()
+	t.Cleanup(copilotBillingUsageCache.Clear)
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		require.Equal(t, "/users/octocat/settings/billing/ai_credit/usage", r.URL.Path)
+		require.NotEmpty(t, r.URL.Query().Get("year"))
+		require.NotEmpty(t, r.URL.Query().Get("month"))
+		require.Equal(t, "Bearer billing-snapshot-token", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, "{\"user\":\"octocat\",\"usageItems\":[{\"grossQuantity\":120.5,\"grossAmount\":1.25,\"netQuantity\":118,\"netAmount\":1.1},{\"grossQuantity\":79.5,\"grossAmount\":0.75,\"netQuantity\":78,\"netAmount\":0.7}]}")
+	}))
+	defer server.Close()
+
+	account := newCopilotGatewayTestAccount()
+	account.ID = 9201
+	account.Credentials["billing_username"] = "octocat"
+	account.Credentials["billing_pat"] = "billing-snapshot-token"
+	oauthService := &OpenAIOAuthService{
+		copilotEndpoints: copilotOAuthEndpoints{billingAPIBaseURL: server.URL},
+	}
+
+	first := oauthService.GetCopilotBillingUsageSnapshot(context.Background(), account)
+	require.NotNil(t, first)
+	require.Equal(t, "octocat", first.Username)
+	require.Equal(t, 200.0, first.GrossQuantity)
+	require.Equal(t, 196.0, first.NetQuantity)
+	require.EqualValues(t, 2, first.ItemsCount)
+
+	second := oauthService.GetCopilotBillingUsageSnapshot(context.Background(), account)
+	require.Same(t, first, second)
+	require.EqualValues(t, 1, calls.Load())
+
+	payload, err := json.Marshal(first)
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), "billing-snapshot-token")
+}
 func TestCopilotBillingGuardDisabledStillHonorsAuthoritativeQuota(t *testing.T) {
 	copilotBillingGuardCache.Clear()
 	t.Cleanup(copilotBillingGuardCache.Clear)

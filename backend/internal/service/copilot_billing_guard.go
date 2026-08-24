@@ -56,6 +56,113 @@ type CopilotBillingValidationResult struct {
 	NetAmount     float64        `json:"net_amount"`
 }
 
+// CopilotBillingUsageSnapshot is the safe, aggregate monthly Billing payload
+// exposed to the admin account list. It intentionally contains no PAT or
+// other credential material.
+type CopilotBillingUsageSnapshot struct {
+	Username      string  `json:"username"`
+	Period        string  `json:"period"`
+	ItemsCount    int     `json:"items_count"`
+	GrossQuantity float64 `json:"gross_quantity"`
+	GrossAmount   float64 `json:"gross_amount"`
+	NetQuantity   float64 `json:"net_quantity"`
+	NetAmount     float64 `json:"net_amount"`
+	FetchedAt     string  `json:"fetched_at"`
+}
+
+type copilotBillingUsageCacheEntry struct {
+	snapshot  *CopilotBillingUsageSnapshot
+	expiresAt time.Time
+}
+
+var copilotBillingUsageCache sync.Map
+var copilotBillingUsageFetchGroup singleflight.Group
+
+// GetCopilotBillingUsageSnapshot returns the current month's aggregate GitHub
+// Billing usage for a Copilot account. A short-lived, credential-scoped cache
+// prevents every account-list refresh from issuing another upstream request.
+func (s *OpenAIOAuthService) GetCopilotBillingUsageSnapshot(ctx context.Context, account *Account) *CopilotBillingUsageSnapshot {
+	if s == nil || account == nil || !account.IsGitHubCopilot() {
+		return nil
+	}
+	username, token := copilotBillingGuardCredentials(account)
+	if username == "" || token == "" {
+		return nil
+	}
+	s.ensureCopilotRuntime()
+	now := time.Now().UTC()
+	period := fmt.Sprintf("%04d-%02d", now.Year(), int(now.Month()))
+	tokenHash := sha256.Sum256([]byte(token))
+	proxyURL := copilotBillingProxyURL(account)
+	baseURL := strings.TrimRight(strings.TrimSpace(s.copilotEndpoints.billingAPIBaseURL), "/")
+	cacheKey := fmt.Sprintf("%d:%s:%s:%s:%s:%x", account.ID, period, username, baseURL, proxyURL, tokenHash[:8])
+	if cached, ok := copilotBillingUsageCache.Load(cacheKey); ok {
+		if entry, valid := cached.(copilotBillingUsageCacheEntry); valid && entry.snapshot != nil && now.Before(entry.expiresAt) {
+			return entry.snapshot
+		}
+		copilotBillingUsageCache.Delete(cacheKey)
+	}
+
+	result, err, _ := copilotBillingUsageFetchGroup.Do(cacheKey, func() (any, error) {
+		fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		usage, _, _, fetchErr := fetchGitHubBillingAIUsage(
+			fetchCtx,
+			s.copilotEndpoints.billingAPIBaseURL,
+			username,
+			token,
+			proxyURL,
+			now.Year(),
+			int(now.Month()),
+		)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		return summarizeCopilotBillingUsage(usage, username, period, now), nil
+	})
+	if err != nil {
+		slog.Debug("copilot_billing_usage_fetch_failed", "account_id", account.ID, "error", err)
+		return nil
+	}
+	snapshot, ok := result.(*CopilotBillingUsageSnapshot)
+	if !ok || snapshot == nil {
+		return nil
+	}
+	copilotBillingUsageCache.Store(cacheKey, copilotBillingUsageCacheEntry{
+		snapshot:  snapshot,
+		expiresAt: now.Add(copilotBillingNormalCacheTTL),
+	})
+	return snapshot
+}
+
+func summarizeCopilotBillingUsage(
+	usage *githubBillingUsageResponse,
+	fallbackUsername string,
+	period string,
+	fetchedAt time.Time,
+) *CopilotBillingUsageSnapshot {
+	if usage == nil {
+		return nil
+	}
+	username := strings.TrimSpace(usage.User)
+	if username == "" {
+		username = strings.TrimSpace(fallbackUsername)
+	}
+	snapshot := &CopilotBillingUsageSnapshot{
+		Username:   username,
+		Period:     period,
+		ItemsCount: len(usage.UsageItems),
+		FetchedAt:  fetchedAt.UTC().Format(time.RFC3339),
+	}
+	for _, item := range usage.UsageItems {
+		snapshot.GrossQuantity += item.GrossQuantity
+		snapshot.GrossAmount += item.GrossAmount
+		snapshot.NetQuantity += item.NetQuantity
+		snapshot.NetAmount += item.NetAmount
+	}
+	return snapshot
+}
+
 // ValidateCopilotBillingPAT verifies a fine-grained PAT against GitHub's AI
 // Credits endpoint through the selected proxy.
 func (s *OpenAIOAuthService) ValidateCopilotBillingPAT(

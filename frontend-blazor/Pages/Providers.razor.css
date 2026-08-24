@@ -43,6 +43,7 @@
 .account-name-cell { min-width: 180px; }
 .account-name-cell strong { overflow: hidden; max-width: 240px; text-overflow: ellipsis; font-size: .85rem; font-weight: 650; }
 .account-name-cell small, .capacity-cell small, .today-stats small, .proxy-cell small, .expiry-cell small { color: var(--muted); font-size: .8rem; }
+.copilot-billing-capacity { width: fit-content; padding: 3px 6px; color: #2878b8; background: color-mix(in srgb, #3b82f6 14%, transparent); border-radius: 5px; font-size: .78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .accounts-data-table code { color: var(--muted); background: transparent; font-size: .83rem; }
 .platform-stack { display: grid; justify-items: start; gap: 4px; }
 .platform-stack > small { color: var(--muted); font-size: .76rem; }

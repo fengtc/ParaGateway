@@ -182,7 +182,26 @@
                                     @if (IsColumnVisible("platform")) { <td><div class="platform-stack"><span class="platform-badge @(IsCopilot(row) ? "platform-copilot" : $"platform-{row.Platform}")">@AccountPlatformLabel(row)</span><small>@AccountTypeLabel(row)</small>@if (row.ParentAccountId.HasValue) { <span class="shadow-badge">@row.QuotaDimension 影子</span> }</div></td> }
                                     @if (IsColumnVisible("endpoint")) { <td><div class="endpoint-cell"><code title="@AccountBaseUrl(row)">@AccountBaseUrl(row)</code></div></td> }
                                     @if (IsColumnVisible("auth")) { <td><div class="auth-cell"><strong>@AuthenticationLabel(row)</strong><small class="@(CredentialConfigured(row) ? "configured" : "missing")">@(CredentialConfigured(row) ? "凭据已配置" : "凭据待补充")</small></div></td> }
-                                    @if (IsColumnVisible("capacity")) { <td><div class="capacity-cell" title="并发上限与负载因子由原账号调度器使用；实时评分由后端动态计算。"><strong>@row.CurrentConcurrency / @row.Concurrency</strong><small>当前 / 并发上限</small>@if (row.LoadFactor.HasValue) { <small>负载因子 @row.LoadFactor</small> }@if (row.ActiveSessions.HasValue) { <small>会话 @row.ActiveSessions</small> }@if (row.CurrentRpm.HasValue) { <small>当前 RPM @row.CurrentRpm</small> }</div></td> }
+                                    @if (IsColumnVisible("capacity"))
+                                    {
+                                        <td>
+                                            <div class="capacity-cell" title="@(IsCopilot(row) ? "GitHub Copilot 本月 AI Credits 用量与并发容量。" : "并发上限与负载因子由原账号调度器使用；实时评分由后端动态计算。")">
+                                                <strong>@row.CurrentConcurrency / @row.Concurrency</strong>
+                                                <small>当前 / 并发上限</small>
+                                                @if (IsCopilot(row) && row.CopilotBillingUsage is not null)
+                                                {
+                                                    <strong class="copilot-billing-capacity">@FormatCopilotCredits(CopilotBillingUsed(row)) / @FormatCopilotCredits(CopilotBillingLimit(row)) AI</strong>
+                                                    <small>本月已用 / AI 总量</small>
+                                                }
+                                                else
+                                                {
+                                                    @if (row.LoadFactor.HasValue) { <small>负载因子 @row.LoadFactor</small> }
+                                                    @if (row.ActiveSessions.HasValue) { <small>会话 @row.ActiveSessions</small> }
+                                                    @if (row.CurrentRpm.HasValue) { <small>当前 RPM @row.CurrentRpm</small> }
+                                                }
+                                            </div>
+                                        </td>
+                                    }
                                     @if (IsColumnVisible("status")) { <td><span class="status-badge @StatusClass(row)" title="@StatusTitle(row)">@StatusLabel(row)</span></td> }
                                     @if (IsColumnVisible("schedulable")) { <td class="schedule-column"><button type="button" class="schedule-switch @(row.Schedulable ? "on" : null)" role="switch" aria-checked="@row.Schedulable.ToString().ToLowerInvariant()" aria-label="切换 @row.Name 调度" title="@(row.Schedulable ? "暂停调度" : "恢复调度")" disabled="@busy" @onclick="() => ToggleSchedulingAsync(row)"></button></td> }
                                     @if (IsColumnVisible("today")) { <td>@if (todayStats.TryGetValue(row.Id, out var stats)) { <div class="today-stats"><strong>@UiFormat.Usd(stats.StandardCost)</strong><small>@stats.Requests 次 · @stats.Tokens token</small></div> } else { <div class="today-stats"><strong>@UiFormat.Usd(0)</strong><small>0 次 · 0 token</small></div> }</td> }
@@ -639,7 +658,7 @@
     private static bool SupportsUsageWindows(AccountDto account) => account.Platform switch
     {
         "anthropic" => account.Type is "oauth" or "setup-token",
-        "openai" => account.Type == "oauth",
+        "openai" => account.Type == "oauth" && !IsCopilot(account),
         "gemini" => true,
         "antigravity" or "grok" => account.Type == "oauth",
         _ => false
@@ -1207,6 +1226,15 @@
     private static double? ReadExtraNumber(AccountDto row, string key) =>
         row.Extra is not null && row.Extra.TryGetValue(key, out var value)
         && value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) ? number : null;
+    private const double DefaultCopilotBillingCreditLimit = 20_000;
+    private static double CopilotBillingUsed(AccountDto row) => row.CopilotBillingUsage?.GrossQuantity ?? 0;
+    private static double CopilotBillingLimit(AccountDto row)
+    {
+        var configured = ReadExtraNumber(row, "billing_credit_limit");
+        return configured is > 0 ? configured.Value : DefaultCopilotBillingCreditLimit;
+    }
+    private static string FormatCopilotCredits(double value) =>
+        value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
     private static bool HasCredentialStatus(AccountDto row, params string[] keys) =>
         row.CredentialsStatus is not null
         && keys.Any(key => row.CredentialsStatus.TryGetValue(key, out var configured) && configured);

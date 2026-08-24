@@ -17,7 +17,7 @@
         </div>
     }
 
-    @if (IsOfficialUsageAccount)
+    @if (IsOfficialUsageAccount && !IsCopilot)
     {
         @if (UsageLoading && CurrentUsage is null)
         {
@@ -104,7 +104,7 @@
             </button>
         }
     }
-    else if (HasLegacyQuota)
+    else if (!IsCopilot && HasLegacyQuota)
     {
         @LegacyWindow("日", Account.QuotaDailyUsed, Account.QuotaDailyLimit)
         @LegacyWindow("周", Account.QuotaWeeklyUsed, Account.QuotaWeeklyLimit)
@@ -159,12 +159,14 @@
     private string? CurrentError => localError ?? UsageError ?? (string.IsNullOrWhiteSpace(CurrentUsage?.Error) ? null : CurrentUsage.Error);
     private string AccountMode => ReadCredential("account_mode");
     private string OAuthProfile => ReadCredential("oauth_profile");
-    private bool IsCopilot => string.Equals(OAuthProfile, "github_copilot", StringComparison.OrdinalIgnoreCase);
+    private bool IsCopilot => string.Equals(Account.Platform, "copilot", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(OAuthProfile, "github_copilot", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(ReadExtraString("oauth_profile"), "github_copilot", StringComparison.OrdinalIgnoreCase);
     private bool IsOpenAIOAuth => Account.Platform == "openai" && Account.Type == "oauth" && !IsCopilot;
     private bool IsOfficialUsageAccount => Account.Platform switch
     {
         "anthropic" => Account.Type is "oauth" or "setup-token",
-        "openai" => Account.Type == "oauth",
+        "openai" => Account.Type == "oauth" && !IsCopilot,
         "gemini" => true,
         "antigravity" or "grok" => Account.Type == "oauth",
         _ => false

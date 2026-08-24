@@ -208,9 +208,10 @@ type AccountWithConcurrency struct {
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
 	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
-	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
-	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
-	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	CurrentWindowCost   *float64                             `json:"current_window_cost,omitempty"` // 当前窗口费用
+	ActiveSessions      *int                                 `json:"active_sessions,omitempty"`     // 当前活跃会话数
+	CurrentRPM          *int                                 `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	CopilotBillingUsage *service.CopilotBillingUsageSnapshot `json:"copilot_billing_usage,omitempty"`
 }
 
 type AccountSchedulerScore struct {
@@ -276,6 +277,10 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 				item.CurrentRPM = &rpm
 			}
 		}
+	}
+
+	if h.openaiOAuthService != nil && account.IsGitHubCopilot() {
+		item.CopilotBillingUsage = h.openaiOAuthService.GetCopilotBillingUsageSnapshot(ctx, account)
 	}
 
 	h.enrichShadowParents(ctx, []AccountWithConcurrency{item})
@@ -573,6 +578,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 	var windowCosts map[int64]float64
 	var activeSessions map[int64]int
 	var rpmCounts map[int64]int
+	var copilotBilling map[int64]*service.CopilotBillingUsageSnapshot
 	// 双重门控：用户要看该列，且当前页确实有 OpenAI 账号，才进入昂贵的候选池打分路径。
 	var schedulerScores map[int64]*AccountSchedulerScore
 	var schedulerGroupScores map[int64][]AccountSchedulerGroupScore
@@ -660,6 +666,36 @@ func (h *AccountHandler) List(c *gin.Context) {
 		_ = g.Wait()
 	}
 
+	// GitHub Copilot uses monthly AI Credits rather than the ChatGPT 5h/7d
+	// usage windows. Fetch the aggregate Billing snapshot in a bounded batch
+	// so the account list can render used / configured AI credits.
+	if h.openaiOAuthService != nil {
+		copilotAccounts := make([]*service.Account, 0)
+		for i := range accounts {
+			if accounts[i].IsGitHubCopilot() {
+				copilotAccounts = append(copilotAccounts, &accounts[i])
+			}
+		}
+		if len(copilotAccounts) > 0 {
+			copilotBilling = make(map[int64]*service.CopilotBillingUsageSnapshot, len(copilotAccounts))
+			var mu sync.Mutex
+			g, gctx := errgroup.WithContext(c.Request.Context())
+			g.SetLimit(8)
+			for _, account := range copilotAccounts {
+				account := account
+				g.Go(func() error {
+					if snapshot := h.openaiOAuthService.GetCopilotBillingUsageSnapshot(gctx, account); snapshot != nil {
+						mu.Lock()
+						copilotBilling[account.ID] = snapshot
+						mu.Unlock()
+					}
+					return nil
+				})
+			}
+			_ = g.Wait()
+		}
+	}
+
 	// Build response with concurrency info
 	result := make([]AccountWithConcurrency, len(accounts))
 	for i := range accounts {
@@ -690,6 +726,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 			if rpm, ok := rpmCounts[acc.ID]; ok {
 				item.CurrentRPM = &rpm
 			}
+		}
+		if copilotBilling != nil {
+			item.CopilotBillingUsage = copilotBilling[acc.ID]
 		}
 
 		result[i] = item

@@ -128,6 +128,39 @@ public sealed class V0178ApiContractTests
         Assert.True(AccountDto.From(account).OllamaCloudUsage?.AutoRefreshEnabled);
     }
 
+    [Fact]
+    public void CopilotBillingUsageSnapshotMapsFromAccountListDto()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var account = JsonSerializer.Deserialize<GoAccount>("""
+            {
+              "id": 43,
+              "name": "Copilot",
+              "platform": "openai",
+              "type": "oauth",
+              "credentials": { "oauth_profile": "github_copilot" },
+              "extra": { "billing_credit_limit": 20000 },
+              "copilot_billing_usage": {
+                "username": "octocat",
+                "period": "2026-08",
+                "items_count": 2,
+                "gross_quantity": 123.5,
+                "gross_amount": 1.23,
+                "net_quantity": 120.0,
+                "net_amount": 1.2,
+                "fetched_at": "2026-08-25T01:00:00Z"
+              }
+            }
+            """, options);
+
+        Assert.NotNull(account);
+        var mapped = AccountDto.From(account);
+        Assert.Equal("octocat", mapped.CopilotBillingUsage?.Username);
+        Assert.Equal("2026-08", mapped.CopilotBillingUsage?.Period);
+        Assert.Equal(123.5, mapped.CopilotBillingUsage?.GrossQuantity);
+        Assert.Equal(20000, mapped.Extra?["billing_credit_limit"].GetDouble());
+    }
+
     private static ApiClient CreateApi(HttpMessageHandler handler) =>
         new(new HttpClient(handler) { BaseAddress = new Uri("https://paragateway.test") }, new NullJsRuntime());
 

@@ -22,6 +22,27 @@ func setupAccountListRouter() (*gin.Engine, *stubAdminService) {
 	return router, adminSvc
 }
 
+func TestAccountWithConcurrencySerializesCopilotBillingUsage(t *testing.T) {
+	item := AccountWithConcurrency{
+		CopilotBillingUsage: &service.CopilotBillingUsageSnapshot{
+			Username:      "octocat",
+			Period:        "2026-08",
+			ItemsCount:    1,
+			GrossQuantity: 4000,
+			NetQuantity:   4000,
+			FetchedAt:     "2026-08-25T01:00:00Z",
+		},
+	}
+	payload, err := json.Marshal(item)
+	require.NoError(t, err)
+	var body map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(payload, &body))
+	var usage map[string]any
+	require.NoError(t, json.Unmarshal(body["copilot_billing_usage"], &usage))
+	require.Equal(t, "octocat", usage["username"])
+	require.Equal(t, float64(4000), usage["gross_quantity"])
+	require.NotContains(t, string(payload), "billing_pat")
+}
 func TestAccountHandlerListIncludesCreatedAt(t *testing.T) {
 	router, adminSvc := setupAccountListRouter()
 

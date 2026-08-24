@@ -1773,6 +1773,7 @@ public sealed class GoAccount
     [JsonPropertyName("credentials_status")] public Dictionary<string, bool>? CredentialsStatus { get; set; }
     public Dictionary<string, JsonElement>? Extra { get; set; }
     [JsonPropertyName("ollama_cloud_usage")] public OllamaCloudUsageStateDto? OllamaCloudUsage { get; set; }
+    [JsonPropertyName("copilot_billing_usage")] public CopilotBillingUsageDto? CopilotBillingUsage { get; set; }
     [JsonPropertyName("proxy_id")] public long? ProxyId { get; set; }
     public int Concurrency { get; set; }
     [JsonPropertyName("load_factor")] public int? LoadFactor { get; set; }
@@ -1852,6 +1853,7 @@ public sealed class AccountDto
     public Dictionary<string, bool>? CredentialsStatus { get; set; }
     public Dictionary<string, JsonElement>? Extra { get; set; }
     public OllamaCloudUsageStateDto? OllamaCloudUsage { get; set; }
+    public CopilotBillingUsageDto? CopilotBillingUsage { get; set; }
     public List<long> GroupIds { get; set; } = [];
     public List<GoGroup> Groups { get; set; } = [];
     public ProxyDto? Proxy { get; set; }
@@ -1890,7 +1892,7 @@ public sealed class AccountDto
             LastUsedAt = account.LastUsedAt, CreatedAt = account.CreatedAt, ExpiresAt = account.ExpiresAt,
             AutoPauseOnExpired = account.AutoPauseOnExpired, ProxyId = account.ProxyId,
             Credentials = account.Credentials, CredentialsStatus = account.CredentialsStatus, Extra = account.Extra,
-            OllamaCloudUsage = account.OllamaCloudUsage,
+            OllamaCloudUsage = account.OllamaCloudUsage, CopilotBillingUsage = account.CopilotBillingUsage,
             GroupIds = account.GroupIds is { Count: > 0 } ? account.GroupIds : (account.Groups ?? []).Select(x => x.Id).ToList(),
             Groups = account.Groups ?? [], Proxy = account.Proxy,
             RateLimitedAt = account.RateLimitedAt, RateLimitResetAt = account.RateLimitResetAt,
@@ -1905,6 +1907,19 @@ public sealed class AccountDto
             QuotaDimension = account.QuotaDimension, ParentEmail = account.ParentEmail
         };
     }
+}
+
+/// <summary>GitHub Copilot 本月 AI Credits 官方账单快照。</summary>
+public sealed class CopilotBillingUsageDto
+{
+    public string Username { get; set; } = string.Empty;
+    public string Period { get; set; } = string.Empty;
+    [JsonPropertyName("items_count")] public int ItemsCount { get; set; }
+    [JsonPropertyName("gross_quantity")] public double GrossQuantity { get; set; }
+    [JsonPropertyName("gross_amount")] public double GrossAmount { get; set; }
+    [JsonPropertyName("net_quantity")] public double NetQuantity { get; set; }
+    [JsonPropertyName("net_amount")] public double NetAmount { get; set; }
+    [JsonPropertyName("fetched_at")] public string FetchedAt { get; set; } = string.Empty;
 }
 
 public sealed class AccountListQuery
