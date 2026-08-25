@@ -109,11 +109,17 @@ public sealed class ApplicationShellParityTests
     }
 
     [Fact]
-    public void AdminDashboardModelDistributionUsesSolidPieChart()
+    public void AdminDashboardModelDistributionUsesRankedHorizontalBars()
     {
         var dashboard = ReadSource("Components", "AdminDashboardPanel.razor");
 
-        Assert.Contains("<DxPieChart Data=\"@ModelRows\" InnerDiameter=\"0\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("<DxChart T=\"ModelDistributionRow\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("Data=\"@ModelDistributionRows\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("Rotated=\"true\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("<DxChartBarSeries T=\"ModelDistributionRow\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("<DxChartArgumentAxis Inverted=\"true\" />", dashboard, StringComparison.Ordinal);
+        Assert.Contains("class=\"distribution-layout model-distribution-layout\"", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("<DxPieChart Data=\"@ModelRows\"", dashboard, StringComparison.Ordinal);
     }
 
     [Fact]

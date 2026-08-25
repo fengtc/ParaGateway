@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Reflection;
 using ParaGateway.Frontend.Models;
 using Xunit;
 
@@ -49,6 +50,73 @@ public sealed class AdminDashboardPageTests
     }
 
     [Fact]
+    public void AdminDashboardModelDistributionShowsRankedSharesAndPreservesDrillDown()
+    {
+        var dashboard = ReadSource("Components", "AdminDashboardPanel.razor");
+        var styles = ReadSource("Components", "AdminDashboardPanel.razor.css");
+
+        Assert.Contains("ModelDistributionLimit = 6", dashboard, StringComparison.Ordinal);
+        Assert.Contains("ModelDistributionLabelLimit = 24", dashboard, StringComparison.Ordinal);
+        Assert.Contains("OtherModelsLabel = \"其他模型\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("Take(ModelDistributionLimit)", dashboard, StringComparison.Ordinal);
+        Assert.Contains("Skip(ModelDistributionLimit)", dashboard, StringComparison.Ordinal);
+        Assert.Contains("ModelDistributionRows.Count == 0", dashboard, StringComparison.Ordinal);
+        Assert.Contains("ValueFormat=\"ChartElementFormat.Percent(1)\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("Format=\"ChartElementFormat.Percent(0)\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("dashboard-chart-card model-distribution-card", dashboard, StringComparison.Ordinal);
+        Assert.Contains(".model-distribution-card", styles, StringComparison.Ordinal);
+        Assert.Contains("overflow: visible;", styles, StringComparison.Ordinal);
+        Assert.Contains("<th>占比</th>", dashboard, StringComparison.Ordinal);
+        Assert.Contains("GetModelShare(model.TotalTokens)", dashboard, StringComparison.Ordinal);
+        Assert.Contains("RefreshModelDistribution();", dashboard, StringComparison.Ordinal);
+        Assert.Contains("modelTotalTokens = modelRows.Sum", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("ModelRows.Sum", dashboard, StringComparison.Ordinal);
+        Assert.Contains("colspan=\"7\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("SeriesClick=\"OnModelDistributionClick\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("row?.Source is not null", dashboard, StringComparison.Ordinal);
+        Assert.Contains("await ToggleModelBreakdownAsync(row.Source)", dashboard, StringComparison.Ordinal);
+        Assert.Contains("CreateUniqueModelChartLabel(item.Model, chartLabels)", dashboard, StringComparison.Ordinal);
+        Assert.Contains("OtherModelsLabel}（汇总）", dashboard, StringComparison.Ordinal);
+        Assert.Contains("item.Model?.Trim()", dashboard, StringComparison.Ordinal);
+        Assert.Contains("CreateUniqueModelChartLabel(otherChartLabel, chartLabels)", dashboard, StringComparison.Ordinal);
+        Assert.Equal(3, dashboard.Split("otherChartLabel", StringSplitOptions.None).Length - 1);
+        Assert.Contains("title=\"@row.FullLabel\"", dashboard, StringComparison.Ordinal);
+        Assert.Contains("model-distribution-table", styles, StringComparison.Ordinal);
+        Assert.Contains("model-distribution-layout", styles, StringComparison.Ordinal);
+        Assert.Equal(2, styles.Split(".model-distribution-layout {", StringSplitOptions.None).Length - 1);
+        Assert.Contains("flex-direction: column;", styles, StringComparison.Ordinal);
+        Assert.Contains(".model-distribution-layout .model-distribution-chart", styles, StringComparison.Ordinal);
+        Assert.Contains(".dxc-arg-elements text", styles, StringComparison.Ordinal);
+        Assert.Contains(".dxc-val-elements text", styles, StringComparison.Ordinal);
+        Assert.Contains("fill: var(--muted) !important;", styles, StringComparison.Ordinal);
+        Assert.Contains(".dxbl-chart-tooltip-content-container", styles, StringComparison.Ordinal);
+        Assert.Contains("background: var(--surface);", styles, StringComparison.Ordinal);
+        Assert.Contains("min-width: 680px;", styles, StringComparison.Ordinal);
+        Assert.Contains("max-height: 230px;", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AdminDashboardModelLabelsPreserveUnicodeTextElementsAndRemainUnique()
+    {
+        var method = typeof(ParaGateway.Frontend.Components.AdminDashboardPanel).GetMethod(
+            "CreateUniqueModelChartLabel",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var usedLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var model = string.Concat(Enumerable.Repeat("😀", 30));
+        var first = Assert.IsType<string>(method.Invoke(null, [model, usedLabels]));
+        var second = Assert.IsType<string>(method.Invoke(null, [model, usedLabels]));
+
+        Assert.Equal(24, System.Globalization.StringInfo.ParseCombiningCharacters(first).Length);
+        Assert.Equal(24, System.Globalization.StringInfo.ParseCombiningCharacters(second).Length);
+        Assert.Equal(first, System.Text.Encoding.UTF8.GetString(System.Text.Encoding.UTF8.GetBytes(first)));
+        Assert.Equal(second, System.Text.Encoding.UTF8.GetString(System.Text.Encoding.UTF8.GetBytes(second)));
+        Assert.NotEqual(first, second);
+        Assert.EndsWith(" (2)", second, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AdminDashboardUsesSnapshotAndRankingEndpoints()
     {
         var dashboard = ReadSource("Components", "AdminDashboardPanel.razor");
@@ -72,7 +140,7 @@ public sealed class AdminDashboardPageTests
         var styles = ReadSource("Components", "AdminDashboardPanel.razor.css");
 
         Assert.Equal(2, dashboard.Split("<DxChartLegend Visible=\"false\" />", StringSplitOptions.None).Length - 1);
-        Assert.Equal(2, dashboard.Split("Position=\"RelativePosition.Outside\"", StringSplitOptions.None).Length - 1);
+        Assert.Equal(3, dashboard.Split("Position=\"RelativePosition.Outside\"", StringSplitOptions.None).Length - 1);
         Assert.Contains("Color=\"@series.ChartColor\"", dashboard, StringComparison.Ordinal);
         Assert.Contains("UserTrendPalette", dashboard, StringComparison.Ordinal);
         Assert.DoesNotContain("admin-chart-legend", dashboard, StringComparison.Ordinal);

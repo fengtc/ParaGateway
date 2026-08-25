@@ -164,7 +164,7 @@
         </section>
 
         <div class="dashboard-chart-grid">
-            <section class="dashboard-card dashboard-chart-card">
+            <section class="dashboard-card dashboard-chart-card model-distribution-card">
                 <div class="dashboard-card-heading chart-heading">
                     <h2>@(activeDistributionView == "models" ? "模型分布" : "用户消费榜")</h2>
                     <div class="segmented-control" role="group" aria-label="分布视图">
@@ -175,36 +175,83 @@
 
                 @if (activeDistributionView == "models")
                 {
-                    @if (ModelRows.Count == 0)
+                    @if (ModelDistributionRows.Count == 0)
                     {
                         <div class="dashboard-empty">暂无数据</div>
                     }
                     else
                     {
-                        <div class="distribution-layout">
-                            <div class="distribution-chart">
-                                <DxPieChart Data="@ModelRows" InnerDiameter="0" Width="100%" Height="210px">
-                                    <DxPieChartSeries T="AdminDashboardModelStatDto"
+                        <div class="distribution-layout model-distribution-layout">
+                            <div class="distribution-chart model-distribution-chart" aria-label="模型 Token 占比">
+                                <DxChart T="ModelDistributionRow"
+                                         Data="@ModelDistributionRows"
+                                         Rotated="true"
+                                         Width="100%"
+                                         Height="230px"
+                                         CustomizeSeriesPoint="CustomizeModelDistributionPoint"
+                                         SeriesClick="OnModelDistributionClick">
+                                    <DxChartBarSeries T="ModelDistributionRow"
                                                       TArgument="string"
-                                                      TValue="long"
-                                                      ArgumentField="item => item.Model"
-                                                      ValueField="item => item.TotalTokens" />
+                                                      TValue="double"
+                                                      Name="Token 占比"
+                                                      Color="@ModelDistributionColor"
+                                                      ArgumentField="item => item.Label"
+                                                      ValueField="item => item.TokenShare"
+                                                      BarPadding="0.32"
+                                                      CornerRadius="3">
+                                        <DxChartSeriesLabel Visible="true"
+                                                            Position="RelativePosition.Outside"
+                                                            ValueFormat="ChartElementFormat.Percent(1)" />
+                                    </DxChartBarSeries>
+                                    <DxChartArgumentAxis Inverted="true" />
+                                    <DxChartValueAxis>
+                                        <DxChartAxisRange StartValue="0" EndValue="1" />
+                                        <DxChartAxisLabel Format="ChartElementFormat.Percent(0)" />
+                                    </DxChartValueAxis>
                                     <DxChartLegend Visible="false" />
-                                    <DxChartTooltip Enabled="true" />
-                                </DxPieChart>
+                                    <DxChartTooltip Enabled="true">
+                                        @{
+                                            var row = context.Point.DataItems.OfType<ModelDistributionRow>().FirstOrDefault();
+                                        }
+                                        @if (row is not null)
+                                        {
+                                            <div class="model-distribution-tooltip">
+                                                <strong title="@row.FullLabel">@row.FullLabel</strong>
+                                                <dl>
+                                                    <div><dt>占比</dt><dd>@FormatPercent(row.TokenShare * 100)</dd></div>
+                                                    <div><dt>Token</dt><dd>@FormatTokens(row.TotalTokens)</dd></div>
+                                                    <div><dt>请求</dt><dd>@FormatNumber(row.Requests)</dd></div>
+                                                    <div><dt>实际费用</dt><dd>$@FormatCost(row.ActualCost)</dd></div>
+                                                    <div><dt>账号成本</dt><dd>$@FormatCost(row.AccountCost)</dd></div>
+                                                    <div><dt>标准费用</dt><dd>$@FormatCost(row.Cost)</dd></div>
+                                                    @if (row.IsOther)
+                                                    {
+                                                        <div><dt>汇总模型</dt><dd>@ModelDistributionOtherCount</dd></div>
+                                                    }
+                                                </dl>
+                                            </div>
+                                        }
+                                    </DxChartTooltip>
+                                </DxChart>
                             </div>
-                            <div class="compact-table-wrap">
-                                <table class="compact-dashboard-table">
-                                    <thead><tr><th>模型</th><th>请求</th><th>Token</th><th>实际</th><th>账号成本</th><th>标准</th></tr></thead>
+                            <div class="compact-table-wrap model-distribution-table-wrap">
+                                <table class="compact-dashboard-table model-distribution-table">
+                                    <thead><tr><th>模型</th><th>请求</th><th>Token</th><th>占比</th><th>实际</th><th>账号成本</th><th>标准</th></tr></thead>
                                     <tbody>
                                         @foreach (var model in ModelRows)
                                         {
                                             <tr class="clickable-row model-row"
                                                 title="查看该模型的用户用量明细"
                                                 @onclick="() => ToggleModelBreakdownAsync(model)">
-                                                <td title="@model.Model"><span class="model-expand-indicator">@(expandedModel == model.Model ? "⌄" : "›")</span>@model.Model</td>
+                                                <td title="@model.Model">
+                                                    <span class="model-name-cell">
+                                                        <span class="model-expand-indicator">@(expandedModel == model.Model ? "⌄" : "›")</span>
+                                                        <span class="model-name-text">@model.Model</span>
+                                                    </span>
+                                                </td>
                                                 <td>@FormatNumber(model.Requests)</td>
                                                 <td>@FormatTokens(model.TotalTokens)</td>
+                                                <td class="model-share">@FormatPercent(GetModelShare(model.TotalTokens))</td>
                                                 <td class="success-text">$@FormatCost(model.ActualCost)</td>
                                                 <td class="account-cost">$@FormatCost(model.AccountCost)</td>
                                                 <td>$@FormatCost(model.Cost)</td>
@@ -212,7 +259,7 @@
                                             @if (expandedModel == model.Model)
                                             {
                                                 <tr class="model-breakdown-row">
-                                                    <td colspan="6">
+                                                    <td colspan="7">
                                                         @if (modelBreakdownLoading)
                                                         {
                                                             <div class="model-breakdown-state">正在载入用户明细…</div>
@@ -231,6 +278,7 @@
                                                                             <td title="@user.Email">@(string.IsNullOrWhiteSpace(user.Email) ? $"用户 #{user.UserId}" : user.Email)</td>
                                                                             <td>@FormatNumber(user.Requests)</td>
                                                                             <td>@FormatTokens(user.TotalTokens)</td>
+                                                                            <td class="model-share">@FormatPercent(GetModelShare(user.TotalTokens))</td>
                                                                             <td class="success-text">$@FormatCost(user.ActualCost)</td>
                                                                             <td class="account-cost">$@FormatCost(user.AccountCost)</td>
                                                                             <td>$@FormatCost(user.Cost)</td>
@@ -373,11 +421,82 @@
     private int loadGeneration;
     private int breakdownGeneration;
     private bool disposed;
+    private IReadOnlyList<AdminDashboardModelStatDto> modelRows = [];
+    private IReadOnlyList<ModelDistributionRow> modelDistributionRows = [];
+    private long modelTotalTokens;
+    private int modelDistributionOtherCount;
 
     private AdminDashboardStats Stats => snapshot?.Stats ?? new AdminDashboardStats();
 
-    private IReadOnlyList<AdminDashboardModelStatDto> ModelRows =>
-        snapshot?.Models.OrderByDescending(item => item.TotalTokens).ToList() ?? [];
+    private IReadOnlyList<AdminDashboardModelStatDto> ModelRows => modelRows;
+
+    private const int ModelDistributionLimit = 6;
+    private const int ModelDistributionLabelLimit = 24;
+    private const string OtherModelsLabel = "其他模型";
+    private static readonly System.Drawing.Color ModelDistributionColor = System.Drawing.Color.FromArgb(22, 126, 99);
+    private static readonly System.Drawing.Color ModelDistributionOtherColor = System.Drawing.Color.FromArgb(125, 136, 131);
+
+    private long ModelTotalTokens => modelTotalTokens;
+
+    private int ModelDistributionOtherCount => modelDistributionOtherCount;
+
+    private IReadOnlyList<ModelDistributionRow> ModelDistributionRows => modelDistributionRows;
+
+    private void RefreshModelDistribution()
+    {
+        modelRows = snapshot?.Models
+            .OrderByDescending(item => item.TotalTokens)
+            .ThenByDescending(item => item.Requests)
+            .ThenBy(item => item.Model, StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+        modelTotalTokens = modelRows.Sum(item => Math.Max(item.TotalTokens, 0));
+
+        var models = modelRows.Where(item => item.TotalTokens > 0).ToList();
+        modelDistributionOtherCount = Math.Max(models.Count - ModelDistributionLimit, 0);
+        if (models.Count == 0)
+        {
+            modelDistributionRows = [];
+            return;
+        }
+
+        var totalTokens = models.Sum(item => item.TotalTokens);
+        var chartLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rows = models.Take(ModelDistributionLimit)
+            .Select(item => new ModelDistributionRow(
+                CreateUniqueModelChartLabel(item.Model, chartLabels),
+                item.Model,
+                item.Requests,
+                item.TotalTokens,
+                item.ActualCost,
+                item.AccountCost,
+                item.Cost,
+                item.TotalTokens / (double)totalTokens,
+                false,
+                item))
+            .ToList();
+
+        var otherModels = models.Skip(ModelDistributionLimit).ToList();
+        if (otherModels.Count > 0)
+        {
+            var otherTokens = otherModels.Sum(item => item.TotalTokens);
+            var otherChartLabel = models.Any(item => string.Equals(item.Model?.Trim(), OtherModelsLabel, StringComparison.OrdinalIgnoreCase))
+                ? $"{OtherModelsLabel}（汇总）"
+                : OtherModelsLabel;
+            rows.Add(new ModelDistributionRow(
+                CreateUniqueModelChartLabel(otherChartLabel, chartLabels),
+                otherChartLabel,
+                otherModels.Sum(item => item.Requests),
+                otherTokens,
+                otherModels.Sum(item => item.ActualCost),
+                otherModels.Sum(item => item.AccountCost),
+                otherModels.Sum(item => item.Cost),
+                otherTokens / (double)totalTokens,
+                true,
+                null));
+        }
+
+        modelDistributionRows = rows;
+    }
 
     private static readonly UserTrendColor[] UserTrendPalette =
     [
@@ -496,6 +615,7 @@
                 nextSnapshot.Stats = snapshot?.Stats;
             }
             snapshot = nextSnapshot;
+            RefreshModelDistribution();
         }
         if (nextRanking is not null) ranking = nextRanking;
         if (snapshotError is not null) error = snapshotError;
@@ -539,6 +659,21 @@
         var start = Uri.EscapeDataString(startDate.ToString("yyyy-MM-dd"));
         var end = Uri.EscapeDataString(endDate.ToString("yyyy-MM-dd"));
         Navigation.NavigateTo($"/admin/usage?user_id={row.UserId}&start_date={start}&end_date={end}");
+    }
+
+    private async Task OnModelDistributionClick(ChartSeriesClickEventArgs args)
+    {
+        var row = args.Point?.DataItems.OfType<ModelDistributionRow>().FirstOrDefault();
+        if (row?.Source is not null)
+            await ToggleModelBreakdownAsync(row.Source);
+    }
+
+    private static void CustomizeModelDistributionPoint(ChartSeriesPointCustomizationSettings settings)
+    {
+        var row = settings.Point.DataItems.OfType<ModelDistributionRow>().FirstOrDefault();
+        settings.PointAppearance.Color = row?.IsOther == true
+            ? ModelDistributionOtherColor
+            : ModelDistributionColor;
     }
 
     private async Task ToggleModelBreakdownAsync(AdminDashboardModelStatDto model)
@@ -630,6 +765,34 @@
 
     private static string FormatNumber(long value) => value.ToString("N0");
 
+    private double GetModelShare(long tokens) => ModelTotalTokens > 0
+        ? Math.Max(tokens, 0) * 100d / ModelTotalTokens
+        : 0;
+
+    private static string CreateUniqueModelChartLabel(string value, ISet<string> usedLabels)
+    {
+        var fullLabel = string.IsNullOrWhiteSpace(value) ? "未命名模型" : value.Trim();
+        var textElementIndexes = System.Globalization.StringInfo.ParseCombiningCharacters(fullLabel);
+        for (var index = 1; ; index++)
+        {
+            var suffix = index == 1 ? string.Empty : $" ({index})";
+            var prefixLimit = Math.Max(4, ModelDistributionLabelLimit - suffix.Length);
+            var prefix = textElementIndexes.Length <= prefixLimit
+                ? fullLabel
+                : $"{fullLabel[..textElementIndexes[prefixLimit - 3]]}...";
+            var candidate = prefix + suffix;
+            if (usedLabels.Add(candidate)) return candidate;
+        }
+    }
+
+    private static string FormatPercent(double value) => value switch
+    {
+        >= 10 => $"{value:0.0}%",
+        >= 1 => $"{value:0.00}%",
+        > 0 => $"{value:0.000}%",
+        _ => "0.0%"
+    };
+
     private static string FormatTokens(long value) => value switch
     {
         >= 1_000_000_000 => $"{value / 1_000_000_000d:0.00}B",
@@ -665,6 +828,18 @@
         string Name,
         List<AdminDashboardUserTrendPointDto> Points,
         System.Drawing.Color ChartColor);
+
+    private sealed record ModelDistributionRow(
+        string Label,
+        string FullLabel,
+        long Requests,
+        long TotalTokens,
+        double ActualCost,
+        double AccountCost,
+        double Cost,
+        double TokenShare,
+        bool IsOther,
+        AdminDashboardModelStatDto? Source);
 
     public sealed record RankingDisplayRow(
         long UserId,
