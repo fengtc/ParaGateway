@@ -148,7 +148,7 @@
 .announcement-popup-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 120;
+    z-index: 1000;
     display: flex;
     padding: 24px 20px;
     align-items: center;

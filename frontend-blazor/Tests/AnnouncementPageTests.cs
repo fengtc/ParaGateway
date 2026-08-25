@@ -17,6 +17,7 @@ public sealed class AnnouncementPageTests
         var program = ReadSource("Program.cs");
 
         Assert.Contains("<AnnouncementBell ViewerId=\"@Auth.User.Id\"", layout, StringComparison.Ordinal);
+        Assert.Contains("<SectionOutlet SectionName=\"announcement-overlays\" />", layout, StringComparison.Ordinal);
         Assert.DoesNotContain("href=\"/announcements\" title=\"公告\"", layout, StringComparison.Ordinal);
         Assert.Contains("Announcements.Reset()", layout, StringComparison.Ordinal);
         Assert.Contains("AddScoped<AnnouncementService>", program, StringComparison.Ordinal);
@@ -24,6 +25,7 @@ public sealed class AnnouncementPageTests
         foreach (var text in new[] { "条未读公告", "全部标记已读", "暂无公告", "公告详情", "标记已读", "未读公告" })
             Assert.Contains(text, bell, StringComparison.Ordinal);
         Assert.Contains("Announcements.CurrentPopup", bell, StringComparison.Ordinal);
+        Assert.Contains("<SectionContent SectionName=\"announcement-overlays\">", bell, StringComparison.Ordinal);
         Assert.Contains("data-testid=\"announcement-popup-dismiss\"", bell, StringComparison.Ordinal);
         Assert.Contains("announcement-popup-title-row", bell, StringComparison.Ordinal);
         Assert.Contains("announcement-popup-read", bell, StringComparison.Ordinal);
@@ -44,6 +46,7 @@ public sealed class AnnouncementPageTests
         Assert.Contains("min-height: 0; max-height: none;", styles, StringComparison.Ordinal);
         Assert.Contains("flex: 1 1 auto; overflow-y: auto;", styles, StringComparison.Ordinal);
         Assert.Contains("overscroll-behavior: contain;", styles, StringComparison.Ordinal);
+        Assert.Contains("z-index: 1000;", styles, StringComparison.Ordinal);
         Assert.DoesNotContain("padding: 8vh 20px 24px;", styles, StringComparison.Ordinal);
     }
 

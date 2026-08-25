@@ -17,6 +17,7 @@
     }
 </button>
 
+<SectionContent SectionName="announcement-overlays">
 <AppModal Open="@listOpen" Title="公告" MaxWidth="620px" OnClose="CloseList">
     <ChildContent>
         <div class="announcement-modal-summary">
@@ -105,6 +106,7 @@
         </section>
     </div>
 }
+</SectionContent>
 
 @code {
     [Parameter] public string? ViewerId { get; set; }
