@@ -60,8 +60,14 @@ $taskTemp = (Resolve-Path .tmp).Path
 $env:TEMP = $taskTemp
 $env:TMP = $taskTemp
 dotnet test frontend-blazor\Tests\ParaGateway.Frontend.Tests.csproj --no-restore --nologo
-dotnet publish frontend-blazor\ParaGateway.Frontend.csproj -c Release -o .tmp\frontend-publish-final --no-restore -p:UseAppHost=false --nologo
+$commit = (git rev-parse HEAD).Trim()
+.\deploy\production\build-frontend-archive.ps1 -Commit $commit
 ```
+
+归档脚本会从当前进程的 `DevExpress_License`、`DEVEXPRESS_LICENSE_FILE` 或
+`%APPDATA%\DevExpress\DevExpress_License.txt` 读取许可证，只注入当前构建进程；
+它会先清理前端 Release 缓存，并在发现 `DX1000/DX1001/DX1002` 评估警告时停止，
+不会把许可证文件写入前端归档。不要绕过该脚本直接生成生产前端归档。
 
 将完整发布目录同步到 `deploy/standalone/data/frontend`，确认静态入口位于
 `data/frontend/wwwroot/index.html` 后，在服务器执行：

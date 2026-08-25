@@ -26,6 +26,25 @@ public sealed class DeploymentScriptTests
         Assert.Contains("flush_interval -1", caddy, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void FrontendArchiveRequiresAndTemporarilyInjectsDevExpressLicense()
+    {
+        var script = ReadSource("deploy", "production", "build-frontend-archive.ps1");
+
+        Assert.Contains("DevExpress_License", script, StringComparison.Ordinal);
+        Assert.Contains("DEVEXPRESS_LICENSE_FILE", script, StringComparison.Ordinal);
+        Assert.Contains("DevExpress\\DevExpress_License.txt", script, StringComparison.Ordinal);
+        Assert.Contains("DevExpress 许可证为空", script, StringComparison.Ordinal);
+        Assert.Contains("DX1000|DX1001|DX1002|For evaluation purposes only", script, StringComparison.Ordinal);
+        Assert.Contains("DevExpress 许可证未被构建接受", script, StringComparison.Ordinal);
+        Assert.Contains("dotnet clean", script, StringComparison.Ordinal);
+        Assert.Contains("Remove-Item -LiteralPath $publishLog", script, StringComparison.Ordinal);
+        Assert.Contains("前端归档生成失败", script, StringComparison.Ordinal);
+        Assert.Contains("SetEnvironmentVariable(\"DevExpress_License\", $licenseValue, \"Process\")", script, StringComparison.Ordinal);
+        Assert.Contains("finally", script, StringComparison.Ordinal);
+        Assert.Contains("SetEnvironmentVariable(\"DevExpress_License\", $restoreLicenseValue, \"Process\")", script, StringComparison.Ordinal);
+    }
+
     private static string ReadSource(params string[] parts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
