@@ -10,10 +10,12 @@
 - 发布目录：`/opt/paragateway/releases/<release>`
 - 配置目录：`/etc/paragateway/<release>`
 
-候选实例必须使用只读数据库副本或临时数据库快照。`deploy-candidate.sh` 要求 `CANDIDATE_ENV_FILE`，并拒绝候选环境与生产环境使用相同数据库主机和库名。`promote.sh` 不执行数据库迁移。
+候选实例必须使用只读数据库副本或临时数据库快照。`deploy-candidate.sh` 要求候选与生产的 PostgreSQL 主机和库名组合不同、候选 Redis 使用独立 DB（默认 `15`），并为每个候选实例创建独立的 `/var/lib/paragateway-backend-<release>` 数据目录。`promote.sh` 不执行数据库迁移。
 
 ```bash
 export CANDIDATE_ENV_FILE=/etc/paragateway/candidate-readonly.env
+export PRODUCTION_ENV_FILE=/etc/paragateway/<production-release>/backend.env
+export PRODUCTION_CONFIG_FILE=/etc/paragateway/<production-release>/config.yaml
 export FRONTEND_ARCHIVE=/var/tmp/paragateway-frontend-<commit>.tar.gz
 ./deploy-candidate.sh <commit>
 ./verify-candidate.sh <release>
