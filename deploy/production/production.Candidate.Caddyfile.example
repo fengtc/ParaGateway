@@ -8,8 +8,9 @@
   root * %RELEASE_ROOT%
   @backend path /api /api/* /v1 /v1/* /models /models/* /health /setup/status
   handle @backend {
-    reverse_proxy 127.0.0.1:8284
-    flush_interval -1
+    reverse_proxy 127.0.0.1:8284 {
+      flush_interval -1
+    }
   }
   handle {
     try_files {path} /index.html

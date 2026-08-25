@@ -8,6 +8,7 @@ public sealed class DeploymentScriptTests
     public void CandidateDeploymentEnforcesDataStoreIsolation()
     {
         var script = ReadSource("deploy", "production", "deploy-candidate.sh");
+        var caddy = ReadSource("deploy", "production", "production.Candidate.Caddyfile.example");
 
         Assert.Contains("production_config=${PRODUCTION_CONFIG_FILE:-/etc/paragateway/production-config.yaml}", script, StringComparison.Ordinal);
         Assert.Contains("candidate REDIS_DB must be", script, StringComparison.Ordinal);
@@ -18,6 +19,11 @@ public sealed class DeploymentScriptTests
         Assert.Contains("DATA_DIR=/var/lib/paragateway-backend-%s", script, StringComparison.Ordinal);
         Assert.Contains("EnvironmentFile=/etc/paragateway/%s/data.env", script, StringComparison.Ordinal);
         Assert.Contains("ReadWritePaths=\\nReadWritePaths=/var/lib/paragateway-backend-%s", script, StringComparison.Ordinal);
+        Assert.Contains("sudo -u sub2api /usr/bin/caddy validate", script, StringComparison.Ordinal);
+        Assert.Contains("systemctl start \"paragateway-backend@$release.service\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("systemctl enable --now", script, StringComparison.Ordinal);
+        Assert.Contains("reverse_proxy 127.0.0.1:8284 {", caddy, StringComparison.Ordinal);
+        Assert.Contains("flush_interval -1", caddy, StringComparison.Ordinal);
     }
 
     private static string ReadSource(params string[] parts)

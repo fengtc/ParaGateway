@@ -49,6 +49,7 @@ install -o root -g root -m 600 "$candidate_env" "/etc/paragateway/$release/backe
 install -o root -g sub2api -m 640 "$production_config" "/etc/paragateway/$release/config.yaml"
 cp "$(dirname "$0")/production.Candidate.Caddyfile.example" "/etc/paragateway/$release/Caddyfile"
 sed -i "s#127.0.0.1:8184#127.0.0.1:8284#g; s#127.0.0.1:8182#127.0.0.1:8282#g; s#%RELEASE_ROOT%#$release_dir/frontend/wwwroot#g" "/etc/paragateway/$release/Caddyfile"
+sudo -u sub2api /usr/bin/caddy validate --config "/etc/paragateway/$release/Caddyfile" --adapter caddyfile
 install -o root -g root -m 644 "$(dirname "$0")/paragateway-backend@.service" /etc/systemd/system/
 install -o root -g root -m 644 "$(dirname "$0")/paragateway-gateway@.service" /etc/systemd/system/
 dropin_dir="/etc/systemd/system/paragateway-backend@$release.service.d"
@@ -58,5 +59,5 @@ install -o root -g root -m 600 "$data_env_tmp" "/etc/paragateway/$release/data.e
 printf '[Service]\nEnvironmentFile=/etc/paragateway/%s/data.env\nReadWritePaths=\nReadWritePaths=/var/lib/paragateway-backend-%s\n' "$release" "$release" > "$dropin_tmp"
 install -o root -g root -m 644 "$dropin_tmp" "$dropin_dir/data.conf"
 systemctl daemon-reload
-systemctl enable --now "paragateway-backend@$release.service" "paragateway-gateway@$release.service"
+systemctl start "paragateway-backend@$release.service" "paragateway-gateway@$release.service"
 echo "$release"
