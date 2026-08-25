@@ -245,7 +245,7 @@
                                 }
                                 @if (IsColumnVisible("balance"))
                                 {
-                                    <td><div class="balance-cell"><button type="button" class="link-cell money" title="查看余额历史" @onclick="() => OpenHistoryAsync(user)">@Money(user.Balance)</button><button type="button" class="inline-action success" @onclick='() => OpenBalance(user, "add")'>充值</button></div></td>
+                                    <td><div class="balance-cell"><button type="button" class="link-cell money" title="查看余额历史" @onclick="() => OpenHistoryAsync(user)">@BalanceMoney(user.Balance)</button><button type="button" class="inline-action success" @onclick='() => OpenBalance(user, "add")'>充值</button></div></td>
                                 }
                                 @if (IsColumnVisible("balance_platform_quota"))
                                 {
@@ -466,8 +466,8 @@
     <ChildContent>
         @if (actionUser is not null)
         {
-            <div class="modal-user-summary"><span class="user-avatar">@Initial(actionUser.Email)</span><span><strong>@actionUser.Email</strong><small>当前余额：@Money(actionUser.Balance)</small></span></div>
-            <div class="form-grid"><div class="form-field full"><label>金额（USD）</label><div class="input-action-row"><InputNumber @bind-Value="balanceAmount" min="0" step="any" />@if (balanceOperation == "subtract") { <button type="button" class="button secondary" @onclick="FillAllBalance">全部扣除</button> }</div></div><div class="form-field full"><label>备注</label><InputTextArea @bind-Value="balanceNotes" rows="3" /></div>@if (balanceAmount > 0) { <div class="balance-preview full"><span>操作后余额</span><strong>@Money(PreviewBalance)</strong></div> }</div>
+            <div class="modal-user-summary"><span class="user-avatar">@Initial(actionUser.Email)</span><span><strong>@actionUser.Email</strong><small>当前余额：@BalanceMoney(actionUser.Balance)</small></span></div>
+            <div class="form-grid"><div class="form-field full"><label>金额（USD）</label><div class="input-action-row"><InputNumber @bind-Value="balanceAmount" min="0" step="any" />@if (balanceOperation == "subtract") { <button type="button" class="button secondary" @onclick="FillAllBalance">全部扣除</button> }</div></div><div class="form-field full"><label>备注</label><InputTextArea @bind-Value="balanceNotes" rows="3" /></div>@if (balanceAmount > 0) { <div class="balance-preview full"><span>操作后余额</span><strong>@BalanceMoney(PreviewBalance)</strong></div> }</div>
         }
         @if (modalError is not null) { <div class="inline-alert danger">@modalError</div> }
     </ChildContent>
@@ -476,8 +476,8 @@
 
 <AppModal Open="historyOpen" Title="余额与权益历史" MaxWidth="820px" OnClose="CloseHistory">
     <ChildContent>
-        @if (actionUser is not null) { <div class="history-user-summary"><div class="modal-user-summary"><span class="user-avatar">@Initial(actionUser.Email)</span><span><strong>@actionUser.Email</strong><small>创建于 @FormatDateTime(actionUser.CreatedAt)</small></span></div><div><small>当前余额</small><strong>@Money(actionUser.Balance)</strong></div></div> }
-        <div class="history-toolbar"><select value="@historyType" @onchange="HistoryTypeChangedAsync"><option value="">全部类型</option><option value="balance">兑换充值</option><option value="affiliate_balance">邀请返利</option><option value="admin_balance">管理员调整余额</option><option value="concurrency">兑换并发</option><option value="admin_concurrency">管理员调整并发</option><option value="subscription">订阅分配</option></select><button type="button" class="button secondary small" @onclick='() => OpenBalanceFromHistory("add")'><Icon Name="plus" Size="14" />充值</button><button type="button" class="button secondary small" @onclick='() => OpenBalanceFromHistory("subtract")'><Icon Name="minus" Size="14" />扣款</button><span>累计充值 <strong>@Money(balanceHistory.TotalRecharged)</strong></span></div>
+        @if (actionUser is not null) { <div class="history-user-summary"><div class="modal-user-summary"><span class="user-avatar">@Initial(actionUser.Email)</span><span><strong>@actionUser.Email</strong><small>创建于 @FormatDateTime(actionUser.CreatedAt)</small></span></div><div><small>当前余额</small><strong>@BalanceMoney(actionUser.Balance)</strong></div></div> }
+        <div class="history-toolbar"><select value="@historyType" @onchange="HistoryTypeChangedAsync"><option value="">全部类型</option><option value="balance">兑换充值</option><option value="affiliate_balance">邀请返利</option><option value="admin_balance">管理员调整余额</option><option value="concurrency">兑换并发</option><option value="admin_concurrency">管理员调整并发</option><option value="subscription">订阅分配</option></select><button type="button" class="button secondary small" @onclick='() => OpenBalanceFromHistory("add")'><Icon Name="plus" Size="14" />充值</button><button type="button" class="button secondary small" @onclick='() => OpenBalanceFromHistory("subtract")'><Icon Name="minus" Size="14" />扣款</button><span>累计充值 <strong>@BalanceMoney(balanceHistory.TotalRecharged)</strong></span></div>
         @if (actionLoading) { <LoadingState Text="正在载入历史" /> }
         else if (balanceHistory.Items.Count == 0) { <EmptyState Title="暂无余额历史" Description="余额、并发或订阅发生变更后会显示在这里。" /> }
         else { <div class="history-list">@foreach (var item in balanceHistory.Items) { <div class="history-row"><span class="history-icon @HistoryTone(item)"><Icon Name="@HistoryIcon(item)" Size="16" /></span><div><strong>@HistoryTitle(item)</strong>@if (!string.IsNullOrWhiteSpace(item.Notes)) { <small>@item.Notes</small> }<small>@FormatDateTime(item.UsedAt ?? item.CreatedAt)</small></div><strong class="history-value @HistoryTone(item)">@HistoryValue(item)</strong></div> }</div> }
@@ -1196,6 +1196,8 @@
     private static string Initial(string email) => string.IsNullOrWhiteSpace(email) ? "?" : char.ToUpperInvariant(email[0]).ToString();
     private static string Money(decimal value) => $"${value.ToString("0.00######", System.Globalization.CultureInfo.InvariantCulture)}";
     private static string Money(double value) => $"${value.ToString("0.00######", System.Globalization.CultureInfo.InvariantCulture)}";
+    private static string BalanceMoney(decimal value) => $"${value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}";
+    private static string BalanceMoney(double value) => $"${value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}";
     private static string FormatDateTime(DateTimeOffset? value) => value.HasValue ? value.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "-";
     private static int ConcurrencyPercent(GoUser user) => user.Concurrency <= 0 ? 0 : Math.Clamp((int)Math.Round(user.CurrentConcurrency * 100d / user.Concurrency), 0, 100);
     private static string PlatformLabel(string value) => value.ToLowerInvariant() switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", _ => value };
@@ -1204,7 +1206,7 @@
     private static string HistoryIcon(AdminBalanceHistoryItemDto item) => IsBalanceHistory(item) ? "dollar" : item.Type == "subscription" ? "ticket" : "activity";
     private static string HistoryTone(AdminBalanceHistoryItemDto item) => item.Type == "subscription" ? "purple" : item.Value >= 0 ? "success" : "danger";
     private static string HistoryTitle(AdminBalanceHistoryItemDto item) => item.Type switch { "balance" => "兑换码充值", "affiliate_balance" => "邀请返利", "admin_balance" => item.Value >= 0 ? "管理员充值" : "管理员扣款", "concurrency" => "兑换并发", "admin_concurrency" => item.Value >= 0 ? "管理员增加并发" : "管理员减少并发", "subscription" => "分配订阅", _ => "未知变更" };
-    private static string HistoryValue(AdminBalanceHistoryItemDto item) { if (item.Type == "subscription") return $"{(item.ValidityDays > 0 ? item.ValidityDays : Math.Round(item.Value))} 天 · {item.Group?.Name ?? "订阅"}"; var sign = item.Value >= 0 ? "+" : string.Empty; return IsBalanceHistory(item) ? $"{sign}{Money(item.Value)}" : $"{sign}{item.Value:0.##}"; }
+    private static string HistoryValue(AdminBalanceHistoryItemDto item) { if (item.Type == "subscription") return $"{(item.ValidityDays > 0 ? item.ValidityDays : Math.Round(item.Value))} 天 · {item.Group?.Name ?? "订阅"}"; var sign = item.Value >= 0 ? "+" : string.Empty; return IsBalanceHistory(item) ? $"{sign}{BalanceMoney(item.Value)}" : $"{sign}{item.Value:0.##}"; }
 
     public void Dispose() { searchDebounce?.Cancel(); searchDebounce?.Dispose(); groupFilterDebounce?.Cancel(); groupFilterDebounce?.Dispose(); }
 

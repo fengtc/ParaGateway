@@ -37,12 +37,29 @@ public sealed class UsersPageParityTests
         Assert.Contains("仅排序当前页", markup, StringComparison.Ordinal);
         Assert.Contains("订阅模式请求不受此限额约束", markup, StringComparison.Ordinal);
         Assert.Contains("全部清空（取消所有限额）", markup, StringComparison.Ordinal);
+
         Assert.Contains("RunSensitiveAsync", markup, StringComparison.Ordinal);
         Assert.Contains("VerifyTotpStepUpAsync", markup, StringComparison.Ordinal);
         Assert.Contains("user-hidden-columns", markup, StringComparison.Ordinal);
         Assert.Contains("user-visible-filters", markup, StringComparison.Ordinal);
         Assert.Contains("user-filter-values", markup, StringComparison.Ordinal);
         Assert.DoesNotContain("支付", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UserBalancesUseFixedTwoDecimalDisplayWithoutChangingUsageFormatting()
+    {
+        var markup = ReadSource("Pages", "Users.razor");
+
+        Assert.Contains("@BalanceMoney(user.Balance)", markup, StringComparison.Ordinal);
+        Assert.Contains("当前余额：@BalanceMoney(actionUser.Balance)", markup, StringComparison.Ordinal);
+        Assert.Contains("@BalanceMoney(PreviewBalance)", markup, StringComparison.Ordinal);
+        Assert.Contains("@BalanceMoney(balanceHistory.TotalRecharged)", markup, StringComparison.Ordinal);
+        Assert.Contains("return IsBalanceHistory(item) ? $\"{sign}{BalanceMoney(item.Value)}\"", markup, StringComparison.Ordinal);
+        Assert.Contains("BalanceMoney(decimal value)", markup, StringComparison.Ordinal);
+        Assert.Contains("BalanceMoney(double value)", markup, StringComparison.Ordinal);
+        Assert.Contains("ToString(\"0.00\", System.Globalization.CultureInfo.InvariantCulture)", markup, StringComparison.Ordinal);
+        Assert.Contains("Money(stats.TodayActualCost)", markup, StringComparison.Ordinal);
     }
 
     [Fact]
