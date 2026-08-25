@@ -66,7 +66,8 @@ $commit = (git rev-parse HEAD).Trim()
 
 归档脚本会从当前进程的 `DevExpress_License`、`DEVEXPRESS_LICENSE_FILE` 或
 `%APPDATA%\DevExpress\DevExpress_License.txt` 读取许可证，只注入当前构建进程；
-它会先清理前端 Release 缓存，并在发现 `DX1000/DX1001/DX1002` 评估警告时停止，
+它要求 Git 工作区干净，会先清理前端 Release 缓存，并在发现 `DX1000/DX1001/DX1002/DX1003`
+或缺少唯一 DevExpress 许可证属性时停止，
 不会把许可证文件写入前端归档。不要绕过该脚本直接生成生产前端归档。
 
 将完整发布目录同步到 `deploy/standalone/data/frontend`，确认静态入口位于

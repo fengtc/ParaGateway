@@ -1,19 +1,22 @@
 [Unit]
-Description=ParaGateway backend (%i)
+Description=ParaGateway backend (%RELEASE%)
 After=network-online.target postgresql.service redis-server.service
 Wants=network-online.target postgresql.service redis-server.service
+Conflicts=sub2api.service
 
 [Service]
 Type=simple
 User=sub2api
 Group=sub2api
-WorkingDirectory=/opt/paragateway/releases/%i/backend
-EnvironmentFile=/etc/paragateway/%i/candidate.env
-Environment=CONFIG_FILE=/etc/paragateway/%i/config.yaml
+WorkingDirectory=/opt/paragateway/releases/%RELEASE%/backend
+LoadCredential=config.yaml:/etc/paragateway/%RELEASE%/config.yaml
+EnvironmentFile=/etc/paragateway/%RELEASE%/production.env
+Environment=CONFIG_FILE=%d/config.yaml
 Environment=SERVER_HOST=127.0.0.1
-Environment=SERVER_PORT=8284
+Environment=SERVER_PORT=8184
 Environment=SERVER_TRUSTED_PROXIES=127.0.0.1/32,::1/128
-ExecStart=/opt/paragateway/releases/%i/backend/paragateway-backend
+ExecStartPre=/usr/bin/mkdir -p /var/lib/paragateway-backend/logs
+ExecStart=/opt/paragateway/releases/%RELEASE%/backend/paragateway-backend
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=90
@@ -21,7 +24,7 @@ KillSignal=SIGTERM
 LimitNOFILE=524288
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=paragateway-backend-%i
+SyslogIdentifier=paragateway-backend
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -30,5 +33,8 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
-StateDirectory=paragateway-backend-%i
+StateDirectory=paragateway-backend
 ReadWritePaths=/var/lib/paragateway-backend
+
+[Install]
+WantedBy=multi-user.target

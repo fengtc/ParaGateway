@@ -3,7 +3,7 @@
   auto_https off
 }
 
-:8282 {
+:8182 {
   bind 127.0.0.1
 
   root * %RELEASE_ROOT%
@@ -18,7 +18,7 @@
   @backend path /api /api/* /v1 /v1/* /v1beta /v1beta/* /models /models/* /backend-api /backend-api/* /antigravity /antigravity/* /responses /responses/* /messages /messages/* /chat /chat/* /embeddings /embeddings/* /images /images/* /videos /videos/* /tts /tts/* /stt /stt/* /custom-voices /custom-voices/* /realtime /realtime/* /live /live/* /web_search /web_search/* /x_search /x_search/* /alpha /alpha/* /openai /openai/* /health /setup/status /setup/test-db /setup/test-redis /setup/install /api/event_logging/batch
 
   handle @backend {
-    reverse_proxy 127.0.0.1:8284 {
+    reverse_proxy 127.0.0.1:8184 {
       trusted_proxies 127.0.0.1/32
       header_up Host {upstream_hostport}
       flush_interval -1
