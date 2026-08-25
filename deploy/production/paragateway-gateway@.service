@@ -1,0 +1,31 @@
+[Unit]
+Description=ParaGateway gateway (%i)
+After=network-online.target paragateway-backend@%i.service
+Wants=network-online.target
+Requires=paragateway-backend@%i.service
+
+[Service]
+Type=simple
+User=sub2api
+Group=sub2api
+ExecStart=/usr/bin/caddy run --config /etc/paragateway/%i/Caddyfile --adapter caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/paragateway/%i/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+LimitNOFILE=524288
+Environment=HOME=/var/lib/paragateway-gateway-%i
+Environment=XDG_DATA_HOME=/var/lib/paragateway-gateway-%i/data
+Environment=XDG_CONFIG_HOME=/var/lib/paragateway-gateway-%i/config
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=paragateway-gateway-%i
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+StateDirectory=paragateway-gateway-%i
+ReadWritePaths=/var/lib/paragateway-gateway-%i

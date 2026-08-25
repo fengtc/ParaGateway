@@ -1,0 +1,22 @@
+# ParaGateway 生产候选发布
+
+本目录用于服务器候选端口发布和生产晋级。代码仍在本机修改、测试、提交并推送 GitHub；服务器只拉取指定提交。
+
+- 生产后端：`127.0.0.1:8184`
+- 候选后端：`127.0.0.1:8284`
+- 生产网关：`127.0.0.1:8182`
+- 候选网关：`127.0.0.1:8282`
+- 源码镜像：`/opt/paragateway/source`
+- 发布目录：`/opt/paragateway/releases/<release>`
+- 配置目录：`/etc/paragateway/<release>`
+
+候选实例必须使用只读数据库副本或临时数据库快照。`deploy-candidate.sh` 要求 `CANDIDATE_ENV_FILE`，并拒绝候选环境与生产环境使用相同数据库主机和库名。`promote.sh` 不执行数据库迁移。
+
+```bash
+export CANDIDATE_ENV_FILE=/etc/paragateway/candidate-readonly.env
+export FRONTEND_ARCHIVE=/var/tmp/paragateway-frontend-<commit>.tar.gz
+./deploy-candidate.sh <commit>
+./verify-candidate.sh <release>
+./promote.sh <release>
+./rollback.sh <previous-release>
+```
