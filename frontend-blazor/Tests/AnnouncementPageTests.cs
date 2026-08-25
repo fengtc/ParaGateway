@@ -25,6 +25,8 @@ public sealed class AnnouncementPageTests
             Assert.Contains(text, bell, StringComparison.Ordinal);
         Assert.Contains("Announcements.CurrentPopup", bell, StringComparison.Ordinal);
         Assert.Contains("data-testid=\"announcement-popup-dismiss\"", bell, StringComparison.Ordinal);
+        Assert.Contains("announcement-popup-title-row", bell, StringComparison.Ordinal);
+        Assert.Contains("announcement-popup-read", bell, StringComparison.Ordinal);
         Assert.Contains("MarkdownRenderer.ToSafeHtml", bell, StringComparison.Ordinal);
 
         foreach (var text in new[] { "公告中心", "公告总数", "未读公告", "仅看未读", "重要通知", "MarkdownRenderer.ToSafeHtml" })

@@ -93,15 +93,15 @@
             <header>
                 <span class="announcement-popup-icon"><Icon Name="bell" Size="20" /></span>
                 <span class="announcement-popup-unread"><i></i>未读公告</span>
-                <h2 id="announcement-popup-title">@popup.Title</h2>
+                <div class="announcement-popup-title-row">
+                    <h2 id="announcement-popup-title">@popup.Title</h2>
+                    <button type="button" class="button primary small announcement-popup-read" data-testid="announcement-popup-dismiss" @onclick="DismissPopupAsync"><Icon Name="check" Size="15" /> 标记已读</button>
+                </div>
                 <p><Icon Name="clock" Size="14" /> @UiFormat.RelativeDateTime(popup.CreatedAt)</p>
             </header>
             <div class="announcement-popup-body">
                 <article class="announcement-markdown markdown-body">@((MarkupString)MarkdownRenderer.ToSafeHtml(popup.Content))</article>
             </div>
-            <footer>
-                <button type="button" class="button primary" data-testid="announcement-popup-dismiss" @onclick="DismissPopupAsync"><Icon Name="check" Size="15" /> 标记已读</button>
-            </footer>
         </section>
     </div>
 }

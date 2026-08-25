@@ -184,7 +184,9 @@
 .announcement-popup-icon { grid-row: 1 / 4; background: linear-gradient(135deg, #f59e0b, #ea580c); }
 .announcement-popup-unread { display: inline-flex; width: max-content; padding: 4px 9px; align-items: center; gap: 5px; color: #fff; background: linear-gradient(90deg, #f59e0b, #ea580c); border-radius: 7px; font-size: .68rem; font-weight: 700; }
 .announcement-popup-unread i { width: 6px; height: 6px; background: #fff; border-radius: 50%; }
-.announcement-popup h2 { margin: 0; color: var(--text); font-size: 1.3rem; }
+.announcement-popup-title-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; }
+.announcement-popup-title-row h2 { min-width: 0; overflow: hidden; margin: 0; color: var(--text); font-size: 1.1rem; text-overflow: ellipsis; white-space: nowrap; }
+.announcement-popup-read { flex: 0 0 auto; white-space: nowrap; }
 .announcement-popup header p { display: flex; margin: 0; align-items: center; gap: 5px; color: var(--muted); font-size: .74rem; }
 .announcement-popup-body { min-height: 0; max-height: none; padding: 26px 28px; flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 .announcement-popup-body .announcement-markdown::before { background: linear-gradient(#f59e0b, #ea580c, #eab308); }
