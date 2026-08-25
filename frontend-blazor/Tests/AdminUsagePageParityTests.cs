@@ -16,7 +16,7 @@ public sealed class AdminUsagePageParityTests
         var route = ReadSource("Pages", "Usage.razor");
 
         Assert.Equal(3, panel.Split("role=\"tab\"", StringSplitOptions.None).Length - 1);
-        foreach (var label in new[] { "用量明细", "错误请求", "用户排行" })
+        foreach (var label in new[] { "用量记录", "错误请求", "用户排行" })
         {
             Assert.Contains(label, panel, StringComparison.Ordinal);
         }
@@ -30,6 +30,47 @@ public sealed class AdminUsagePageParityTests
         Assert.Contains("SupplyParameterFromQuery(Name = \"user_id\")", route, StringComparison.Ordinal);
         Assert.Contains("InitialStartDate=\"@QueryStartDate\"", route, StringComparison.Ordinal);
         Assert.Contains("InitialEndDate=\"@QueryEndDate\"", route, StringComparison.Ordinal);
+        Assert.Contains("<th>来源 IP</th>", panel, StringComparison.Ordinal);
+        Assert.Contains("data-label=\"来源 IP\"", panel, StringComparison.Ordinal);
+        Assert.Contains("item.IpAddress", panel, StringComparison.Ordinal);
+
+        var styles = ReadSource("Components", "AdminUsagePanel.razor.css");
+        Assert.Contains(".source-ip", styles, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: anywhere", styles, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("203.0.113.10")]
+    [InlineData("2001:db8:85a3::8a2e:370:7334")]
+    [InlineData(null)]
+    public void AdminUsageMappingPreservesSourceIp(string? sourceIp)
+    {
+        var record = UsageRecordDto.From(new GoUsageLog
+        {
+            Id = 19,
+            Model = "gpt-5.6",
+            IpAddress = sourceIp,
+            CreatedAt = new DateTimeOffset(2026, 8, 25, 8, 30, 0, TimeSpan.Zero)
+        });
+
+        Assert.Equal(sourceIp, record.IpAddress);
+    }
+
+    [Fact]
+    public async Task AdminUsageClientPreservesSourceIpFromApiJson()
+    {
+        var handler = new UsageQueryHandler
+        {
+            UsagePayload = """
+                {"code":0,"message":"success","data":{"items":[{"id":19,"model":"gpt-5.6","ip_address":"2001:db8:85a3::8a2e:370:7334","created_at":"2026-08-25T08:30:00Z"}],"total":1,"page":1,"page_size":20,"pages":1}}
+                """
+        };
+        var api = new ApiClient(new HttpClient(handler) { BaseAddress = new Uri("https://paragateway.test") }, new NullJsRuntime());
+
+        var result = await api.GetUsageAsync(new AdminUsageQuery());
+
+        var record = Assert.Single(result.Items);
+        Assert.Equal("2001:db8:85a3::8a2e:370:7334", record.IpAddress);
     }
 
     [Fact]
@@ -151,6 +192,7 @@ public sealed class AdminUsagePageParityTests
     {
         public string LastPath { get; private set; } = string.Empty;
         public string LastQuery { get; private set; } = string.Empty;
+        public string? UsagePayload { get; init; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -158,7 +200,7 @@ public sealed class AdminUsagePageParityTests
             LastQuery = request.RequestUri?.Query ?? string.Empty;
             var payload = LastPath.EndsWith("/user-breakdown", StringComparison.Ordinal)
                 ? "{\"code\":0,\"message\":\"success\",\"data\":{\"users\":[],\"start_date\":\"2026-08-23\",\"end_date\":\"2026-08-24\"}}"
-                : "{\"code\":0,\"message\":\"success\",\"data\":{\"items\":[],\"total\":0,\"page\":1,\"page_size\":20,\"pages\":0}}";
+                : UsagePayload ?? "{\"code\":0,\"message\":\"success\",\"data\":{\"items\":[],\"total\":0,\"page\":1,\"page_size\":20,\"pages\":0}}";
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(payload, Encoding.UTF8, "application/json")

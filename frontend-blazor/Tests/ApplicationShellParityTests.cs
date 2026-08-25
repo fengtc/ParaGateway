@@ -14,7 +14,7 @@ public sealed class ApplicationShellParityTests
         {
             "运营总览", "账户总览", "运维管理", "用户管理", "内容风控", "提示风控",
             "请求审计", "分组管理", "订阅管理", "账号管理", "公告管理", "代理管理",
-            "用量明细", "审计日志", "系统设置"
+            "用量记录", "审计日志", "系统设置"
         })
         {
             Assert.Contains(title, layout, StringComparison.Ordinal);
@@ -58,7 +58,8 @@ public sealed class ApplicationShellParityTests
         Assert.Contains("我的账户", menu, StringComparison.Ordinal);
         Assert.Contains("账号管理", menu, StringComparison.Ordinal);
         Assert.Contains("代理管理", menu, StringComparison.Ordinal);
-        Assert.Contains("用量明细", menu, StringComparison.Ordinal);
+        Assert.Contains("用量记录", menu, StringComparison.Ordinal);
+        Assert.DoesNotContain("用量明细", menu, StringComparison.Ordinal);
         Assert.Contains("审计日志", menu, StringComparison.Ordinal);
         Assert.Contains("账户总览", menu, StringComparison.Ordinal);
         Assert.DoesNotContain("GetSystemVersionAsync", menu, StringComparison.Ordinal);

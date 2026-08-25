@@ -3821,6 +3821,7 @@ public sealed class UsageRecordDto
     public string ProviderName { get; set; } = string.Empty;
     public string PublicModel { get; set; } = string.Empty;
     public string UpstreamModel { get; set; } = string.Empty;
+    public string? IpAddress { get; set; }
     public long PromptTokens { get; set; }
     public long CacheWriteTokens { get; set; }
     public long CacheReadTokens { get; set; }
@@ -3837,7 +3838,7 @@ public sealed class UsageRecordDto
     {
         Id = log.Id.ToString(), UserEmail = log.User?.Email ?? string.Empty, ApiKeyId = log.ApiKeyId.ToString(),
         ApiKeyName = log.ApiKey?.Name ?? string.Empty, Endpoint = log.InboundEndpoint ?? string.Empty,
-        PublicModel = log.Model, PromptTokens = log.InputTokens, CompletionTokens = log.OutputTokens,
+        PublicModel = log.Model, IpAddress = log.IpAddress, PromptTokens = log.InputTokens, CompletionTokens = log.OutputTokens,
         CacheWriteTokens = log.CacheCreationTokens, CacheReadTokens = log.CacheReadTokens,
         TotalTokens = log.InputTokens + log.OutputTokens + log.CacheCreationTokens + log.CacheReadTokens,
         CostMicros = decimal.ToInt64(decimal.Round((decimal)log.ActualCost * 1_000_000m)),

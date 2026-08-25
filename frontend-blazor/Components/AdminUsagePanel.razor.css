@@ -57,6 +57,11 @@
 
 .admin-usage-filter-actions .result-count { margin-left: 4px; padding-bottom: 0; }
 
+.source-ip {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+
 @media (max-width: 1080px) {
     .admin-usage-filter-bar { align-items: stretch; flex-direction: column; }
     .admin-usage-filter-grid { grid-template-columns: repeat(3, minmax(140px, 1fr)); }

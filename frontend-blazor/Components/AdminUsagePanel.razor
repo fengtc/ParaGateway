@@ -10,7 +10,7 @@
 </div>
 
 <div class="admin-usage-tabs" role="tablist" aria-label="用量详情视图">
-    <button type="button" id="admin-usage-tab-usage" role="tab" aria-selected="@(activeTab == "usage" ? "true" : "false")" aria-controls="admin-usage-panel-usage" tabindex="@(activeTab == "usage" ? 0 : -1)" class="@(activeTab == "usage" ? "active" : null)" @onclick='() => SwitchTab("usage")'><Icon Name="file-text" Size="16" /> 用量明细</button>
+    <button type="button" id="admin-usage-tab-usage" role="tab" aria-selected="@(activeTab == "usage" ? "true" : "false")" aria-controls="admin-usage-panel-usage" tabindex="@(activeTab == "usage" ? 0 : -1)" class="@(activeTab == "usage" ? "active" : null)" @onclick='() => SwitchTab("usage")'><Icon Name="file-text" Size="16" /> 用量记录</button>
     <button type="button" id="admin-usage-tab-errors" role="tab" aria-selected="@(activeTab == "errors" ? "true" : "false")" aria-controls="admin-usage-panel-errors" tabindex="@(activeTab == "errors" ? 0 : -1)" class="@(activeTab == "errors" ? "active" : null)" @onclick='() => SwitchTab("errors")'><Icon Name="alert" Size="16" /> 错误请求</button>
     <button type="button" id="admin-usage-tab-ranking" role="tab" aria-selected="@(activeTab == "ranking" ? "true" : "false")" aria-controls="admin-usage-panel-ranking" tabindex="@(activeTab == "ranking" ? 0 : -1)" class="@(activeTab == "ranking" ? "active" : null)" @onclick='() => SwitchTab("ranking")'><Icon Name="users" Size="16" /> 用户排行</button>
 </div>
@@ -80,7 +80,7 @@
             <div class="data-table-wrap wide-table">
                 <table class="data-table">
                     <thead>
-                        <tr><th>时间</th><th>用户 / Key</th><th>模型</th><th>输入 Token</th><th>缓存写入</th><th>缓存读取</th><th>输出 Token</th><th>费用</th><th>耗时</th><th>状态</th><th>记录 ID</th></tr>
+                        <tr><th>时间</th><th>用户 / Key</th><th>模型</th><th>来源 IP</th><th>输入 Token</th><th>缓存写入</th><th>缓存读取</th><th>输出 Token</th><th>费用</th><th>耗时</th><th>状态</th><th>记录 ID</th></tr>
                     </thead>
                     <tbody>
                         @foreach (var item in result.Items)
@@ -89,6 +89,7 @@
                                 <td data-label="时间">@UiFormat.DateTime(item.CreatedAt)</td>
                                 <td data-label="用户 / Key"><span class="primary-cell">@(string.IsNullOrWhiteSpace(item.UserEmail) ? "-" : item.UserEmail)</span><small>@(string.IsNullOrWhiteSpace(item.ApiKeyName) ? ShortId(item.ApiKeyId) : item.ApiKeyName)</small></td>
                                 <td data-label="模型"><span class="primary-cell">@item.PublicModel</span><small>@item.ProviderName</small></td>
+                                <td data-label="来源 IP"><code class="source-ip">@(string.IsNullOrWhiteSpace(item.IpAddress) ? "-" : item.IpAddress)</code></td>
                                 <td data-label="输入 Token" class="numeric-cell">@UiFormat.Integer(item.PromptTokens)</td>
                                 <td data-label="缓存写入 Token" class="numeric-cell">@UiFormat.Integer(item.CacheWriteTokens)</td>
                                 <td data-label="缓存读取 Token" class="numeric-cell">@UiFormat.Integer(item.CacheReadTokens)</td>
