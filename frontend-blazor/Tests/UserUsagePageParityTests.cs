@@ -48,6 +48,15 @@ public sealed class UserUsagePageParityTests
     }
 
     [Fact]
+    public void UserUsageTableHoverUsesThemeSurfaceColor()
+    {
+        var styles = ReadSource("Components", "UserUsagePanel.razor.css");
+
+        Assert.Contains(".usage-detail-table tbody tr:hover { background: var(--surface-hover); }", styles, StringComparison.Ordinal);
+        Assert.DoesNotContain(".usage-detail-table tbody tr:hover { background: #f9fbfa; }", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void UserErrorViewIsFeatureGatedAndHasSafeDetailSurface()
     {
         var page = ReadSource("Components", "UserUsagePanel.razor");

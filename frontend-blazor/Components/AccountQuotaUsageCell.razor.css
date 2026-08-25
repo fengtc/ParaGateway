@@ -1,12 +1,12 @@
-.account-quota-cell { display: grid; min-width: 250px; gap: 6px; color: var(--ink); }
-.quota-window { display: grid; grid-template-columns: 42px 80px 42px minmax(58px, 1fr); align-items: center; gap: 6px; }
-.quota-window small { overflow: hidden; color: var(--muted); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
-.quota-window .quota-label { display: inline-flex; width: fit-content; padding: 3px 6px; border-radius: 5px; color: #7c83ee; background: color-mix(in srgb, #6366f1 18%, transparent); font-weight: 700; }
+.account-quota-cell { display: grid; min-width: 235px; gap: 3px; color: var(--ink); }
+.quota-window { display: grid; grid-template-columns: 38px 72px 38px minmax(54px, 1fr); align-items: center; gap: 4px; }
+.quota-window small { overflow: hidden; color: var(--muted); font-size: .68rem; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+.quota-window .quota-label { display: inline-flex; width: fit-content; padding: 2px 5px; border-radius: 5px; color: #7c83ee; background: color-mix(in srgb, #6366f1 18%, transparent); font-weight: 700; }
 .quota-window .quota-label.emerald { color: #69d5a6; background: color-mix(in srgb, #10b981 18%, transparent); }
 .quota-window .quota-label.purple { color: #c083f5; background: color-mix(in srgb, #a855f7 18%, transparent); }
 .quota-window .quota-label.amber { color: #d99a45; background: color-mix(in srgb, #c47e1b 18%, transparent); }
-.quota-window b { color: var(--muted); text-align: right; font-size: .75rem; font-weight: 620; font-variant-numeric: tabular-nums; }
-.quota-window i { display: block; height: 8px; overflow: hidden; background: color-mix(in srgb, var(--muted) 34%, transparent); border-radius: 4px; }
+.quota-window b { color: var(--muted); text-align: right; font-size: .68rem; font-weight: 620; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.quota-window i { display: block; height: 6px; overflow: hidden; background: color-mix(in srgb, var(--muted) 34%, transparent); border-radius: 4px; }
 .quota-window em { display: block; height: 100%; background: var(--primary); border-radius: inherit; }
 .quota-window em.indigo { background: #6366f1; }
 .quota-window em.emerald { background: #10b981; }
@@ -14,15 +14,15 @@
 .quota-window em.amber, .quota-window em.warning { background: #c47e1b; }
 .quota-window em.danger { background: var(--danger); }
 .quota-window.legacy { grid-template-columns: 42px 80px 70px minmax(0, 1fr); }
-.quota-stats { display: flex; flex-wrap: wrap; gap: 4px; padding-left: 48px; }
-.quota-stats span { padding: 3px 6px; color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); border-radius: 5px; font-size: .71rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.quota-stats { display: flex; flex-wrap: wrap; gap: 3px; padding-left: 42px; }
+.quota-stats span { padding: 2px 5px; color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); border-radius: 5px; font-size: .64rem; font-variant-numeric: tabular-nums; line-height: 1.2; white-space: nowrap; }
 .account-today-stats { padding-left: 0; }
 .today-stats-loading { display: flex; align-items: center; gap: 4px; }
 .today-stats-loading span { width: 48px; height: 20px; border-radius: 5px; background: color-mix(in srgb, var(--muted) 18%, transparent); animation: quota-pulse 1.4s ease-in-out infinite; }
 .today-stats-loading span:nth-child(2) { width: 40px; }
 .today-stats-loading span:nth-child(3) { width: 58px; }
-.quota-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding-top: 2px; }
-.quota-actions button { display: inline-flex; min-height: 25px; padding: 2px 4px; align-items: center; gap: 3px; color: #669cff; background: transparent; border: 0; border-radius: 4px; font-size: .74rem; font-weight: 650; }
+.quota-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-top: 0; }
+.quota-actions button { display: inline-flex; min-height: 21px; padding: 1px 3px; align-items: center; gap: 3px; color: #669cff; background: transparent; border: 0; border-radius: 4px; font-size: .66rem; font-weight: 650; line-height: 1.15; }
 .quota-actions button:hover:not(:disabled) { background: color-mix(in srgb, #669cff 14%, transparent); }
 .quota-actions button.reset-action { color: #b97728; }
 .quota-actions button:disabled { cursor: not-allowed; opacity: .48; }

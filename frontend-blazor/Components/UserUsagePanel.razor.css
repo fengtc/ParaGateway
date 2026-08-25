@@ -316,7 +316,7 @@
 }
 
 .usage-detail-table tbody tr:last-child td { border-bottom: 0; }
-.usage-detail-table tbody tr:hover { background: #f9fbfa; }
+.usage-detail-table tbody tr:hover { background: var(--surface-hover); }
 .usage-detail-table .clickable-row { cursor: pointer; }
 
 .sort-button {

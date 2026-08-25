@@ -286,6 +286,21 @@ public sealed class AccountPageParityTests
     }
 
     [Fact]
+    public void AccountUsageWindowsUseCompactNonTruncatingStyles()
+    {
+        var styles = Read("Components", "AccountQuotaUsageCell.razor.css");
+
+        Assert.Contains("min-width: 235px; gap: 3px;", styles, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: 38px 72px 38px minmax(54px, 1fr);", styles, StringComparison.Ordinal);
+        Assert.Contains("font-size: .68rem;", styles, StringComparison.Ordinal);
+        Assert.Contains("height: 6px;", styles, StringComparison.Ordinal);
+        Assert.Contains("padding: 2px 5px;", styles, StringComparison.Ordinal);
+        Assert.Contains("font-size: .64rem;", styles, StringComparison.Ordinal);
+        Assert.Contains("min-height: 21px;", styles, StringComparison.Ordinal);
+        Assert.Contains("white-space: nowrap;", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CopilotUsesBillingCapacityAndHidesOfficialUsageWindows()
     {
         var page = Read("Pages", "Providers.razor");
