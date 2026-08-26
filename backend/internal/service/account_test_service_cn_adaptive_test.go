@@ -189,3 +189,24 @@ func TestAccountTestService_FixedCNChatProtocolStillTestsOnlyChatEndpoint(t *tes
 	require.Equal(t, "http://fixed-chat.example/v1/chat/completions", upstream.requests[0].URL.String())
 	require.Equal(t, 1, strings.Count(recorder.Body.String(), `"type":"test_complete"`))
 }
+
+func TestAccountTestService_ZhipuCodingPlanUsesRealUpstreamModelWhenTestModelIsEmpty(t *testing.T) {
+	account := adaptiveCNAccountTestAccount(310, PlatformZhipu)
+	account.Credentials["api_protocol"] = APIProtocolChatCompletions
+	account.Credentials["base_url"] = "http://fixed-chat.example/v1"
+	account.Credentials["account_mode"] = AccountModeCoding
+	svc, upstream := adaptiveCNAccountTestService(account, adaptiveCNChatTestResponse())
+	c, _ := newTestContext()
+
+	err := svc.TestAccountConnection(c, account.ID, "", "", AccountTestModeDefault)
+
+	require.NoError(t, err)
+	require.Equal(t, "glm-4.7", gjson.GetBytes(upstream.bodies[0], "model").String())
+}
+
+func TestResolveCNProviderTestModelPreservesExplicitModelMapping(t *testing.T) {
+	account := adaptiveCNAccountTestAccount(320, PlatformZhipu)
+	account.Credentials["model_mapping"] = map[string]any{"glm-test": "glm-5.2"}
+
+	require.Equal(t, "glm-5.2", resolveCNProviderTestModel(account, "glm-test"))
+}

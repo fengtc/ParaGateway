@@ -172,14 +172,14 @@ public sealed class UserUsagePageParityTests
     }
 
     [Fact]
-    public void AdminAndUserRoutesUsePathInsteadOfRole()
+    public void UserRouteHasItsOwnPageComponent()
     {
         var page = ReadSource("Pages", "Usage.razor");
 
-        Assert.Contains("AbsolutePath.TrimEnd('/').Equals(\"/admin/usage\"", page, StringComparison.Ordinal);
-        Assert.Contains("<AdminUsagePanel InitialUserId=", page, StringComparison.Ordinal);
+        Assert.Contains("@page \"/usage\"", page, StringComparison.Ordinal);
         Assert.Contains("<UserUsagePanel />", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("Auth.User?.IsAdmin", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("/admin/usage", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<AdminUsagePanel", page, StringComparison.Ordinal);
     }
 
     private static string ReadSource(params string[] parts)

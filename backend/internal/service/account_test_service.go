@@ -360,11 +360,7 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 }
 
 func (s *AccountTestService) testCNProviderChatCompletionsConnection(c *gin.Context, account *Account, modelID string, prompt string) error {
-	testModelID := strings.TrimSpace(modelID)
-	if testModelID == "" {
-		testModelID = openai.DefaultTestModel
-	}
-	testModelID = account.GetMappedModel(testModelID)
+	testModelID := resolveCNProviderTestModel(account, modelID)
 
 	authToken := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
 	if authToken == "" {
@@ -378,6 +374,22 @@ func (s *AccountTestService) testCNProviderChatCompletionsConnection(c *gin.Cont
 	}
 
 	return s.testOpenAIChatCompletionsConnection(c, account, testModelID, prompt, normalizedBaseURL, authToken)
+}
+
+// resolveCNProviderTestModel selects a real upstream model when the UI starts
+// a connection test without specifying one. Falling back to OpenAI's default
+// makes Zhipu reject an otherwise healthy Coding Plan account.
+func resolveCNProviderTestModel(account *Account, modelID string) string {
+	testModelID := strings.TrimSpace(modelID)
+	if testModelID == "" {
+		switch account.Platform {
+		case PlatformZhipu:
+			testModelID = "glm-4.7"
+		default:
+			testModelID = openai.DefaultTestModel
+		}
+	}
+	return account.GetMappedModel(testModelID)
 }
 
 // testClaudeAccountConnection tests an Anthropic Claude account's connection

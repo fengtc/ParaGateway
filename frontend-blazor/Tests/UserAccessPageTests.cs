@@ -81,10 +81,12 @@ public sealed class UserAccessPageTests
     }
 
     [Fact]
-    public void ApiKeysAreAlwaysPersonalAndUsageRoutesAreSelectedByPath()
+    public void ApiKeysAreAlwaysPersonalAndUsageRoutesUseDistinctComponents()
     {
         var keys = ReadSource("Pages", "ApiKeys.razor");
         var usage = ReadSource("Pages", "Usage.razor");
+        var adminUsage = ReadSource("Pages", "AdminUsage.razor");
+        var guard = ReadSource("Components", "RouteGuard.razor");
 
         Assert.Contains("Api.GetMyApiKeysPageAsync", keys, StringComparison.Ordinal);
         Assert.Contains("Api.CreateMyApiKeyAsync", keys, StringComparison.Ordinal);
@@ -92,10 +94,12 @@ public sealed class UserAccessPageTests
         Assert.Contains("Api.DeleteMyApiKeyAsync", keys, StringComparison.Ordinal);
         Assert.DoesNotContain("Api.GetApiKeysAsync", keys, StringComparison.Ordinal);
         Assert.DoesNotContain("IsAdmin", keys, StringComparison.Ordinal);
-        Assert.Contains("IsAdminRoute", usage, StringComparison.Ordinal);
-        Assert.Contains("<AdminUsagePanel InitialUserId=", usage, StringComparison.Ordinal);
         Assert.Contains("<UserUsagePanel />", usage, StringComparison.Ordinal);
         Assert.Contains("我的使用记录", usage, StringComparison.Ordinal);
+        Assert.DoesNotContain("/admin/usage", usage, StringComparison.Ordinal);
+        Assert.Contains("@page \"/admin/usage\"", adminUsage, StringComparison.Ordinal);
+        Assert.Contains("<AdminUsagePanel InitialUserId=", adminUsage, StringComparison.Ordinal);
+        Assert.Contains("typeof(Pages.AdminUsage)", guard, StringComparison.Ordinal);
     }
 
     [Fact]

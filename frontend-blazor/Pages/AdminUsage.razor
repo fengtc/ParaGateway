@@ -1,0 +1,18 @@
+@page "/admin/usage"
+
+<PageTitle>用量记录 · ParaGateway</PageTitle>
+
+<AdminUsagePanel InitialUserId="@QueryUserId"
+                 InitialStartDate="@QueryStartDate"
+                 InitialEndDate="@QueryEndDate" />
+
+@code {
+    [Parameter, SupplyParameterFromQuery(Name = "user_id")]
+    public long? QueryUserId { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "start_date")]
+    public string? QueryStartDate { get; set; }
+
+    [Parameter, SupplyParameterFromQuery(Name = "end_date")]
+    public string? QueryEndDate { get; set; }
+}

@@ -13,7 +13,7 @@ public sealed class AdminUsagePageParityTests
     public void AdminUsageRestoresOfficialDetailTabsAndRouteDrillDown()
     {
         var panel = ReadSource("Components", "AdminUsagePanel.razor");
-        var route = ReadSource("Pages", "Usage.razor");
+        var route = ReadSource("Pages", "AdminUsage.razor");
 
         Assert.Equal(3, panel.Split("role=\"tab\"", StringSplitOptions.None).Length - 1);
         foreach (var label in new[] { "用量记录", "错误请求", "用户排行" })
@@ -28,6 +28,7 @@ public sealed class AdminUsagePageParityTests
         Assert.Contains("SelectRankedUserAsync", panel, StringComparison.Ordinal);
         Assert.Contains("selectedUserId = user.UserId", panel, StringComparison.Ordinal);
         Assert.Contains("SupplyParameterFromQuery(Name = \"user_id\")", route, StringComparison.Ordinal);
+        Assert.Contains("@page \"/admin/usage\"", route, StringComparison.Ordinal);
         Assert.Contains("InitialStartDate=\"@QueryStartDate\"", route, StringComparison.Ordinal);
         Assert.Contains("InitialEndDate=\"@QueryEndDate\"", route, StringComparison.Ordinal);
         Assert.Contains("<th>来源 IP</th>", panel, StringComparison.Ordinal);
