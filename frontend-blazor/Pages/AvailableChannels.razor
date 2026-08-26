@@ -64,7 +64,7 @@ else
                         <tbody class="channel-row-group" @key="channel">
                             @for (var sectionIndex = 0; sectionIndex < channel.Platforms.Count; sectionIndex++)
                             {
-                                var section = channel.Platforms[sectionIndex];
+                                var platformSection = channel.Platforms[sectionIndex];
                                 <tr class="@(sectionIndex > 0 ? "platform-section-row divided" : "platform-section-row")">
                                     @if (sectionIndex == 0)
                                     {
@@ -72,25 +72,25 @@ else
                                         <td rowspan="@channel.Platforms.Count" class="channel-description-cell">@(string.IsNullOrWhiteSpace(channel.Description) ? "-" : channel.Description)</td>
                                     }
                                     <td class="channel-platform-cell">
-                                        <span class="channel-platform-badge platform-@PlatformTone(section.Platform)">
-                                            <Icon Name="@PlatformIcon(section.Platform)" Size="12" />
-                                            @section.Platform
+                                        <span class="channel-platform-badge platform-@PlatformTone(platformSection.Platform)">
+                                            <Icon Name="@PlatformIcon(platformSection.Platform)" Size="12" />
+                                            @platformSection.Platform
                                         </span>
                                     </td>
                                     <td class="channel-groups-cell">
-                                        <AvailableGroupList Groups="@section.Groups" UserGroupRates="@userGroupRates" ServerUtcOffset="@serverUtcOffset" />
+                                        <AvailableGroupList Groups="@platformSection.Groups" UserGroupRates="@userGroupRates" ServerUtcOffset="@serverUtcOffset" />
                                     </td>
                                     <td class="channel-models-cell">
-                                        @if (section.SupportedModels.Count == 0)
+                                        @if (platformSection.SupportedModels.Count == 0)
                                         {
                                             <span class="no-models">未配置模型</span>
                                         }
                                         else
                                         {
                                             <div class="model-chip-list">
-                                                @foreach (var model in section.SupportedModels)
+                                                @foreach (var model in platformSection.SupportedModels)
                                                 {
-                                                    <SupportedModelChip Model="@model" PlatformHint="@section.Platform" @key="model" />
+                                                    <SupportedModelChip Model="@model" PlatformHint="@platformSection.Platform" @key="model" />
                                                 }
                                             </div>
                                         }
@@ -111,31 +111,31 @@ else
                             <p>@(string.IsNullOrWhiteSpace(channel.Description) ? "-" : channel.Description)</p>
                         </header>
                         <div class="mobile-platform-list">
-                            @foreach (var section in channel.Platforms)
+                            @foreach (var platformSection in channel.Platforms)
                             {
-                                <section class="mobile-platform-section" @key="section">
-                                    <span class="channel-platform-badge platform-@PlatformTone(section.Platform)">
-                                        <Icon Name="@PlatformIcon(section.Platform)" Size="12" />
-                                        @section.Platform
+                                <section class="mobile-platform-section" @key="platformSection">
+                                    <span class="channel-platform-badge platform-@PlatformTone(platformSection.Platform)">
+                                        <Icon Name="@PlatformIcon(platformSection.Platform)" Size="12" />
+                                        @platformSection.Platform
                                     </span>
                                     <dl>
                                         <div>
                                             <dt>我可访问的分组</dt>
-                                            <dd><AvailableGroupList Groups="@section.Groups" UserGroupRates="@userGroupRates" ServerUtcOffset="@serverUtcOffset" /></dd>
+                                            <dd><AvailableGroupList Groups="@platformSection.Groups" UserGroupRates="@userGroupRates" ServerUtcOffset="@serverUtcOffset" /></dd>
                                         </div>
                                         <div>
                                             <dt>支持模型</dt>
                                             <dd>
-                                                @if (section.SupportedModels.Count == 0)
+                                                @if (platformSection.SupportedModels.Count == 0)
                                                 {
                                                     <span class="no-models">未配置模型</span>
                                                 }
                                                 else
                                                 {
                                                     <span class="model-chip-list">
-                                                        @foreach (var model in section.SupportedModels)
+                                                        @foreach (var model in platformSection.SupportedModels)
                                                         {
-                                                            <SupportedModelChip Model="@model" PlatformHint="@section.Platform" @key="model" />
+                                                            <SupportedModelChip Model="@model" PlatformHint="@platformSection.Platform" @key="model" />
                                                         }
                                                     </span>
                                                 }

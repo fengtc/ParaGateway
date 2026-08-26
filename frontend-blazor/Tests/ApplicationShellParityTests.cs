@@ -6,6 +6,16 @@ namespace ParaGateway.Frontend.Tests;
 public sealed class ApplicationShellParityTests
 {
     [Fact]
+    public void AvailableChannelsAvoidsRazorSectionDirectiveNameCollision()
+    {
+        var page = ReadSource("Pages", "AvailableChannels.razor");
+
+        Assert.DoesNotContain("var section =", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("var section in", page, StringComparison.Ordinal);
+        Assert.Contains("platformSection", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MainLayoutExposesOfficialHeaderContextBalanceAndPersistentControls()
     {
         var layout = ReadSource("Layout", "MainLayout.razor");
