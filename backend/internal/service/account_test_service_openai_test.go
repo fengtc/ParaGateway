@@ -424,6 +424,49 @@ func TestAccountTestService_OpenAI401SetsPermanentErrorOnly(t *testing.T) {
 	require.Nil(t, account.RateLimitResetAt)
 }
 
+func TestAccountTestService_CopilotErrorsDoNotApplyChatGPTAccountState(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			ctx, _ := newTestContext()
+			resp := newJSONResponse(status, `{"error":{"message":"copilot test failure"}}`)
+			resp.Header.Set("x-codex-primary-used-percent", "100")
+			resp.Header.Set("x-codex-primary-reset-after-seconds", "3600")
+
+			repo := &openAIAccountTestRepo{}
+			upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+			svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+			account := &Account{
+				ID:          801,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"oauth_profile": CopilotOAuthProfile,
+					"access_token":  "copilot-token",
+				},
+			}
+
+			err := svc.testOpenAIChatCompletionsConnection(
+				ctx,
+				account,
+				"gpt-4o",
+				"",
+				CopilotAPIBaseURL,
+				"copilot-token",
+			)
+
+			require.Error(t, err)
+			require.Zero(t, repo.setErrorID)
+			require.Zero(t, repo.rateLimitedID)
+			require.Zero(t, repo.clearedErrorID)
+			require.Empty(t, repo.updatedExtra)
+			require.Equal(t, StatusActive, account.Status)
+			require.Nil(t, account.RateLimitResetAt)
+		})
+	}
+}
+
 func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := newTestContext()

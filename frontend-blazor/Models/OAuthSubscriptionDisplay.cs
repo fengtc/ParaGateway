@@ -15,7 +15,8 @@ public sealed record OAuthSubscriptionDisplay(
 
         if (!string.Equals(account.Type, "oauth", StringComparison.OrdinalIgnoreCase)
             || !IsSubscriptionPlatform(account.Platform)
-            || IsGitHubCopilot(account))
+            || AccountProviderIdentity.IsCanonicalGitHubCopilot(account)
+            || AccountProviderIdentity.IsLegacyGitHubCopilot(account))
         {
             return null;
         }
@@ -65,11 +66,6 @@ public sealed record OAuthSubscriptionDisplay(
 
         return new OAuthSubscriptionDisplay(planLabel, planTone, expiryLabel, rawExpiry);
     }
-
-    private static bool IsGitHubCopilot(AccountDto account) =>
-        string.Equals(account.Platform, "copilot", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(ReadString(account.Credentials, "oauth_profile"), "github_copilot", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(ReadString(account.Extra, "oauth_profile"), "github_copilot", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsSubscriptionPlatform(string? platform) =>
         string.Equals(platform, "openai", StringComparison.OrdinalIgnoreCase)

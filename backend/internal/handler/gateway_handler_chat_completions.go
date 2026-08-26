@@ -210,6 +210,31 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", "No available accounts")
 				return
 			}
+			accountWaitCounted := false
+			if account.IsGitHubCopilot() || selection.PreserveStickyBinding {
+				canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(c.Request.Context(), account.ID, selection.WaitPlan.MaxWaiting)
+				if waitErr != nil {
+					reqLog.Warn("gateway.cc.account_wait_counter_increment_failed", zap.Int64("account_id", account.ID), zap.Error(waitErr))
+				} else if !canWait {
+					reqLog.Info("gateway.cc.account_wait_queue_full",
+						zap.Int64("account_id", account.ID),
+						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
+					)
+					fs.FailedAccountIDs[account.ID] = struct{}{}
+					if selection.PreserveStickyBinding {
+						c.Request = c.Request.WithContext(service.WithPreserveCopilotStickyBinding(c.Request.Context()))
+					}
+					continue
+				} else {
+					accountWaitCounted = true
+				}
+			}
+			releaseWait := func() {
+				if accountWaitCounted {
+					h.concurrencyHelper.DecrementAccountWaitCount(c.Request.Context(), account.ID)
+					accountWaitCounted = false
+				}
+			}
 			accountReleaseFunc, err = h.concurrencyHelper.AcquireAccountSlotWithWaitTimeout(
 				c,
 				account.ID,
@@ -220,9 +245,11 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			)
 			if err != nil {
 				reqLog.Warn("gateway.cc.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+				releaseWait()
 				h.handleConcurrencyError(c, err, "account", streamStarted)
 				return
 			}
+			releaseWait()
 		}
 		if !selection.RuntimePolicyAdmitted {
 			gate, gateErr := h.gatewayService.AcquireAccountSelectionRuntimePolicy(c.Request.Context(), selection)
@@ -259,7 +286,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		account = latest
 		selection.Account = latest
-		if selection.ProfitGateActive() {
+		if selection.ProfitGateActive() && !selection.PreserveStickyBinding {
 			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, selectionSessionHash, account.ID); err != nil {
 				reqLog.Warn("gateway.cc.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
@@ -281,8 +308,16 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMapping.MappedModel)
 		}
 		var result *service.ForwardResult
+		var openAIResult *service.OpenAIForwardResult
+		isCopilot := account.IsGitHubCopilot()
 		setActualUpstreamEndpoint(c, "")
-		if account.Platform == service.PlatformGemini {
+		if isCopilot {
+			if h.openAIGatewayService == nil {
+				err = errors.New("OpenAI gateway service is not configured")
+			} else {
+				openAIResult, err = h.openAIGatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, sessionHash, "")
+			}
+		} else if account.Platform == service.PlatformGemini {
 			if h.geminiCompatService == nil {
 				h.chatCompletionsErrorResponse(c, http.StatusBadGateway, "upstream_error", "Gemini compatibility service is not configured")
 				if accountReleaseFunc != nil {
@@ -304,10 +339,58 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		} else {
 			result, err = h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, parsedReq)
 		}
-		h.gatewayService.RecordAccountSelectionRuntimeOutcome(c.Request.Context(), selection, service.AccountRuntimeOutcomeFromForwardContext(c.Request.Context(), result, err))
+		if isCopilot {
+			h.gatewayService.RecordAccountSelectionRuntimeOutcome(c.Request.Context(), selection, service.AccountRuntimeOutcomeFromOpenAIForwardContext(c.Request.Context(), openAIResult, err))
+		} else {
+			h.gatewayService.RecordAccountSelectionRuntimeOutcome(c.Request.Context(), selection, service.AccountRuntimeOutcomeFromForwardContext(c.Request.Context(), result, err))
+		}
 
 		if accountReleaseFunc != nil {
 			accountReleaseFunc()
+		}
+
+		submitOpenAIForwardUsage := func(result *service.OpenAIForwardResult) {
+			if result == nil || h.openAIGatewayService == nil {
+				return
+			}
+			userAgent := c.GetHeader("User-Agent")
+			clientIP := ip.GetClientIP(c)
+			// Usage deduplication follows the client request identity. Channel model
+			// mapping changes the upstream payload, but must not create a second
+			// fingerprint for the same inbound request.
+			requestPayloadHash := service.HashUsageRequestPayload(body)
+			inboundEndpoint := GetInboundEndpoint(c)
+			upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
+			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+			sessionID := service.ExtractClientSessionID(c)
+			cyberBlocked := service.GetOpsCyberPolicy(c) != nil
+			forceCacheBilling := fs.ForceCacheBilling
+			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+				if err := h.openAIGatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
+					Result:             result,
+					APIKey:             apiKey,
+					User:               apiKey.User,
+					Account:            account,
+					Subscription:       subscription,
+					PricingAt:          pricingAt,
+					InboundEndpoint:    inboundEndpoint,
+					UpstreamEndpoint:   upstreamEndpoint,
+					UserAgent:          userAgent,
+					IPAddress:          clientIP,
+					RequestPayloadHash: requestPayloadHash,
+					ForceCacheBilling:  forceCacheBilling,
+					APIKeyService:      h.apiKeyService,
+					QuotaPlatform:      quotaPlatform,
+					SessionID:          sessionID,
+					ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+					CyberBlocked:       cyberBlocked,
+				}); err != nil {
+					reqLog.Error("gateway.cc.copilot_record_usage_failed",
+						zap.Int64("account_id", account.ID),
+						zap.Error(err),
+					)
+				}
+			})
 		}
 
 		if err != nil {
@@ -334,12 +417,20 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			if !upstreamErrorAlreadyCommunicated {
 				wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
 			}
+			if isCopilot {
+				submitOpenAIForwardUsage(openAIResult)
+			}
 			reqLog.Error("gateway.cc.forward_failed",
 				zap.Int64("account_id", account.ID),
 				zap.Bool("fallback_error_response_written", wroteFallback),
 				zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 				zap.Error(err),
 			)
+			return
+		}
+
+		if isCopilot {
+			submitOpenAIForwardUsage(openAIResult)
 			return
 		}
 

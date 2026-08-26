@@ -16,7 +16,7 @@ import (
 type ModelAvailabilityDiagnosis struct {
 	// HasAccountsInPool is true if the group has at least one persistently
 	// eligible account on the queried platform (or, for Anthropic/Gemini, on
-	// the platform plus mixed-scheduled Antigravity accounts).
+	// the platform plus compatible mixed-scheduling accounts).
 	HasAccountsInPool bool
 	// HasModelSupport is true if at least one account's model mapping admits
 	// the requested model.
@@ -73,6 +73,9 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 	platforms := []string{platform}
 	if useMixed {
 		platforms = append(platforms, PlatformAntigravity)
+		if platform == PlatformAnthropic {
+			platforms = append(platforms, PlatformOpenAI)
+		}
 	}
 
 	queryGroupID := groupID
@@ -98,7 +101,7 @@ func (s *GatewayService) DiagnoseModelAvailabilityForPlatform(
 
 	diag := ModelAvailabilityDiagnosis{}
 	for i := range accounts {
-		if useMixed && accounts[i].Platform == PlatformAntigravity && !accounts[i].IsMixedSchedulingEnabled() {
+		if useMixed && !isMixedSchedulingPlatformAllowed(&accounts[i], platform) {
 			continue
 		}
 		diag.HasAccountsInPool = true

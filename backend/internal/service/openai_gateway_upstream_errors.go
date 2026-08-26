@@ -346,6 +346,9 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
+	if account.IsGitHubCopilot() {
+		return s.handleCopilotHTTPErrorResponse(ctx, resp, c, account, body, requestedModel...)
+	}
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
 	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。
@@ -578,6 +581,58 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 // the compat paths (Chat Completions and Anthropic Messages).
 type compatErrorWriter func(c *gin.Context, statusCode int, errType, message string)
 
+// handleCopilotHTTPErrorResponse preserves the standalone Copilot gateway's
+// HTTP contract. Only an authoritative monthly quota response becomes a
+// failover error; every other response keeps its upstream status/body and does
+// not mutate durable or runtime account health (apart from evicting a token on
+// a final 401 after the request pipeline's one forced-refresh replay).
+func (s *OpenAIGatewayService) handleCopilotHTTPErrorResponse(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
+	shouldFailover := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, requestedModel...)
+	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
+	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, "")
+
+	kind := "http_error"
+	if shouldFailover {
+		kind = "failover"
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:           account.Platform,
+		AccountID:          account.ID,
+		AccountName:        account.Name,
+		UpstreamStatusCode: resp.StatusCode,
+		UpstreamRequestID:  resp.Header.Get("x-request-id"),
+		Kind:               kind,
+		Message:            upstreamMsg,
+	})
+	if shouldFailover {
+		return nil, newOpenAIUpstreamFailoverError(
+			resp.StatusCode,
+			resp.Header,
+			body,
+			upstreamMsg,
+			false,
+		)
+	}
+
+	if c != nil {
+		MarkResponseCommitted(c)
+		c.Data(resp.StatusCode, "application/json", body)
+	}
+	return nil, newRequestScopedUpstreamHTTPStatusError(
+		resp.StatusCode,
+		body,
+		"copilot upstream error: %d",
+		resp.StatusCode,
+	)
+}
+
 // handleCompatErrorResponse is the shared non-failover error handler for the
 // Chat Completions and Anthropic Messages compat paths. It mirrors the logic of
 // handleErrorResponse (passthrough rules, ShouldHandleErrorCode, rate-limit
@@ -591,6 +646,13 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
+	if account.IsGitHubCopilot() {
+		ctx := context.Background()
+		if c != nil && c.Request != nil {
+			ctx = c.Request.Context()
+		}
+		return s.handleCopilotHTTPErrorResponse(ctx, resp, c, account, body, requestedModel...)
+	}
 	body = s.redactAgentIdentitySensitiveBody(context.Background(), account, body)
 
 	// cyber_policy：兼容路径（Chat Completions / Anthropic）以各自格式回写错误，

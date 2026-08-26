@@ -362,11 +362,82 @@ func TestRateLimitService_CopilotQuotaExceededPausesUntilNextUTCMonth(t *testing
 	require.True(t, account.TempUnschedulableUntil.After(time.Now().UTC()))
 }
 
-func TestRateLimitService_CopilotOther402KeepsGenericErrorBehavior(t *testing.T) {
+func TestRateLimitService_Copilot401OnlyInvalidatesShortLivedToken(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	invalidator := &tokenCacheInvalidatorRecorder{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	service.SetTokenCacheInvalidator(invalidator)
+	account := newCopilotGatewayTestAccount()
+	account.ID = 2885
+	account.Status = StatusActive
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusUnauthorized,
+		http.Header{},
+		[]byte(`{"error":{"code":"invalid_token","message":"expired"}}`),
+	)
+
+	require.False(t, shouldDisable)
+	require.Len(t, invalidator.accounts, 1)
+	require.Same(t, account, invalidator.accounts[0])
+	require.Zero(t, repo.setErrorCalls)
+	require.Zero(t, repo.tempCalls)
+	require.Equal(t, StatusActive, account.Status)
+	require.Empty(t, account.TempUnschedulableReason)
+	require.Nil(t, account.TempUnschedulableUntil)
+}
+
+func TestRateLimitService_CopilotNonQuotaHTTPResponsesDoNotMutateAccount(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+	}{
+		{name: "non-quota 402", statusCode: http.StatusPaymentRequired, body: `{"error":{"code":"billing_issue","message":"payment required"}}`},
+		{name: "quota code on 429", statusCode: http.StatusTooManyRequests, body: `{"error":{"code":"quota_exceeded"}}`},
+		{name: "ordinary 429", statusCode: http.StatusTooManyRequests, body: `{"error":{"code":"rate_limited"}}`},
+		{name: "ordinary 500", statusCode: http.StatusInternalServerError, body: `{"error":{"code":"server_error"}}`},
+		{name: "nested response code is not authoritative", statusCode: http.StatusPaymentRequired, body: `{"response":{"error":{"code":"quota_exceeded"}}}`},
+		{name: "case changed code is not authoritative", statusCode: http.StatusPaymentRequired, body: `{"error":{"code":"QUOTA_EXCEEDED"}}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &rateLimitAccountRepoStub{}
+			invalidator := &tokenCacheInvalidatorRecorder{}
+			service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+			service.SetTokenCacheInvalidator(invalidator)
+			account := newCopilotGatewayTestAccount()
+			account.ID = 2886
+			account.Status = StatusActive
+
+			shouldDisable := service.HandleUpstreamError(
+				context.Background(),
+				account,
+				tt.statusCode,
+				http.Header{},
+				[]byte(tt.body),
+			)
+
+			require.False(t, shouldDisable)
+			require.Zero(t, repo.setErrorCalls)
+			require.Zero(t, repo.tempCalls)
+			require.Empty(t, invalidator.accounts)
+			require.Equal(t, StatusActive, account.Status)
+			require.Empty(t, account.TempUnschedulableReason)
+			require.Nil(t, account.TempUnschedulableUntil)
+		})
+	}
+}
+
+func TestRateLimitService_CopilotOther402KeepsAccountActive(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	account := newCopilotGatewayTestAccount()
-	account.ID = 2885
+	account.ID = 2887
+	account.Status = StatusActive
 
 	shouldDisable := service.HandleUpstreamError(
 		context.Background(),
@@ -376,16 +447,17 @@ func TestRateLimitService_CopilotOther402KeepsGenericErrorBehavior(t *testing.T)
 		[]byte(`{"error":{"code":"billing_issue","message":"payment required"}}`),
 	)
 
-	require.True(t, shouldDisable)
-	require.Equal(t, 1, repo.setErrorCalls)
+	require.False(t, shouldDisable)
+	require.Zero(t, repo.setErrorCalls)
 	require.Zero(t, repo.tempCalls)
+	require.Equal(t, StatusActive, account.Status)
 }
 
 func TestRateLimitService_NonCopilotQuotaExceededKeepsGenericErrorBehavior(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	account := &Account{
-		ID:       2886,
+		ID:       2888,
 		Platform: PlatformOpenAI,
 		Type:     AccountTypeOAuth,
 		Credentials: map[string]any{

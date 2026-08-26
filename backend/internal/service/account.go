@@ -130,6 +130,10 @@ const (
 	OpenAIEndpointCapabilityEmbeddings      OpenAIEndpointCapability = "embeddings"
 	OpenAIEndpointCapabilityAlphaSearch     OpenAIEndpointCapability = "alpha_search"
 	OpenAIEndpointCapabilityLive            OpenAIEndpointCapability = "live"
+	// OpenAIEndpointCapabilityInputTokens covers token-count preflight routes.
+	// GitHub Copilot must never receive these requests: it exposes neither
+	// endpoint, and its runtime bearer token is scoped to Copilot hosts.
+	OpenAIEndpointCapabilityInputTokens OpenAIEndpointCapability = "input_tokens"
 	// OpenAIEndpointCapabilityGrokMediaGeneration keeps image/video generation
 	// away from Grok accounts that are explicitly disabled or whose billing
 	// entitlement probe was forbidden. Video status lookups intentionally do not
@@ -1803,7 +1807,8 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	}
 	if a.IsGrok() {
 		switch capability {
-		case OpenAIEndpointCapabilityChatCompletions:
+		case OpenAIEndpointCapabilityChatCompletions,
+			OpenAIEndpointCapabilityInputTokens:
 			return true
 		case OpenAIEndpointCapabilityGrokMediaGeneration:
 			eligible, reason := a.GrokMediaGenerationEligibility()
@@ -1831,6 +1836,11 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	}
 	switch capability {
 	case OpenAIEndpointCapabilityChatCompletions:
+	case OpenAIEndpointCapabilityInputTokens:
+		// Regular OpenAI-compatible accounts either expose input_tokens or use
+		// the local estimator. Reuse their chat capability configuration while
+		// excluding Copilot in the dedicated branch above.
+		capability = OpenAIEndpointCapabilityChatCompletions
 	case OpenAIEndpointCapabilityLive:
 		return a.Platform == PlatformOpenAI &&
 			a.Type == AccountTypeOAuth &&

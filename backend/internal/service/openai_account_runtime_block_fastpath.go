@@ -51,6 +51,17 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 	if account != nil && account.Platform == PlatformGrok && isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}
+	// Copilot deliberately keeps the standalone gateway's narrower account
+	// health contract. Its HTTP responses must not enter OpenAI's generic 401,
+	// 429, model cooldown, team-linked, or runtime-block paths.
+	if account != nil && account.IsGitHubCopilot() {
+		if s == nil || s.rateLimitService == nil {
+			return false
+		}
+		stateCtx, cancel := openAIAccountStateContext(ctx)
+		defer cancel()
+		return s.rateLimitService.HandleUpstreamError(stateCtx, account, statusCode, headers, responseBody, canonicalModel...)
+	}
 	// Any non-2xx upstream HTTP response means the model request was actually sent.
 	if s != nil {
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)
@@ -140,7 +151,7 @@ func shouldCooldownOpenAITransientUpstreamError(statusCode int, responseBody []b
 }
 
 func (s *OpenAIGatewayService) markOpenAIOAuth429RateLimited(ctx context.Context, account *Account, headers http.Header, responseBody []byte) {
-	if s == nil || !isOpenAIOAuthAccount(account) {
+	if s == nil || !isOpenAIOAuthAccount(account) || account.IsGitHubCopilot() {
 		return
 	}
 	// Spark 影子：不按 /responses 429 的 global x-codex-* 信号做内存运行时熔断(同 handle429,外审第8轮 P1)。

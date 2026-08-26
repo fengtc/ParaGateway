@@ -102,6 +102,48 @@ func TestGatewayModels_GeminiGroupFallsBackToGeminiModels(t *testing.T) {
 	require.NotContains(t, modelIDsForTest(got.Data), "claude-sonnet-4-6")
 }
 
+func TestGatewayModels_OpenAICopilotOnlyGroupFallsBackToCopilotModels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	groupID := int64(21)
+	h := newGatewayModelsHandlerForTest(
+		&gatewayModelsAccountRepoStub{
+			byGroup: map[int64][]service.Account{
+				groupID: {
+					{
+						ID:       1,
+						Platform: service.PlatformOpenAI,
+						Type:     service.AccountTypeOAuth,
+						Credentials: map[string]any{
+							"oauth_profile": service.CopilotOAuthProfile,
+						},
+					},
+				},
+			},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI},
+	})
+
+	h.Models(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var got gatewayModelsResponseForTest
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.Equal(t, "list", got.Object)
+	modelIDs := modelIDsForTest(got.Data)
+	require.Contains(t, modelIDs, "claude-sonnet-4-5")
+	require.Contains(t, modelIDs, "gemini-2.0-flash-001")
+	require.NotContains(t, modelIDs, "gpt-5.6-sol")
+	require.NotContains(t, modelIDs, "gpt-image-2")
+}
+
 func TestGatewayModels_Grok45AdvertisesReasoningEffortForGrokBuild(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

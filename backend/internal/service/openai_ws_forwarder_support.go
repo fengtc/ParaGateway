@@ -267,15 +267,31 @@ func openAIWSPayloadTransientStatus(payload []byte) int {
 	}
 }
 
+func normalizeOpenAIWSCopilotQuotaPayload(account *Account, payload []byte) []byte {
+	if account == nil || !account.IsGitHubCopilot() || len(payload) == 0 || gjson.GetBytes(payload, "error").Exists() {
+		return payload
+	}
+	responseError := gjson.GetBytes(payload, "response.error")
+	if !responseError.Exists() || strings.TrimSpace(responseError.Get("code").String()) != "quota_exceeded" {
+		return payload
+	}
+	normalized, err := sjson.SetRawBytes(payload, "error", []byte(responseError.Raw))
+	if err != nil {
+		return payload
+	}
+	return normalized
+}
+
 func (s *OpenAIGatewayService) handleOpenAIWSTerminalTransientFailure(ctx context.Context, account *Account, canonicalModel string, headers http.Header, payload []byte) string {
 	eventType, _, _ := parseOpenAIWSEventEnvelope(payload)
 	terminalEvent := normalizeOpenAIWSTerminalEvent(eventType)
 	if terminalEvent != "response.failed" {
 		return terminalEvent
 	}
-	status := openAIWSPayloadTransientStatus(payload)
+	policyPayload := normalizeOpenAIWSCopilotQuotaPayload(account, payload)
+	status := openAIWSPayloadTransientStatus(policyPayload)
 	if status != 0 {
-		s.handleOpenAIAccountUpstreamError(ctx, account, status, headers, payload, canonicalModel)
+		s.handleOpenAIAccountUpstreamError(ctx, account, status, headers, policyPayload, canonicalModel)
 	}
 	return terminalEvent
 }
@@ -285,9 +301,10 @@ func (s *OpenAIGatewayService) handleOpenAIWSErrorEventTransientFailure(ctx cont
 	if eventType != "error" {
 		return
 	}
-	status := openAIWSPayloadTransientStatus(payload)
+	policyPayload := normalizeOpenAIWSCopilotQuotaPayload(account, payload)
+	status := openAIWSPayloadTransientStatus(policyPayload)
 	if status != 0 {
-		s.handleOpenAIAccountUpstreamError(ctx, account, status, headers, payload, canonicalModel)
+		s.handleOpenAIAccountUpstreamError(ctx, account, status, headers, policyPayload, canonicalModel)
 	}
 }
 

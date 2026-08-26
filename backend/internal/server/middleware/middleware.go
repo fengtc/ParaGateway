@@ -44,6 +44,20 @@ func ForcePlatform(platform string) gin.HandlerFunc {
 	}
 }
 
+// ForceGitHubCopilot maps the legacy /copilot/v1 surface to the canonical
+// OpenAI platform while retaining an independent account-identity restriction.
+// ForcePlatform(PlatformOpenAI) alone is insufficient because it would also
+// admit ordinary OpenAI OAuth and API-key accounts.
+func ForceGitHubCopilot() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := service.WithGitHubCopilotOnly(c.Request.Context())
+		ctx = context.WithValue(ctx, ctxkey.ForcePlatform, service.PlatformOpenAI)
+		c.Request = c.Request.WithContext(ctx)
+		c.Set(string(ContextKeyForcePlatform), service.PlatformOpenAI)
+		c.Next()
+	}
+}
+
 // HasForcePlatform 检查是否有强制平台（用于 Handler 跳过分组检查）
 func HasForcePlatform(c *gin.Context) bool {
 	_, exists := c.Get(string(ContextKeyForcePlatform))

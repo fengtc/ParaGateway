@@ -165,6 +165,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 		SupportedModelScopes:            []string{"claude", "gemini_text"},
 		SortOrder:                       9,
 		AllowMessagesDispatch:           true,
+		GitHubCopilotOnly:               true,
 		AllowLive:                       true,
 		RequireOAuthOnly:                true,
 		RequirePrivacySet:               true,
@@ -211,6 +212,7 @@ func TestDuplicateGroupCopiesConfigurationDeeplyAndResetsRuntimeState(t *testing
 	require.Equal(t, source.WebSearchPricePerCall, duplicate.WebSearchPricePerCall)
 	require.Equal(t, source.FallbackGroupID, duplicate.FallbackGroupID)
 	require.Equal(t, source.ModelRouting, duplicate.ModelRouting)
+	require.True(t, duplicate.GitHubCopilotOnly)
 	require.Equal(t, source.MessagesDispatchModelConfig, duplicate.MessagesDispatchModelConfig)
 	require.Equal(t, source.ModelsListConfig, duplicate.ModelsListConfig)
 	require.Equal(t, source.RPMLimit, duplicate.RPMLimit)

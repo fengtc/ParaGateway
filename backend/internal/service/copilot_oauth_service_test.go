@@ -134,6 +134,12 @@ func TestCopilotExchangeHeadersAndZeroValueRuntime(t *testing.T) {
 	require.NotEmpty(t, service.copilotEndpoints.githubUserURL)
 }
 
+func TestNormalizeCopilotModelDropsClaudeDateSuffix(t *testing.T) {
+	require.Equal(t, "claude-sonnet-4.5", normalizeCopilotModel("claude-sonnet-4-5-20250929"))
+	require.Equal(t, "claude-opus-4.6", normalizeCopilotModel(" claude-opus-4-6 "))
+	require.Equal(t, "gpt-4.1", normalizeCopilotModel("gpt-4.1"))
+}
+
 func TestCopilotUpstream401ForcesTokenRefreshAndRetriesOnce(t *testing.T) {
 	var exchangeCalls atomic.Int32
 	exchange := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -154,12 +160,14 @@ func TestCopilotUpstream401ForcesTokenRefreshAndRetriesOnce(t *testing.T) {
 	service := newCopilotGatewayTestService(upstream)
 	service.openAITokenProvider = NewOpenAITokenProvider(nil, nil, oauthService)
 	account := newCopilotGatewayTestAccount()
+	account.Credentials["user_agent"] = "configured-openai-agent/1.0"
 	account.Credentials["access_token"] = "stale-copilot-token"
 	account.Credentials["github_access_token"] = "github-refresh-token"
 
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "PostmanRuntime/7.46.0")
 	response, err := service.sendCCUpstreamRequest(
 		context.Background(),
 		c,
@@ -168,7 +176,7 @@ func TestCopilotUpstream401ForcesTokenRefreshAndRetriesOnce(t *testing.T) {
 		[]byte(`{"model":"gpt-4.1","messages":[]}`),
 		false,
 		"stale-copilot-token",
-		"",
+		account.GetOpenAIUserAgent(),
 		"",
 	)
 	require.NoError(t, err)
@@ -176,6 +184,8 @@ func TestCopilotUpstream401ForcesTokenRefreshAndRetriesOnce(t *testing.T) {
 	require.Len(t, upstream.requests, 2)
 	require.Equal(t, "Bearer stale-copilot-token", upstream.requests[0].Header.Get("Authorization"))
 	require.Equal(t, "Bearer fresh-copilot-token", upstream.requests[1].Header.Get("Authorization"))
+	require.Equal(t, "GitHubCopilotChat/0.26.7", upstream.requests[0].Header.Get("User-Agent"))
+	require.Equal(t, "GitHubCopilotChat/0.26.7", upstream.requests[1].Header.Get("User-Agent"))
 	require.Equal(t, "fresh-copilot-token", account.GetOpenAIAccessToken())
 	require.EqualValues(t, 1, exchangeCalls.Load())
 }

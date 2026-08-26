@@ -23,4 +23,42 @@ public sealed class AccountGroupSelectionPolicyTests
 
         Assert.Equal(expected, AccountGroupSelectionPolicy.IsSelectable(group, accountPlatform, mixedScheduling));
     }
+
+    [Theory]
+    [InlineData("openai", true)]
+    [InlineData("anthropic", true)]
+    [InlineData("composite", false)]
+    [InlineData("gemini", false)]
+    [InlineData("grok", false)]
+    public void GitHubCopilotOnlyAllowsOpenAIAndAnthropicGroups(string groupPlatform, bool expected)
+    {
+        var group = new GroupDto { Id = "1", Name = "test", Platform = groupPlatform };
+
+        Assert.Equal(
+            expected,
+            AccountGroupSelectionPolicy.IsSelectable(group, "openai", githubCopilot: true));
+    }
+
+    [Fact]
+    public void RegularOpenAIAccountStillRejectsAnthropicGroup()
+    {
+        var group = new GroupDto { Id = "1", Name = "test", Platform = "anthropic" };
+
+        Assert.False(AccountGroupSelectionPolicy.IsSelectable(group, "openai"));
+    }
+
+    [Fact]
+    public void RegularOpenAIAccountCannotSelectCopilotOnlyGroup()
+    {
+        var group = new GroupDto
+        {
+            Id = "1",
+            Name = "legacy-copilot",
+            Platform = "openai",
+            GitHubCopilotOnly = true
+        };
+
+        Assert.False(AccountGroupSelectionPolicy.IsSelectable(group, "openai"));
+        Assert.True(AccountGroupSelectionPolicy.IsSelectable(group, "openai", githubCopilot: true));
+    }
 }

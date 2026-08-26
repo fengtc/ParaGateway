@@ -116,6 +116,8 @@ const (
 	FieldSortOrder = "sort_order"
 	// FieldAllowMessagesDispatch holds the string denoting the allow_messages_dispatch field in the database.
 	FieldAllowMessagesDispatch = "allow_messages_dispatch"
+	// FieldGithubCopilotOnly holds the string denoting the github_copilot_only field in the database.
+	FieldGithubCopilotOnly = "github_copilot_only"
 	// FieldAllowLive holds the string denoting the allow_live field in the database.
 	FieldAllowLive = "allow_live"
 	// FieldRequireOauthOnly holds the string denoting the require_oauth_only field in the database.
@@ -265,6 +267,7 @@ var Columns = []string{
 	FieldSupportedModelScopes,
 	FieldSortOrder,
 	FieldAllowMessagesDispatch,
+	FieldGithubCopilotOnly,
 	FieldAllowLive,
 	FieldRequireOauthOnly,
 	FieldRequirePrivacySet,
@@ -384,6 +387,8 @@ var (
 	DefaultSortOrder int
 	// DefaultAllowMessagesDispatch holds the default value on creation for the "allow_messages_dispatch" field.
 	DefaultAllowMessagesDispatch bool
+	// DefaultGithubCopilotOnly holds the default value on creation for the "github_copilot_only" field.
+	DefaultGithubCopilotOnly bool
 	// DefaultAllowLive holds the default value on creation for the "allow_live" field.
 	DefaultAllowLive bool
 	// DefaultRequireOauthOnly holds the default value on creation for the "require_oauth_only" field.
@@ -650,6 +655,11 @@ func BySortOrder(opts ...sql.OrderTermOption) OrderOption {
 // ByAllowMessagesDispatch orders the results by the allow_messages_dispatch field.
 func ByAllowMessagesDispatch(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldAllowMessagesDispatch, opts...).ToFunc()
+}
+
+// ByGithubCopilotOnly orders the results by the github_copilot_only field.
+func ByGithubCopilotOnly(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldGithubCopilotOnly, opts...).ToFunc()
 }
 
 // ByAllowLive orders the results by the allow_live field.

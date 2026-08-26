@@ -20,6 +20,21 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+type rawChatErrorReader struct {
+	data []byte
+	off  int
+	err  error
+}
+
+func (r *rawChatErrorReader) Read(p []byte) (int, error) {
+	if r.off < len(r.data) {
+		n := copy(p, r.data[r.off:])
+		r.off += n
+		return n, nil
+	}
+	return 0, r.err
+}
+
 func TestBuildOpenAIChatCompletionsURL(t *testing.T) {
 	t.Parallel()
 
@@ -121,6 +136,87 @@ func TestForwardAsRawChatCompletions_ForcesStreamUsageUpstreamAndPassesUsageDown
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream_options.include_usage").Bool())
 	require.Contains(t, rec.Body.String(), `"usage"`)
 	require.Contains(t, rec.Body.String(), "data: [DONE]")
+}
+
+func TestStreamRawChatCompletions_BrokenBeforeOutputReturnsFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_before_output"}},
+		Body: io.NopCloser(&rawChatErrorReader{
+			data: []byte("data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"model\":\"gpt-5.4\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"),
+			err:  io.ErrUnexpectedEOF,
+		}),
+	}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+
+	result, err := svc.streamRawChatCompletions(
+		c,
+		resp,
+		rawChatCompletionsTestAccount(),
+		"gpt-5.4",
+		"gpt-5.4",
+		"gpt-5.4",
+		nil,
+		nil,
+		time.Now(),
+		openAISilentRefusalMinRequestBodyBytes,
+	)
+
+	require.Nil(t, result)
+	var failoverErr *UpstreamFailoverError
+	require.ErrorAs(t, err, &failoverErr)
+	require.False(t, recorder.Result().Header.Get("Content-Type") == "text/event-stream")
+	require.Empty(t, recorder.Body.String(), "no partial stream may be committed before account failover")
+}
+
+func TestStreamRawChatCompletions_BrokenAfterOutputReturnsPartialUsageWithoutFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	upstreamBody := strings.Join([]string{
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"partial"}}]}`,
+		"",
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":3,"total_tokens":14,"prompt_tokens_details":{"cached_tokens":2}}}`,
+		"",
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_after_output"}},
+		Body: io.NopCloser(&rawChatErrorReader{
+			data: []byte(upstreamBody),
+			err:  io.ErrUnexpectedEOF,
+		}),
+	}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+
+	result, err := svc.streamRawChatCompletions(
+		c,
+		resp,
+		rawChatCompletionsTestAccount(),
+		"gpt-5.4",
+		"gpt-5.4",
+		"gpt-5.4",
+		nil,
+		nil,
+		time.Now(),
+		0,
+	)
+
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 11, result.Usage.InputTokens)
+	require.Equal(t, 3, result.Usage.OutputTokens)
+	require.Equal(t, 2, result.Usage.CacheReadInputTokens)
+	var failoverErr *UpstreamFailoverError
+	require.NotErrorAs(t, err, &failoverErr, "a committed stream must never be replayed on another account")
+	require.Contains(t, recorder.Body.String(), "partial")
 }
 
 func TestForwardAsChatCompletions_OpenAICompatibleGrokRawMissingUsageFailsBeforeWrite(t *testing.T) {

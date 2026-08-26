@@ -99,6 +99,26 @@ func TestOpenAIQuotaHeadroomFactor_PrimaryUsedPercent(t *testing.T) {
 	require.InDelta(t, 0.8, openAIQuotaHeadroomFactor(account, now), 0.0001)
 }
 
+func TestOpenAIQuotaHeadroomFactor_CopilotIgnoresCodexQuotaResidue(t *testing.T) {
+	now := time.Date(2026, 3, 11, 10, 0, 0, 0, time.UTC)
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"oauth_profile": CopilotOAuthProfile,
+		},
+		Extra: map[string]any{
+			"codex_5h_used_percent":  100.0,
+			"codex_7d_used_percent":  100.0,
+			"codex_5h_reset_at":      now.Add(time.Hour).Format(time.RFC3339),
+			"codex_7d_reset_at":      now.Add(24 * time.Hour).Format(time.RFC3339),
+			"codex_usage_updated_at": now.Add(-time.Minute).Format(time.RFC3339),
+		},
+	}
+
+	require.Equal(t, openAIQuotaHeadroomNeutralFactor, openAIQuotaHeadroomFactor(account, now))
+}
+
 func TestOpenAIQuotaHeadroomFactor_PrimaryMissingIsNeutral(t *testing.T) {
 	now := time.Date(2026, 3, 11, 10, 0, 0, 0, time.UTC)
 	account := &Account{

@@ -738,6 +738,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						zap.Int64("account_id", account.ID),
 						zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 					)
+					if account.IsGitHubCopilot() || selection.PreserveStickyBinding {
+						fs.FailedAccountIDs[account.ID] = struct{}{}
+						if selection.PreserveStickyBinding {
+							c.Request = c.Request.WithContext(service.WithPreserveCopilotStickyBinding(c.Request.Context()))
+						}
+						continue
+					}
 					h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", streamStarted)
 					return
 				}
@@ -808,7 +815,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			selection.Account = latest
 			// 等待路径保持既有 eager 绑定（无门时 helper 直接绑定）；调度器已
 			// 抢槽的直达路径无门时由选号内部绑定，这里只在门下补准入后绑定。
-			if selection.ProfitGateActive() || !selection.Acquired {
+			if !selection.PreserveStickyBinding && (selection.ProfitGateActive() || !selection.Acquired) {
 				if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -886,6 +893,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 转发请求 - 根据账号平台分流
 			c.Set("parsed_request", attemptParsedReq)
 			var result *service.ForwardResult
+			var openAIResult *service.OpenAIForwardResult
+			isCopilot := account.IsGitHubCopilot()
 			requestCtx := c.Request.Context()
 			if fs.SwitchCount > 0 {
 				requestCtx = service.WithAccountSwitchCount(requestCtx, fs.SwitchCount, h.metadataBridgeEnabled())
@@ -895,12 +904,22 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			// 记录 Forward 前已写入字节数，Forward 后若增加则说明 SSE 内容已发，禁止 failover
 			writerSizeBeforeForward := c.Writer.Size()
-			if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
+			if isCopilot {
+				if h.openAIGatewayService == nil {
+					err = errors.New("OpenAI gateway service is not configured")
+				} else {
+					openAIResult, err = h.openAIGatewayService.ForwardAsAnthropic(requestCtx, c, account, attemptBody, sessionKey, "")
+				}
+			} else if account.Platform == service.PlatformAntigravity && account.Type != service.AccountTypeAPIKey {
 				result, err = h.antigravityGatewayService.Forward(requestCtx, c, account, attemptBody, hasBoundSession)
 			} else {
 				result, err = h.gatewayService.Forward(requestCtx, c, account, attemptParsedReq)
 			}
-			h.gatewayService.RecordAccountSelectionRuntimeOutcome(requestCtx, selection, service.AccountRuntimeOutcomeFromForwardContext(requestCtx, result, err))
+			if isCopilot {
+				h.gatewayService.RecordAccountSelectionRuntimeOutcome(requestCtx, selection, service.AccountRuntimeOutcomeFromOpenAIForwardContext(requestCtx, openAIResult, err))
+			} else {
+				h.gatewayService.RecordAccountSelectionRuntimeOutcome(requestCtx, selection, service.AccountRuntimeOutcomeFromForwardContext(requestCtx, result, err))
+			}
 
 			// 兜底释放串行锁（正常情况已通过回调提前释放）
 			if queueRelease != nil {
@@ -916,6 +935,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 提交 usage 记录。成功路径与"流中断但 Forward 已观测到 usage 的部分结果"
 			// 错误路径共用：后者若不入账，上游已计量的请求会完全漏记漏计费（#5148）。
 			submitForwardUsage := func(result *service.ForwardResult) {
+				if result == nil {
+					return
+				}
 				// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 				userAgent := c.GetHeader("User-Agent")
 				clientIP := ip.GetClientIP(c)
@@ -968,6 +990,63 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 							zap.String("model", reqModel),
 							zap.Int64("account_id", account.ID),
 						).Error("gateway.record_usage_failed", zap.Error(err))
+					}
+				})
+			}
+			submitOpenAIForwardUsage := func(result *service.OpenAIForwardResult) {
+				if result == nil || h.openAIGatewayService == nil {
+					return
+				}
+				if result.ReasoningEffort == nil {
+					result.ReasoningEffort = service.NormalizeClaudeOutputEffort(attemptParsedReq.OutputEffort)
+				}
+				if result.ReasoningEffort == nil && attemptParsedReq.ThinkingEnabled {
+					protocolModel := result.UpstreamModel
+					if protocolModel == "" {
+						protocolModel = result.Model
+					}
+					result.ReasoningEffort = service.DefaultEffortForThinkingEnabled(protocolModel)
+				}
+
+				userAgent := c.GetHeader("User-Agent")
+				clientIP := ip.GetClientIP(c)
+				// Keep deduplication anchored to the original client request. Model
+				// routing and protocol fallback may rewrite attemptBody per account.
+				requestPayloadHash := service.HashUsageRequestPayload(body)
+				inboundEndpoint := GetInboundEndpoint(c)
+				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
+				quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
+				sessionID := service.ExtractClientSessionID(c)
+				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
+				forceCacheBilling := fs.ForceCacheBilling
+				h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
+					if err := h.openAIGatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
+						Result:             result,
+						APIKey:             currentAPIKey,
+						User:               currentAPIKey.User,
+						Account:            account,
+						Subscription:       currentSubscription,
+						PricingAt:          pricingAt,
+						InboundEndpoint:    inboundEndpoint,
+						UpstreamEndpoint:   upstreamEndpoint,
+						UserAgent:          userAgent,
+						IPAddress:          clientIP,
+						SessionID:          sessionID,
+						RequestPayloadHash: requestPayloadHash,
+						ForceCacheBilling:  forceCacheBilling,
+						APIKeyService:      h.apiKeyService,
+						QuotaPlatform:      quotaPlatform,
+						ChannelUsageFields: clientRequestedUsageFields(c, channelMapping, reqModel, result.UpstreamModel),
+						CyberBlocked:       cyberBlocked,
+					}); err != nil {
+						logger.L().With(
+							zap.String("component", "handler.gateway.messages.copilot"),
+							zap.Int64("user_id", subject.UserID),
+							zap.Int64("api_key_id", currentAPIKey.ID),
+							zap.Any("group_id", currentAPIKey.GroupID),
+							zap.String("model", reqModel),
+							zap.Int64("account_id", account.ID),
+						).Error("gateway.copilot_record_usage_failed", zap.Error(err))
 					}
 				})
 			}
@@ -1073,7 +1152,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				// Forward 与错误一起返回的部分结果：流中断前上游已计量的 usage 照常入账，
 				// 避免上游已产生消耗的请求完全漏记（#5148）。failover 错误恒定 result=nil，
 				// 不会走到这里重复计费。
-				if result != nil {
+				if isCopilot {
+					submitOpenAIForwardUsage(openAIResult)
+				} else if result != nil {
 					submitForwardUsage(result)
 				}
 				return
@@ -1099,7 +1180,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				}
 			}
 
-			submitForwardUsage(result)
+			if isCopilot {
+				submitOpenAIForwardUsage(openAIResult)
+			} else {
+				submitForwardUsage(result)
+			}
 			return
 		}
 		if !retryWithFallback {
@@ -2098,16 +2183,26 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
-	// 选择支持该模型的账号
-	account, err := h.gatewayService.SelectAccountForModel(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model)
-	if err != nil {
-		reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
-		cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, service.PlatformAnthropic)
-		if !cls.ModelNotFound {
-			markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+	// Copilot does not expose Anthropic count_tokens. Keep selecting within the
+	// same group until a native Anthropic-compatible account is found.
+	excludedAccountIDs := make(map[int64]struct{})
+	var account *service.Account
+	for {
+		account, err = h.gatewayService.SelectAccountForModelWithExclusions(c.Request.Context(), apiKey.GroupID, sessionHash, parsedReq.Model, excludedAccountIDs)
+		if err != nil {
+			reqLog.Warn("gateway.count_tokens_select_account_failed", zap.Error(err))
+			cls := classifyNoAccountErrorFromGin(c, h.gatewayService, apiKey, parsedReq.Model, parsedReq.Model, service.PlatformAnthropic)
+			if !cls.ModelNotFound {
+				markOpsRoutingCapacityLimitedIfNoAvailable(c, err)
+			}
+			h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
+			return
 		}
-		h.errorResponse(c, cls.Status, cls.ErrType, cls.Message)
-		return
+		if !account.IsGitHubCopilot() {
+			break
+		}
+		excludedAccountIDs[account.ID] = struct{}{}
+		reqLog.Debug("gateway.count_tokens_skip_copilot", zap.Int64("account_id", account.ID))
 	}
 	setOpsSelectedAccount(c, account.ID, account.Platform)
 

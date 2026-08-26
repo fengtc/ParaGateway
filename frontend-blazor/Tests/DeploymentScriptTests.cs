@@ -19,6 +19,8 @@ public sealed class DeploymentScriptTests
         Assert.Contains("candidate REDIS_DB equals production", script, StringComparison.Ordinal);
         Assert.Contains("PRODUCTION_COMMIT", script, StringComparison.Ordinal);
         Assert.Contains("backend migrations differ from production", script, StringComparison.Ordinal);
+        Assert.Contains("ALLOW_CANDIDATE_MIGRATIONS", script, StringComparison.Ordinal);
+        Assert.Contains("candidate-migrations-only", script, StringComparison.Ordinal);
         Assert.Contains("candidate port $port is already in use", script, StringComparison.Ordinal);
         Assert.Contains("FRONTEND_ARCHIVE_SHA256", script, StringComparison.Ordinal);
         Assert.Contains("frontend archive SHA-256 mismatch", script, StringComparison.Ordinal);
@@ -94,6 +96,7 @@ public sealed class DeploymentScriptTests
         Assert.Contains("rollback-snapshots/pre-$release", promote, StringComparison.Ordinal);
         Assert.Contains("previous-production-snapshot", promote, StringComparison.Ordinal);
         Assert.Contains("promotion was already attempted for this release", promote, StringComparison.Ordinal);
+        Assert.Contains("release contains candidate-only migrations", promote, StringComparison.Ordinal);
         Assert.Contains("another ParaGateway release operation is running", promote, StringComparison.Ordinal);
         AssertAppearsBefore(promote, "[ ! -e \"$pointer\" ]", "printf '%s\\n' \"$snapshot\" > \"/etc/paragateway/$release/previous-production-snapshot\"");
         Assert.Contains("verify-candidate.sh", promote, StringComparison.Ordinal);

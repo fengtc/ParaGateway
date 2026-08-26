@@ -114,7 +114,7 @@ public sealed class OAuthSubscriptionDisplayTests
     }
 
     [Fact]
-    public void ExcludesGitHubCopilotProfileFromExtraMetadata()
+    public void IgnoresGitHubCopilotProfileFromExtraMetadata()
     {
         var account = Account("openai", "pro");
         account.Extra = new Dictionary<string, JsonElement>
@@ -122,7 +122,10 @@ public sealed class OAuthSubscriptionDisplayTests
             ["oauth_profile"] = JsonSerializer.SerializeToElement("github_copilot")
         };
 
-        Assert.Null(OAuthSubscriptionDisplay.From(account));
+        var display = OAuthSubscriptionDisplay.From(account);
+
+        Assert.NotNull(display);
+        Assert.Equal("Pro", display.PlanLabel);
     }
 
     [Fact]

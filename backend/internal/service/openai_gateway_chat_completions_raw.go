@@ -285,6 +285,23 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	clientOutputStarted := false
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
+	resultWithUsage := func() *OpenAIForwardResult {
+		return &OpenAIForwardResult{
+			RequestID:                     requestID,
+			Usage:                         usage,
+			Model:                         originalModel,
+			BillingModel:                  billingModel,
+			UpstreamModel:                 upstreamModel,
+			UpstreamResponseModel:         observedUpstreamResponseModel(c),
+			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+			ReasoningEffort:               reasoningEffort,
+			ServiceTier:                   serviceTier,
+			Stream:                        true,
+			Duration:                      time.Since(startTime),
+			FirstTokenMs:                  firstTokenMs,
+			ClientDisconnect:              clientDisconnected,
+		}
+	}
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -362,6 +379,14 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 				zap.String("request_id", requestID),
 			)
 		}
+		if !clientOutputStarted && !clientDisconnected {
+			message := "OpenAI chat completions stream disconnected before output"
+			if errText := strings.TrimSpace(err.Error()); errText != "" {
+				message += ": " + errText
+			}
+			return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, nil, message, resp.Header)
+		}
+		return resultWithUsage(), newUpstreamTransportError(err, "OpenAI chat completions stream disconnected before completion")
 	} else if !clientDisconnected && !clientOutputStarted {
 		if refusalDetector.IsSilentRefusal() {
 			return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
@@ -385,21 +410,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		}
 	}
 
-	return &OpenAIForwardResult{
-		RequestID:                     requestID,
-		Usage:                         usage,
-		Model:                         originalModel,
-		BillingModel:                  billingModel,
-		UpstreamModel:                 upstreamModel,
-		UpstreamResponseModel:         observedUpstreamResponseModel(c),
-		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
-		ReasoningEffort:               reasoningEffort,
-		ServiceTier:                   serviceTier,
-		Stream:                        true,
-		Duration:                      time.Since(startTime),
-		FirstTokenMs:                  firstTokenMs,
-		ClientDisconnect:              clientDisconnected,
-	}, nil
+	return resultWithUsage(), nil
 }
 
 // rewriteCopilotSSEModelLine converts the top-level model field in one SSE

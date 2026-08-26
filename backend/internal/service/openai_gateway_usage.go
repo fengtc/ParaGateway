@@ -31,6 +31,7 @@ type OpenAIRecordUsageInput struct {
 	IPAddress          string // 请求的客户端 IP 地址
 	SessionID          string // 客户端显式会话标识（session_id / X-Session-Id 等请求头），仅用于用量行会话关联
 	RequestPayloadHash string
+	ForceCacheBilling  bool // 粘性会话实际切换账号时，将未缓存输入按 cache_read 计费
 	APIKeyService      APIKeyQuotaUpdater
 	QuotaPlatform      string // user×platform quota platform resolved by the handler before async billing.
 	// PricingAt 是请求级定价时刻（请求开始捕获，与利润门的 D 同源）：高峰因子
@@ -149,8 +150,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// OpenAI input_tokens 是总输入，包含缓存读取和缓存写入明细。
 	// 将三类 token 拆成互斥桶，避免缓存写入同时按普通输入和 cache_write 重复计费。
-	actualInputTokens := result.Usage.InputTokens - result.Usage.CacheReadInputTokens - result.Usage.CacheCreationInputTokens
+	cacheReadInputTokens := result.Usage.CacheReadInputTokens
+	actualInputTokens := result.Usage.InputTokens - cacheReadInputTokens - result.Usage.CacheCreationInputTokens
 	if actualInputTokens < 0 {
+		actualInputTokens = 0
+	}
+	if input.ForceCacheBilling && actualInputTokens > 0 {
+		cacheReadInputTokens += actualInputTokens
 		actualInputTokens = 0
 	}
 
@@ -160,7 +166,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ImageInputTokens:    result.Usage.ImageInputTokens,
 		OutputTokens:        result.Usage.OutputTokens,
 		CacheCreationTokens: result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:     result.Usage.CacheReadInputTokens,
+		CacheReadTokens:     cacheReadInputTokens,
 		ImageOutputTokens:   result.Usage.ImageOutputTokens,
 	}
 
@@ -336,7 +342,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		InputTokens:           actualInputTokens,
 		OutputTokens:          result.Usage.OutputTokens,
 		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
-		CacheReadTokens:       result.Usage.CacheReadInputTokens,
+		CacheReadTokens:       cacheReadInputTokens,
 		ImageInputTokens:      result.Usage.ImageInputTokens,
 		ImageOutputTokens:     result.Usage.ImageOutputTokens,
 		ImageCount:            result.ImageCount,
@@ -428,7 +434,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
-		if s.billingCacheService != nil { s.billingCacheService.RecordUserTPM(ctx, usageLog.UserID, usageLog.TotalTokens()) }
+		if s.billingCacheService != nil {
+			s.billingCacheService.RecordUserTPM(ctx, usageLog.UserID, usageLog.TotalTokens())
+		}
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return nil
@@ -464,7 +472,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		return billingErr
 	}
-	if applied && s.billingCacheService != nil { s.billingCacheService.RecordUserTPM(ctx, usageLog.UserID, usageLog.TotalTokens()) }
+	if applied && s.billingCacheService != nil {
+		s.billingCacheService.RecordUserTPM(ctx, usageLog.UserID, usageLog.TotalTokens())
+	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 
 	return nil

@@ -230,12 +230,17 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 	if _, suppliedInternalCiphertext := req.Credentials[wifClientSecretCiphertextKey]; suppliedInternalCiphertext {
 		return nil, errors.New("WIF ciphertext is managed by the server")
 	}
-	// 验证分组是否存在（如果指定了分组）
-	if len(req.GroupIDs) > 0 {
-		if err := s.validateGroupIDsExist(ctx, req.GroupIDs); err != nil {
-			return nil, err
-		}
+	normalizedPlatform, normalizedType, normalizedCredentials, isGitHubCopilot, err := NormalizeGitHubCopilotIdentity(
+		req.Platform,
+		req.Type,
+		req.Credentials,
+	)
+	if err != nil {
+		return nil, err
 	}
+	req.Platform = normalizedPlatform
+	req.Type = normalizedType
+	req.Credentials = normalizedCredentials
 
 	// 创建账号
 	account := &Account{
@@ -259,22 +264,12 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 	if account.IsWIF() {
 		return nil, errors.New("WIF accounts must be created through the encrypted admin account service")
 	}
+	if err := s.validateAccountGroupBindings(ctx, req.GroupIDs, isGitHubCopilot, account.Type); err != nil {
+		return nil, err
+	}
 
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, fmt.Errorf("create account: %w", err)
-	}
-
-	// require_oauth_only 检查：apikey 类型账号不可加入限制分组
-	if account.Type == AccountTypeAPIKey && len(req.GroupIDs) > 0 {
-		for _, gid := range req.GroupIDs {
-			g, err := s.groupRepo.GetByID(ctx, gid)
-			if err != nil {
-				return nil, err
-			}
-			if g.RequireOAuthOnly && (g.Platform == PlatformOpenAI || g.Platform == PlatformAntigravity || g.Platform == PlatformAnthropic || g.Platform == PlatformGemini || g.Platform == PlatformGrok) {
-				return nil, fmt.Errorf("分组 [%s] 仅允许 OAuth 账号，apikey 类型账号无法加入", g.Name)
-			}
-		}
 	}
 
 	// 绑定分组
@@ -335,6 +330,17 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		return nil, fmt.Errorf("get account: %w", err)
 	}
 	wasWIF := account.IsWIF()
+	normalizedPlatform, normalizedType, normalizedCredentials, wasGitHubCopilot, err := NormalizeGitHubCopilotIdentity(
+		account.Platform,
+		account.Type,
+		account.Credentials,
+	)
+	if err != nil {
+		return nil, err
+	}
+	account.Platform = normalizedPlatform
+	account.Type = normalizedType
+	account.Credentials = normalizedCredentials
 
 	// 更新字段
 	if req.Name != nil {
@@ -345,7 +351,27 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	if req.Credentials != nil {
-		account.Credentials = SanitizeStoredCredentials(account.Platform, *req.Credentials)
+		incomingCredentials := *req.Credentials
+		if wasGitHubCopilot {
+			if key, supplied := firstGitHubCopilotServerCredentialKey(incomingCredentials); supplied {
+				return nil, githubCopilotCredentialUpdateForbidden(key)
+			}
+			incomingCredentials = MergePreservingGitHubCopilotCreds(account.Credentials, incomingCredentials)
+		}
+		targetPlatform, targetType, targetCredentials, isGitHubCopilot, normalizeErr := NormalizeGitHubCopilotIdentity(
+			account.Platform,
+			account.Type,
+			incomingCredentials,
+		)
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		if wasGitHubCopilot != isGitHubCopilot {
+			return nil, oauthProfileUpdateForbidden()
+		}
+		account.Platform = targetPlatform
+		account.Type = targetType
+		account.Credentials = SanitizeStoredCredentials(targetPlatform, targetCredentials)
 	}
 
 	if req.Extra != nil {
@@ -386,9 +412,9 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		return nil, errors.New("WIF accounts must be updated through the encrypted admin account service")
 	}
 
-	// 先验证分组是否存在（在任何写操作之前）
+	// 在任何写操作前完成存在性、OAuth-only 与 Copilot-only 校验。
 	if req.GroupIDs != nil {
-		if err := s.validateGroupIDsExist(ctx, *req.GroupIDs); err != nil {
+		if err := s.validateAccountGroupBindings(ctx, *req.GroupIDs, wasGitHubCopilot, account.Type); err != nil {
 			return nil, err
 		}
 	}
@@ -396,19 +422,6 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	// 执行更新
 	if err := s.accountRepo.Update(ctx, account); err != nil {
 		return nil, fmt.Errorf("update account: %w", err)
-	}
-
-	// require_oauth_only 检查
-	if account.Type == AccountTypeAPIKey && req.GroupIDs != nil {
-		for _, gid := range *req.GroupIDs {
-			g, err := s.groupRepo.GetByID(ctx, gid)
-			if err != nil {
-				return nil, err
-			}
-			if g.RequireOAuthOnly && (g.Platform == PlatformOpenAI || g.Platform == PlatformAntigravity || g.Platform == PlatformAnthropic || g.Platform == PlatformGemini || g.Platform == PlatformGrok) {
-				return nil, fmt.Errorf("分组 [%s] 仅允许 OAuth 账号，apikey 类型账号无法加入", g.Name)
-			}
-		}
 	}
 
 	// 绑定分组
@@ -419,6 +432,48 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 	}
 
 	return account, nil
+}
+
+func (s *AccountService) validateAccountGroupBindings(ctx context.Context, groupIDs []int64, isGitHubCopilot bool, accountType string) error {
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	if s.groupRepo == nil {
+		return fmt.Errorf("group repository not configured")
+	}
+
+	seen := make(map[int64]struct{}, len(groupIDs))
+	groups := make([]*Group, 0, len(groupIDs))
+	for _, groupID := range groupIDs {
+		if groupID <= 0 {
+			return fmt.Errorf("get group: %w", ErrGroupNotFound)
+		}
+		if _, exists := seen[groupID]; exists {
+			continue
+		}
+		seen[groupID] = struct{}{}
+		group, err := s.groupRepo.GetByID(ctx, groupID)
+		if err != nil {
+			return fmt.Errorf("get group: %w", err)
+		}
+		if group == nil {
+			return fmt.Errorf("get group: %w", ErrGroupNotFound)
+		}
+		groups = append(groups, group)
+	}
+
+	if err := validateAccountBindingGroups(isGitHubCopilot, groups); err != nil {
+		return err
+	}
+	if accountType != AccountTypeAPIKey {
+		return nil
+	}
+	for _, group := range groups {
+		if group.RequireOAuthOnly && groupSupportsOAuthOnlyFilter(group.Platform) {
+			return fmt.Errorf("分组 [%s] 仅允许 OAuth 账号，apikey 类型账号无法加入", group.Name)
+		}
+	}
+	return nil
 }
 
 // Delete 删除账号

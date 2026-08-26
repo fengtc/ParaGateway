@@ -920,7 +920,38 @@ func (r *accountRepository) List(ctx context.Context, params pagination.Paginati
 func (r *accountRepository) accountListFilteredQuery(platform, accountType, status, search string, groupID int64, privacyMode string) *dbent.AccountQuery {
 	q := r.client.Account.Query()
 
-	if platform != "" {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "copilot":
+		q = q.Where(
+			dbaccount.PlatformEQ(service.PlatformOpenAI),
+			dbaccount.TypeEQ(service.AccountTypeOAuth),
+			dbpredicate.Account(func(s *entsql.Selector) {
+				s.Where(sqljson.ValueEQ(
+					dbaccount.FieldCredentials,
+					service.CopilotOAuthProfile,
+					sqljson.Path("oauth_profile"),
+				))
+			}),
+		)
+	case service.PlatformOpenAI:
+		// Copilot keeps the OpenAI storage platform for scheduler compatibility,
+		// while the account-list filter retains the legacy product boundary.
+		q = q.Where(
+			dbaccount.PlatformEQ(service.PlatformOpenAI),
+			dbaccount.Or(
+				dbaccount.TypeNEQ(service.AccountTypeOAuth),
+				dbpredicate.Account(func(s *entsql.Selector) {
+					path := sqljson.Path("oauth_profile")
+					s.Where(entsql.Or(
+						entsql.Not(sqljson.HasKey(dbaccount.FieldCredentials, path)),
+						sqljson.ValueNEQ(dbaccount.FieldCredentials, service.CopilotOAuthProfile, path),
+					))
+				}),
+			),
+		)
+	case "":
+		// No platform filter.
+	default:
 		q = q.Where(dbaccount.PlatformEQ(platform))
 	}
 	if accountType != "" {

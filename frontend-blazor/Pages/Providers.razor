@@ -185,7 +185,7 @@
                                         <td>
                                             <div class="platform-stack">
                                                 <div class="platform-meta-row">
-                                                    <span class="platform-badge @(IsCopilot(row) ? "platform-copilot" : $"platform-{row.Platform}")">@AccountPlatformLabel(row)</span>
+                                                    <span class="platform-badge @((IsCopilot(row) || IsLegacyCopilot(row)) ? "platform-copilot" : $"platform-{row.Platform}")">@AccountPlatformLabel(row)</span>
                                                     <small class="account-type-label">@AccountTypeLabel(row)</small>
                                                 </div>
                                                 @if (subscription is not null || row.ParentAccountId.HasValue)
@@ -573,7 +573,11 @@
         get
         {
             var mixedScheduling = IsEditorMixedSchedulingEnabled();
-            return groups.Where(group => AccountGroupSelectionPolicy.IsSelectable(group, form.Platform, mixedScheduling));
+            return groups.Where(group => AccountGroupSelectionPolicy.IsSelectable(
+                group,
+                form.Platform,
+                mixedScheduling: mixedScheduling,
+                githubCopilot: editingIsCopilot));
         }
     }
 
@@ -1185,11 +1189,12 @@
 
     private static readonly HashSet<string> AllowedSortKeys = new(StringComparer.OrdinalIgnoreCase) { "id", "name", "status", "schedulable", "priority", "rate_multiplier", "upstream_billing_rate", "last_used_at", "created_at", "expires_at" };
     private static string PlatformLabel(string value) => value.ToLowerInvariant() switch { "anthropic" => "Anthropic", "openai" => "OpenAI", "gemini" => "Gemini", "antigravity" => "Antigravity", "grok" => "Grok", "kimi" => "Kimi", "zhipu" => "智谱 GLM", "deepseek" => "DeepSeek", _ => value };
-    private static string AccountPlatformLabel(AccountDto row) => IsCopilot(row) ? "GitHub Copilot" : PlatformLabel(row.Platform);
-    private static string OAuthProfile(AccountDto row) => ReadJsonString(row.Credentials, "oauth_profile") ?? ReadJsonString(row.Extra, "oauth_profile") ?? string.Empty;
-    private static bool IsCopilot(AccountDto row) =>
-        string.Equals(row.Platform, "copilot", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(OAuthProfile(row), "github_copilot", StringComparison.OrdinalIgnoreCase);
+    private static string AccountPlatformLabel(AccountDto row) => IsCopilot(row)
+        ? "GitHub Copilot"
+        : IsLegacyCopilot(row) ? "GitHub Copilot（待迁移）" : PlatformLabel(row.Platform);
+    private static string OAuthProfile(AccountDto row) => AccountProviderIdentity.OAuthProfile(row);
+    private static bool IsCopilot(AccountDto row) => AccountProviderIdentity.IsCanonicalGitHubCopilot(row);
+    private static bool IsLegacyCopilot(AccountDto row) => AccountProviderIdentity.IsLegacyGitHubCopilot(row);
     private static string AccountTypeLabel(AccountDto row) => TypeLabel(row.Type);
     private static bool CanRefreshToken(AccountDto row) => row.ParentAccountId is null && row.Type is "oauth" or "setup-token";
     private static string DefaultApiBaseUrl(AccountInput input) => IsCNPlatform(input.Platform)

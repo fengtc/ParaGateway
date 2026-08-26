@@ -27,6 +27,15 @@ func (r *bulkEventAccountRepo) GetByIDs(context.Context, []int64) ([]*Account, e
 	return append([]*Account(nil), r.accounts...), nil
 }
 
+func (r *bulkEventAccountRepo) GetByID(_ context.Context, id int64) (*Account, error) {
+	for _, account := range r.accounts {
+		if account != nil && account.ID == id {
+			return account, nil
+		}
+	}
+	return nil, ErrAccountNotFound
+}
+
 type bulkEventSnapshotCache struct {
 	*batchSnapshotCache
 
@@ -100,7 +109,7 @@ func schedulerBucketsForTest(groupIDs []int64, platforms ...string) []SchedulerB
 	return buckets
 }
 
-func TestSchedulerBulkAccountEventScopesOpenAIRebuildToFreshPlatform(t *testing.T) {
+func TestSchedulerBulkAccountEventOpenAIAlsoRebuildsAnthropicCleanupBuckets(t *testing.T) {
 	cache := newBulkEventSnapshotCache()
 	repo := newBulkEventAccountRepo(&Account{ID: 1, Platform: PlatformOpenAI, GroupIDs: []int64{12}})
 	svc := newBulkEventTestService(cache, repo)
@@ -108,9 +117,84 @@ func TestSchedulerBulkAccountEventScopesOpenAIRebuildToFreshPlatform(t *testing.
 	err := svc.handleBulkAccountEvent(context.Background(), bulkEventPayload([]int64{1}, []int64{11}), make(map[batchSeenKey]struct{}))
 
 	require.NoError(t, err)
-	require.ElementsMatch(t, schedulerBucketsForTest([]int64{11, 12}, PlatformOpenAI), cache.capturedBuckets())
+	want := append(
+		schedulerBucketsForTest([]int64{11, 12}, PlatformOpenAI),
+		schedulerBucketsForTest([]int64{11, 12}, PlatformAnthropic)...,
+	)
+	require.ElementsMatch(t, want, cache.capturedBuckets())
 	set, deleted := cache.accountWrites()
 	require.Equal(t, []int64{1}, set)
+	require.Empty(t, deleted)
+}
+
+func TestSchedulerBulkAccountEventCopilotAlsoRebuildsAnthropicMixedBuckets(t *testing.T) {
+	cache := newBulkEventSnapshotCache()
+	repo := newBulkEventAccountRepo(&Account{
+		ID:       2,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		GroupIDs: []int64{12},
+		Credentials: map[string]any{
+			"oauth_profile": CopilotOAuthProfile,
+		},
+	})
+	svc := newBulkEventTestService(cache, repo)
+
+	err := svc.handleBulkAccountEvent(context.Background(), bulkEventPayload([]int64{2}, []int64{11}), make(map[batchSeenKey]struct{}))
+
+	require.NoError(t, err)
+	want := append(
+		schedulerBucketsForTest([]int64{11, 12}, PlatformOpenAI),
+		schedulerBucketsForTest([]int64{11, 12}, PlatformAnthropic)...,
+	)
+	require.ElementsMatch(t, want, cache.capturedBuckets())
+}
+
+func TestSchedulerRebuildByCopilotAccountAlsoRebuildsAnthropicMixedBuckets(t *testing.T) {
+	cache := newBulkEventSnapshotCache()
+	repo := newBulkEventAccountRepo()
+	svc := newBulkEventTestService(cache, repo)
+	account := &Account{
+		ID:       3,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"oauth_profile": CopilotOAuthProfile,
+		},
+	}
+
+	err := svc.rebuildByAccount(context.Background(), account, []int64{21}, "test", make(map[batchSeenKey]struct{}))
+
+	require.NoError(t, err)
+	want := append(
+		schedulerBucketsForTest([]int64{21}, PlatformOpenAI),
+		schedulerBucketsForTest([]int64{21}, PlatformAnthropic)...,
+	)
+	require.ElementsMatch(t, want, cache.capturedBuckets())
+}
+
+func TestSchedulerRegularOpenAIAccountEventAlsoRebuildsAnthropicCleanupBuckets(t *testing.T) {
+	cache := newBulkEventSnapshotCache()
+	account := &Account{
+		ID:          4,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		GroupIDs:    []int64{22},
+		Credentials: map[string]any{"oauth_profile": "chatgpt"},
+	}
+	svc := newBulkEventTestService(cache, newBulkEventAccountRepo(account))
+	accountID := account.ID
+
+	err := svc.handleAccountEvent(context.Background(), &accountID, nil, make(map[batchSeenKey]struct{}))
+
+	require.NoError(t, err)
+	want := append(
+		schedulerBucketsForTest([]int64{22}, PlatformOpenAI),
+		schedulerBucketsForTest([]int64{22}, PlatformAnthropic)...,
+	)
+	require.ElementsMatch(t, want, cache.capturedBuckets())
+	set, deleted := cache.accountWrites()
+	require.Equal(t, []int64{4}, set)
 	require.Empty(t, deleted)
 }
 
@@ -137,7 +221,11 @@ func TestSchedulerBulkAccountEventRebuildsOpenAIUngroupedBucket(t *testing.T) {
 	err := svc.handleBulkAccountEvent(context.Background(), bulkEventPayload([]int64{6}, nil), make(map[batchSeenKey]struct{}))
 
 	require.NoError(t, err)
-	require.ElementsMatch(t, schedulerBucketsForTest([]int64{0}, PlatformOpenAI), cache.capturedBuckets())
+	want := append(
+		schedulerBucketsForTest([]int64{0}, PlatformOpenAI),
+		schedulerBucketsForTest([]int64{0}, PlatformAnthropic)...,
+	)
+	require.ElementsMatch(t, want, cache.capturedBuckets())
 }
 
 func TestSchedulerBulkAccountEventKeepsGroupedAndUngroupedBuckets(t *testing.T) {
@@ -151,7 +239,11 @@ func TestSchedulerBulkAccountEventKeepsGroupedAndUngroupedBuckets(t *testing.T) 
 	err := svc.handleBulkAccountEvent(context.Background(), bulkEventPayload([]int64{7, 8}, nil), make(map[batchSeenKey]struct{}))
 
 	require.NoError(t, err)
-	require.ElementsMatch(t, schedulerBucketsForTest([]int64{0, 51}, PlatformOpenAI), cache.capturedBuckets())
+	want := append(
+		schedulerBucketsForTest([]int64{0, 51}, PlatformOpenAI),
+		schedulerBucketsForTest([]int64{0, 51}, PlatformAnthropic)...,
+	)
+	require.ElementsMatch(t, want, cache.capturedBuckets())
 }
 
 func TestSchedulerBulkAccountEventDoesNotCrossCurrentGroupsBetweenPlatforms(t *testing.T) {
@@ -167,6 +259,10 @@ func TestSchedulerBulkAccountEventDoesNotCrossCurrentGroupsBetweenPlatforms(t *t
 	require.NoError(t, err)
 	want := append(
 		schedulerBucketsForTest([]int64{61, 63}, PlatformOpenAI),
+		schedulerBucketsForTest([]int64{61, 63}, PlatformAnthropic)...,
+	)
+	want = append(
+		want,
 		schedulerBucketsForTest([]int64{62, 63}, PlatformGrok)...,
 	)
 	require.ElementsMatch(t, want, cache.capturedBuckets())
@@ -180,7 +276,11 @@ func TestSchedulerBulkAccountEventUsesGroupZeroInSimpleMode(t *testing.T) {
 	err := svc.handleBulkAccountEvent(context.Background(), bulkEventPayload([]int64{11}, []int64{72}), make(map[batchSeenKey]struct{}))
 
 	require.NoError(t, err)
-	require.ElementsMatch(t, schedulerBucketsForTest([]int64{0}, PlatformOpenAI), cache.capturedBuckets())
+	want := append(
+		schedulerBucketsForTest([]int64{0}, PlatformOpenAI),
+		schedulerBucketsForTest([]int64{0}, PlatformAnthropic)...,
+	)
+	require.ElementsMatch(t, want, cache.capturedBuckets())
 }
 
 func TestSchedulerBulkAccountEventConservativelyExpandsAntigravityPlatforms(t *testing.T) {

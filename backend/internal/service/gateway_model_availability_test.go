@@ -189,6 +189,60 @@ func TestDiagnoseModelAvailabilityForPlatform_RateLimitedSupportingAccountRemain
 	require.True(t, diag.HasModelSupport, "a configured model remains supported while every matching account is temporarily cooling down")
 }
 
+func TestDiagnoseModelAvailabilityForPlatform_AnthropicIncludesGitHubCopilot(t *testing.T) {
+	groupID := int64(44)
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:            3,
+				Platform:      PlatformOpenAI,
+				Type:          AccountTypeOAuth,
+				Status:        StatusActive,
+				Schedulable:   true,
+				AccountGroups: []AccountGroup{{GroupID: groupID}},
+				Credentials: map[string]any{
+					"oauth_profile": CopilotOAuthProfile,
+					"model_mapping": map[string]any{"claude-sonnet-4-5": "claude-sonnet-4-5"},
+				},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	svc := &GatewayService{accountRepo: repo, cfg: testConfig()}
+
+	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "claude-sonnet-4-5", PlatformAnthropic)
+
+	require.True(t, diag.HasAccountsInPool)
+	require.True(t, diag.HasModelSupport, "Copilot must count as configured support on the Anthropic route")
+}
+
+func TestDiagnoseModelAvailabilityForPlatform_AnthropicExcludesRegularOpenAI(t *testing.T) {
+	groupID := int64(45)
+	repo := &mockAccountRepoForPlatform{
+		accounts: []Account{
+			{
+				ID:            4,
+				Platform:      PlatformOpenAI,
+				Type:          AccountTypeOAuth,
+				Status:        StatusActive,
+				Schedulable:   true,
+				AccountGroups: []AccountGroup{{GroupID: groupID}},
+				Credentials: map[string]any{
+					"oauth_profile": "chatgpt",
+					"model_mapping": map[string]any{"claude-sonnet-4-5": "claude-sonnet-4-5"},
+				},
+			},
+		},
+		accountsByID: map[int64]*Account{},
+	}
+	svc := &GatewayService{accountRepo: repo, cfg: testConfig()}
+
+	diag := svc.DiagnoseModelAvailabilityForPlatform(context.Background(), &groupID, "claude-sonnet-4-5", PlatformAnthropic)
+
+	require.False(t, diag.HasAccountsInPool, "regular OpenAI accounts must not enter the Anthropic mixed pool")
+	require.False(t, diag.HasModelSupport)
+}
+
 func TestOpenAIDiagnoseModelAvailabilityForPlatform_RateLimitedSupportingAccountRemainsConfigured(t *testing.T) {
 	groupID := int64(43)
 	cooldownUntil := time.Now().Add(time.Hour)

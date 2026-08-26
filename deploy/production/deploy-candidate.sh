@@ -11,9 +11,11 @@ production_config=${PRODUCTION_CONFIG_FILE:-/etc/paragateway/production-config.y
 frontend_archive=${FRONTEND_ARCHIVE:?set FRONTEND_ARCHIVE}
 frontend_archive_sha256=${FRONTEND_ARCHIVE_SHA256:?set FRONTEND_ARCHIVE_SHA256}
 expected_candidate_redis_db=${CANDIDATE_REDIS_DB_EXPECTED:-15}
+allow_candidate_migrations=${ALLOW_CANDIDATE_MIGRATIONS:-0}
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'commit must be a full lowercase SHA-1' >&2; exit 1; }
 [[ "$production_commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'PRODUCTION_COMMIT must be a full lowercase SHA-1' >&2; exit 1; }
 [[ "$release" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || { echo 'invalid release name' >&2; exit 1; }
+[[ "$allow_candidate_migrations" =~ ^[01]$ ]] || { echo 'ALLOW_CANDIDATE_MIGRATIONS must be 0 or 1' >&2; exit 1; }
 command -v flock >/dev/null || { echo 'flock is required' >&2; exit 1; }
 exec 9>/run/lock/paragateway-release.lock
 flock -n 9 || { echo 'another ParaGateway release operation is running' >&2; exit 1; }
@@ -63,7 +65,11 @@ resolved_commit=$(git -C "$source_dir" rev-parse HEAD)
 git -C "$source_dir" merge-base --is-ancestor "$commit" origin/main || { echo 'commit is not published on origin/main' >&2; exit 1; }
 resolved_production_commit=$(git -C "$source_dir" rev-parse "$production_commit^{commit}")
 [ "$resolved_production_commit" = "$production_commit" ] || { echo 'PRODUCTION_COMMIT does not resolve exactly' >&2; exit 1; }
-git -C "$source_dir" diff --quiet "$production_commit" "$commit" -- backend/migrations || { echo 'backend migrations differ from production; use the separately approved migration workflow' >&2; exit 1; }
+candidate_migrations_only=0
+if ! git -C "$source_dir" diff --quiet "$production_commit" "$commit" -- backend/migrations; then
+  [ "$allow_candidate_migrations" = 1 ] || { echo 'backend migrations differ from production; set ALLOW_CANDIDATE_MIGRATIONS=1 only for an isolated disposable candidate database' >&2; exit 1; }
+  candidate_migrations_only=1
+fi
 [ -z "$(git -C "$source_dir" status --porcelain --untracked-files=all)" ] || { echo 'server source worktree is not clean' >&2; exit 1; }
 source "$candidate_env"
 : "${DATABASE_HOST:?candidate env must set DATABASE_HOST}"
@@ -105,6 +111,10 @@ printf '%s\n' "$production_env_real" > "/etc/paragateway/$release/production-env
 printf '%s\n' "$production_config_real" > "/etc/paragateway/$release/production-config-source"
 printf '%s\n' "$production_commit" > "/etc/paragateway/$release/production-commit"
 printf '%s\n' "$commit" > "/etc/paragateway/$release/target-commit"
+if [ "$candidate_migrations_only" = 1 ]; then
+  printf '%s -> %s\n' "$production_commit" "$commit" > "/etc/paragateway/$release/candidate-migrations-only"
+  chmod 600 "/etc/paragateway/$release/candidate-migrations-only"
+fi
 cp "$(dirname "$0")/production.Candidate.Caddyfile.example" "/etc/paragateway/$release/Caddyfile"
 cp "$(dirname "$0")/production.Caddyfile.example" "/etc/paragateway/$release/Caddyfile.production"
 sed -i "s#%RELEASE_ROOT%#$release_dir/frontend/wwwroot#g" "/etc/paragateway/$release/Caddyfile" "/etc/paragateway/$release/Caddyfile.production"

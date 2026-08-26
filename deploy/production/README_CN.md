@@ -12,7 +12,7 @@
 
 候选实例必须使用隔离的、可写的临时数据库快照。后端启动可能执行迁移、bootstrap 和 seed，因此只读副本不能作为通用候选数据库；“候选不执行充值、扣款等业务写操作”是验证流程约束，不能替代数据库隔离。`deploy-candidate.sh` 要求候选与生产的 PostgreSQL 主机和库名组合不同、候选 Redis 使用独立 DB（默认 `15`），并为每个候选实例创建独立的 `/var/lib/paragateway-backend-<release>` 数据目录。发布配置分别保存为 `candidate.env` 和 `production.env`；候选 unit 只读取前者，晋级生成的生产 unit 只读取后者。
 
-后端启动时会自动检查并应用迁移。标准候选流程要求设置当前生产后端的完整 `PRODUCTION_COMMIT`，并拒绝 `backend/migrations` 与生产提交存在任何差异的目标提交，因此本流程不会改变生产 schema。包含迁移的版本必须使用单独审批的数据库备份、迁移和回滚流程；unit 快照不能回滚数据库 schema。
+后端启动时会自动检查并应用迁移。标准候选流程要求设置当前生产后端的完整 `PRODUCTION_COMMIT`，并拒绝 `backend/migrations` 与生产提交存在任何差异的目标提交，因此本流程不会改变生产 schema。仅在候选数据库是隔离、可丢弃的快照时，才可显式设置 `ALLOW_CANDIDATE_MIGRATIONS=1` 验证迁移；发布目录会写入 `candidate-migrations-only` 标记，`promote.sh` 会拒绝直接晋级。生产迁移仍必须使用单独审批的数据库备份、迁移和回滚流程；unit 快照不能回滚数据库 schema。
 
 候选和生产的内层网关只信任来自 `127.0.0.1/32` 的上一层代理，后端只信任回环网关。仓库中的 Caddy 校验仅检查候选发布目录自己的配置，不读取、修改或重载公网外层 Caddy。公网第一层代理必须覆盖客户端传入的 `X-Forwarded-For`，不能透传未经校验的伪造值。
 
@@ -36,6 +36,14 @@ export FRONTEND_ARCHIVE_SHA256=<build-frontend-archive.ps1 输出的 sha256>
 ./verify-candidate.sh <release>
 ./promote.sh <release>
 ```
+
+仅验证候选数据库迁移时，在执行 `deploy-candidate.sh` 前额外设置：
+
+```bash
+export ALLOW_CANDIDATE_MIGRATIONS=1
+```
+
+该候选只能用于验证，不能使用 `promote.sh` 直接晋级生产。
 
 首次从旧发布结构迁移时，`PRODUCTION_ENV_FILE` 可以指向当前生产实际使用的旧 `backend.env`；新流程会将其另存为目标发布的 `production.env`。运行 `deploy-candidate.sh` 前必须停止准确的旧候选实例并确认 `8282/8284` 已释放，脚本不会自动停止任何未知服务。
 

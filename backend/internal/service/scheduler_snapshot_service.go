@@ -609,8 +609,14 @@ func (s *SchedulerSnapshotService) handleBulkAccountEvent(ctx context.Context, p
 		}
 		accountGroupIDs := s.normalizeGroupIDs(account.GroupIDs)
 		switch account.Platform {
-		case PlatformAnthropic, PlatformGemini, PlatformOpenAI, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek:
+		case PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepseek:
 			addPlatformGroups(account.Platform, accountGroupIDs)
+		case PlatformOpenAI:
+			addPlatformGroups(PlatformOpenAI, accountGroupIDs)
+			// Account events only carry the current identity. Always rebuild the
+			// Anthropic bucket so converting a Copilot account to regular OpenAI
+			// also removes the stale mixed-scheduling entry.
+			addPlatformGroups(PlatformAnthropic, accountGroupIDs)
 		case PlatformAntigravity:
 			// 批量更新可能刚关闭 mixed_scheduling，仍需清理两个兼容平台的旧快照。
 			addPlatformGroups(PlatformAntigravity, accountGroupIDs)
@@ -817,6 +823,12 @@ func (s *SchedulerSnapshotService) rebuildByAccount(ctx context.Context, account
 	}
 
 	buckets := s.bucketsForPlatform(account.Platform, groupIDs, seen)
+	// Account events do not contain the previous OAuth profile. Rebuild the
+	// Anthropic bucket for every OpenAI identity change; load-time filtering
+	// still admits only GitHub Copilot accounts into that mixed bucket.
+	if account.Platform == PlatformOpenAI {
+		buckets = append(buckets, s.bucketsForPlatform(PlatformAnthropic, groupIDs, seen)...)
+	}
 	if account.Platform == PlatformAntigravity && account.IsMixedSchedulingEnabled() {
 		buckets = append(buckets, s.bucketsForPlatform(PlatformAnthropic, groupIDs, seen)...)
 		buckets = append(buckets, s.bucketsForPlatform(PlatformGemini, groupIDs, seen)...)
@@ -1465,6 +1477,9 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 
 	if useMixed {
 		platforms := []string{bucket.Platform, PlatformAntigravity}
+		if bucket.Platform == PlatformAnthropic {
+			platforms = append(platforms, PlatformOpenAI)
+		}
 		var accounts []Account
 		var err error
 		if groupID > 0 {
@@ -1479,7 +1494,7 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 		}
 		filtered := make([]Account, 0, len(accounts))
 		for _, acc := range accounts {
-			if acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
+			if !isMixedSchedulingPlatformAllowed(&acc, bucket.Platform) {
 				continue
 			}
 			filtered = append(filtered, acc)

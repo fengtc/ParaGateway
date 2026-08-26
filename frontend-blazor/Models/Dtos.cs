@@ -2445,6 +2445,7 @@ public sealed class GoGroup
     [JsonPropertyName("model_routing_enabled")] public bool ModelRoutingEnabled { get; set; }
     [JsonPropertyName("supported_model_scopes")] public List<string> SupportedModelScopes { get; set; } = [];
     [JsonPropertyName("allow_messages_dispatch")] public bool AllowMessagesDispatch { get; set; }
+    [JsonPropertyName("github_copilot_only")] public bool GitHubCopilotOnly { get; set; }
     [JsonPropertyName("allow_live")] public bool AllowLive { get; set; }
     [JsonPropertyName("require_oauth_only")] public bool RequireOAuthOnly { get; set; }
     [JsonPropertyName("require_privacy_set")] public bool RequirePrivacySet { get; set; }
@@ -2486,6 +2487,7 @@ public sealed class GroupDto
     public string PeakEnd { get; set; } = string.Empty;
     public double PeakRateMultiplier { get; set; }
     public bool LongContextPricingEnabled { get; set; }
+    public bool GitHubCopilotOnly { get; set; }
     public int RpmLimit { get; set; }
     public static GroupDto From(GoGroup group) => new()
     {
@@ -2499,6 +2501,7 @@ public sealed class GroupDto
         PeakRateEnabled = group.PeakRateEnabled, PeakStart = group.PeakStart,
         PeakEnd = group.PeakEnd, PeakRateMultiplier = group.PeakRateMultiplier,
         LongContextPricingEnabled = group.LongContextPricingEnabled,
+        GitHubCopilotOnly = group.GitHubCopilotOnly,
         SubscriptionType = group.SubscriptionType,
         AdvancedJson = JsonSerializer.Serialize(group, JsonDefaults.Options)
     };

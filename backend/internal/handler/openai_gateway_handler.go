@@ -171,6 +171,9 @@ func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecord
 }
 
 func openAICompatibleRequestPlatform(ctx context.Context, apiKey *service.APIKey) string {
+	if service.IsGitHubCopilotOnly(ctx) {
+		return service.PlatformOpenAI
+	}
 	if platform, ok := service.ResolvedTargetPlatformFromContext(ctx); ok {
 		// 保留 grok 与国产供应商原值，其他归一为 openai（与调度器精确匹配语义一致）。
 		return service.NormalizeOpenAICompatiblePlatform(platform)
@@ -199,6 +202,9 @@ func openAIResponsesRequiredCapabilityForRequest(imageIntent bool, needsResponse
 }
 
 func allowOpenAICompatibleMessagesDispatch(c *gin.Context, apiKey *service.APIKey) bool {
+	if c != nil && c.Request != nil && service.IsGitHubCopilotOnly(c.Request.Context()) {
+		return true
+	}
 	if apiKey == nil || apiKey.Group == nil {
 		return true
 	}
@@ -225,6 +231,9 @@ func allowOpenAICompatibleMessagesDispatch(c *gin.Context, apiKey *service.APIKe
 }
 
 func openAICompatibleTextTargetAllowed(c *gin.Context, apiKey *service.APIKey, model string) bool {
+	if c != nil && c.Request != nil && service.IsGitHubCopilotOnly(c.Request.Context()) {
+		return true
+	}
 	return compositeTargetPlatformAllowed(c, apiKey, model,
 		service.PlatformOpenAI, service.PlatformGrok,
 		service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek)
@@ -1026,6 +1035,17 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	setOpsRequestContext(c, reqModel, reqStream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(reqStream, false)))
+
+	// Preserve the legacy Copilot connectivity probe behavior. Claude Code uses
+	// this non-streaming Haiku request to validate the endpoint; answering it
+	// locally avoids account selection, upstream traffic, and usage billing.
+	if service.IsGitHubCopilotOnly(c.Request.Context()) &&
+		!reqStream &&
+		isMaxTokensOneHaikuRequest(reqModel, int(gjson.GetBytes(body, "max_tokens").Int())) {
+		reqLog.Debug("copilot.messages.probe_intercept", zap.String("model", reqModel))
+		sendMockInterceptResponse(c, reqModel, InterceptTypeMaxTokensOneHaiku)
+		return
+	}
 
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.anthropicSecurityAuditError(c, decision)

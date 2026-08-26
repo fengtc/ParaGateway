@@ -1374,7 +1374,8 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 	}
 
 	updatedAccount, err := h.adminService.UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{
-		Credentials: newCredentials,
+		Credentials:                  newCredentials,
+		AllowManagedCredentialUpdate: account.IsGitHubCopilot(),
 	})
 	if err != nil {
 		return nil, "", err
@@ -1471,6 +1472,13 @@ func (h *AccountHandler) ApplyOAuthCredentials(c *gin.Context) {
 	}
 	if !existing.IsOAuth() {
 		response.ErrorFrom(c, infraerrors.BadRequest("NOT_OAUTH", "cannot apply oauth credentials to non-OAuth account"))
+		return
+	}
+	if existing.IsGitHubCopilot() {
+		response.ErrorFrom(c, infraerrors.BadRequest(
+			"COPILOT_CREDENTIAL_MANAGED",
+			"GitHub Copilot credentials can only be managed through the dedicated Copilot OAuth flow",
+		))
 		return
 	}
 	if err := service.ValidateOpenAILongContextBillingExtra(existing.Platform, req.Extra); err != nil {

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
-	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
@@ -401,11 +400,8 @@ func (h *OpenAIOAuthHandler) validateCopilotGroupIDs(ctx context.Context, groupI
 		if group == nil {
 			return service.ErrGroupNotFound
 		}
-		if !strings.EqualFold(strings.TrimSpace(group.Platform), service.PlatformOpenAI) {
-			return infraerrors.BadRequest(
-				"COPILOT_GROUP_PLATFORM_MISMATCH",
-				"Copilot 账号只能绑定 OpenAI 平台分组",
-			)
+		if err := service.ValidateGitHubCopilotGroupPlatform(group.Platform); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -584,7 +580,8 @@ func (h *OpenAIOAuthHandler) RefreshAccountToken(c *gin.Context) {
 	newCredentials = service.NormalizeOpenAIPersonalAccessTokenCredentials(account, tokenInfo, newCredentials)
 
 	updatedAccount, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
-		Credentials: newCredentials,
+		Credentials:                  newCredentials,
+		AllowManagedCredentialUpdate: account.IsGitHubCopilot(),
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

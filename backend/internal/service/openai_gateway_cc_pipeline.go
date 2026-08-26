@@ -88,7 +88,15 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	upstreamMsg string,
 	upstreamModel string,
 ) *UpstreamFailoverError {
-	shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody)
+	// The legacy Copilot gateway only fails over on an authoritative monthly
+	// quota response. Other HTTP responses are written back by the compat error
+	// handler without switching accounts. Network/transport failures never reach
+	// this function and retain the shared failover behavior.
+	shouldFailover := account != nil && account.IsGitHubCopilot() &&
+		isAuthoritativeCopilotMonthlyQuotaResponse(account, resp.StatusCode, respBody)
+	if account == nil || !account.IsGitHubCopilot() {
+		shouldFailover = s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody)
+	}
 	tempUnscheduled := false
 	if c != nil && account != nil && account.Platform != PlatformGrok && !shouldFailover && !IsResponseCommitted(c) && s.rateLimitService != nil {
 		tempUnscheduled = s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, upstreamModel) == ErrorPolicyTempUnscheduled
@@ -233,13 +241,16 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequestWithRetry(
 	// 透传白名单中的客户端 header。详见 openaiCCRawAllowedHeaders 的设计说明。
 	for key, values := range c.Request.Header {
 		lowerKey := strings.ToLower(key)
+		if account.IsGitHubCopilot() && lowerKey == "user-agent" {
+			continue
+		}
 		if openaiCCRawAllowedHeaders[lowerKey] {
 			for _, v := range values {
 				upstreamReq.Header.Add(key, v)
 			}
 		}
 	}
-	if userAgent != "" {
+	if userAgent != "" && !account.IsGitHubCopilot() {
 		upstreamReq.Header.Set("user-agent", userAgent)
 	}
 

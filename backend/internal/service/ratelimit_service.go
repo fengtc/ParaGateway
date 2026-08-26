@@ -251,7 +251,11 @@ const (
 // 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte, requestedModel ...string) ErrorPolicyResult {
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
-	if isAuthoritativeCopilotMonthlyQuotaResponse(account, statusCode, responseBody) {
+	// Copilot keeps the standalone gateway's error contract: HTTP responses do
+	// not participate in the generic OpenAI custom-error/temp-unschedulable
+	// policy. Only 402 + error.code=quota_exceeded is handled later by
+	// HandleUpstreamError as a monthly quota pause.
+	if account.IsGitHubCopilot() {
 		return ErrorPolicyNone
 	}
 	if account.IsCustomErrorCodesEnabled() {
@@ -279,13 +283,28 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
 	ctx = withTempUnschedulableModel(ctx, requestedModel)
+	if account.IsGitHubCopilot() {
+		switch {
+		case statusCode == http.StatusUnauthorized:
+			// The request pipeline has already forced one bounded token refresh
+			// and replay. A second 401 only evicts the short-lived Copilot token;
+			// the durable account remains active and schedulable.
+			if s.tokenCacheInvalidator != nil {
+				if err := s.tokenCacheInvalidator.InvalidateToken(ctx, account); err != nil {
+					slog.Warn("copilot_401_invalidate_cache_failed", "account_id", account.ID, "error", err)
+				}
+			}
+			return false
+		case isAuthoritativeCopilotMonthlyQuotaResponse(account, statusCode, responseBody):
+			s.handleCopilotMonthlyQuotaExceeded(ctx, account)
+			return true
+		default:
+			return false
+		}
+	}
 	// Team 联动熔断必须先于池模式/自定义错误码/临时不可调度的各类早退；
 	// 同请求内与 fastpath 调用点的重复触发由方法内去重吸收。
 	s.maybeHandleOpenAITeamLinkedError(ctx, account, statusCode, responseBody)
-	if isAuthoritativeCopilotMonthlyQuotaResponse(account, statusCode, responseBody) {
-		s.handleCopilotMonthlyQuotaExceeded(ctx, account)
-		return true
-	}
 	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled()
 
 	// 池模式默认不标记本地账号状态；但管理员显式配置的临时不可调度规则优先。
@@ -514,12 +533,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 }
 
 func isCopilotMonthlyQuotaExceededResponse(responseBody []byte) bool {
-	for _, path := range []string{"error.code", "response.error.code"} {
-		if strings.EqualFold(strings.TrimSpace(gjson.GetBytes(responseBody, path).String()), "quota_exceeded") {
-			return true
-		}
-	}
-	return false
+	return strings.TrimSpace(gjson.GetBytes(responseBody, "error.code").String()) == "quota_exceeded"
 }
 
 func isAuthoritativeCopilotMonthlyQuotaResponse(account *Account, statusCode int, responseBody []byte) bool {
@@ -2104,7 +2118,7 @@ func (s *RateLimitService) HandleTempUnschedulable(ctx context.Context, account 
 	if account == nil {
 		return false
 	}
-	if isAuthoritativeCopilotMonthlyQuotaResponse(account, statusCode, responseBody) {
+	if account.IsGitHubCopilot() {
 		return false
 	}
 	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {

@@ -8,6 +8,10 @@ const (
 	// ForcePlatform 强制平台（用于 /antigravity 路由），由 middleware.ForcePlatform 设置
 	ForcePlatform Key = "ctx_force_platform"
 
+	// GitHubCopilotOnly 标识旧 /copilot/v1/* 兼容入口。该入口在 canonical
+	// openai 平台内只允许 oauth_profile=github_copilot 的账号参与调度。
+	GitHubCopilotOnly Key = "ctx_github_copilot_only"
+
 	// ResolvedTargetPlatform 是 composite 分组按请求模型解析出的真实目标平台。
 	ResolvedTargetPlatform Key = "ctx_resolved_target_platform"
 

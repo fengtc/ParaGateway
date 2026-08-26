@@ -770,6 +770,13 @@ func (s *sparkShadowValidatingGroupRepoStub) ExistsByIDs(_ context.Context, ids 
 	return out, nil
 }
 
+func (s *sparkShadowValidatingGroupRepoStub) GetByIDLite(_ context.Context, id int64) (*Group, error) {
+	if !s.existing[id] {
+		return nil, ErrGroupNotFound
+	}
+	return &Group{ID: id, Platform: PlatformOpenAI}, nil
+}
+
 // TestCreateShadow_DefaultsNameFromParent 验证外审 E/P2:空 name 不应 500,
 // 而是默认 "<母账号名> (Spark)"。
 func TestCreateShadow_DefaultsNameFromParent(t *testing.T) {
@@ -824,6 +831,32 @@ func TestCreateShadow_InvalidGroupRejectedNoOrphan(t *testing.T) {
 	shadows, qerr := repo.ListShadowsByParent(ctx, parent.ID)
 	require.NoError(t, qerr)
 	require.Empty(t, shadows, "无效分组应在创建前被拒,不应建出影子")
+}
+
+func TestCreateShadow_RejectsGitHubCopilotParent(t *testing.T) {
+	ctx := context.Background()
+	repo := newSparkShadowRepoStub()
+	svc := &adminServiceImpl{accountRepo: repo}
+	parent := &Account{
+		Name:     "copilot-parent",
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			accountOAuthProfileCredentialKey: CopilotOAuthProfile,
+			"github_access_token":            "test-token",
+		},
+	}
+	require.NoError(t, repo.Create(ctx, parent))
+
+	shadow, err := svc.CreateShadow(ctx, parent.ID, ShadowOptions{Name: "not-allowed"})
+
+	require.Nil(t, shadow)
+	require.Equal(t, http.StatusBadRequest, infraerrors.Code(err))
+	requireApplicationErrorReason(t, err, "SPARK_SHADOW_COPILOT_UNSUPPORTED")
+	shadows, listErr := repo.ListShadowsByParent(ctx, parent.ID)
+	require.NoError(t, listErr)
+	require.Empty(t, shadows)
 }
 
 // TestCreateShadow_BindFailureRollsBackShadow 验证外审 C/P1:绑组失败时补偿删除

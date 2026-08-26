@@ -285,6 +285,11 @@ func AllowMessagesDispatch(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldAllowMessagesDispatch, v))
 }
 
+// GithubCopilotOnly applies equality check predicate on the "github_copilot_only" field. It's identical to GithubCopilotOnlyEQ.
+func GithubCopilotOnly(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldGithubCopilotOnly, v))
+}
+
 // AllowLive applies equality check predicate on the "allow_live" field. It's identical to AllowLiveEQ.
 func AllowLive(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldAllowLive, v))
@@ -2258,6 +2263,16 @@ func AllowMessagesDispatchEQ(v bool) predicate.Group {
 // AllowMessagesDispatchNEQ applies the NEQ predicate on the "allow_messages_dispatch" field.
 func AllowMessagesDispatchNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldAllowMessagesDispatch, v))
+}
+
+// GithubCopilotOnlyEQ applies the EQ predicate on the "github_copilot_only" field.
+func GithubCopilotOnlyEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldGithubCopilotOnly, v))
+}
+
+// GithubCopilotOnlyNEQ applies the NEQ predicate on the "github_copilot_only" field.
+func GithubCopilotOnlyNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldGithubCopilotOnly, v))
 }
 
 // AllowLiveEQ applies the EQ predicate on the "allow_live" field.

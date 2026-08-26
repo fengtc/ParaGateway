@@ -295,12 +295,19 @@ func groupSupportsOAuthOnlyFilter(platform string) bool {
 		platform == PlatformComposite
 }
 
+func normalizeAdminGroupPlatform(platform string) (string, bool) {
+	if strings.EqualFold(strings.TrimSpace(platform), legacyGitHubCopilotPlatform) {
+		return PlatformOpenAI, true
+	}
+	return NormalizeGroupPlatform(platform), false
+}
+
 func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupInput) (*Group, error) {
 	if input.RateMultiplier <= 0 {
 		return nil, errors.New("rate_multiplier must be > 0")
 	}
 
-	platform := NormalizeGroupPlatform(input.Platform)
+	platform, githubCopilotOnly := normalizeAdminGroupPlatform(input.Platform)
 	modelPricing, err := normalizeGroupModelPricing(platform, input.ModelPricing)
 	if err != nil {
 		return nil, err
@@ -442,6 +449,12 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 			if !canCopyAccountsFromGroupPlatform(platform, srcGroup.Platform) {
 				return nil, fmt.Errorf("source group %d platform mismatch: expected %s, got %s", srcGroupID, platform, srcGroup.Platform)
 			}
+			if srcGroup.GitHubCopilotOnly != githubCopilotOnly {
+				return nil, infraerrors.BadRequest(
+					"COPILOT_ONLY_GROUP_SOURCE_MISMATCH",
+					"GitHub Copilot 专用分组只能从同类专用分组复制账号",
+				)
+			}
 		}
 
 		// 获取所有源分组的账号（去重）
@@ -508,12 +521,27 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		RPMLimit:                        input.RPMLimit,
 		MaxReasoningEffort:              maxReasoningEffort,
 		ReasoningEffortMappings:         reasoningEffortMappings,
+		GitHubCopilotOnly:               githubCopilotOnly,
 	}
 	sanitizeGroupMessagesDispatchFields(group)
+	if group.GitHubCopilotOnly {
+		group.AllowMessagesDispatch = true
+		group.AllowLive = false
+		group.RequireOAuthOnly = true
+	}
 	if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
 		group.AllowLive = false
 	}
 	sanitizeGroupReasoningEffortPolicy(group)
+	if group.GitHubCopilotOnly && len(accountIDsToCopy) > 0 {
+		accounts, err := s.accountRepo.GetByIDs(ctx, accountIDsToCopy)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch accounts for Copilot-only filter: %w", err)
+		}
+		if err := validateAccountsForTargetGroup(group, accounts); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.groupRepo.Create(ctx, group); err != nil {
 		return nil, err
 	}
@@ -651,7 +679,20 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.Description = *input.Description
 	}
 	if input.Platform != "" {
-		group.Platform = input.Platform
+		normalizedPlatform, requestedCopilotOnly := normalizeAdminGroupPlatform(input.Platform)
+		if requestedCopilotOnly && !group.GitHubCopilotOnly {
+			return nil, infraerrors.BadRequest(
+				"COPILOT_ONLY_GROUP_CREATE_REQUIRED",
+				"请新建 GitHub Copilot 专用分组，普通分组不能直接转换为 Copilot 专用分组",
+			)
+		}
+		group.Platform = normalizedPlatform
+	}
+	if group.GitHubCopilotOnly && group.Platform != PlatformOpenAI {
+		return nil, infraerrors.BadRequest(
+			"COPILOT_ONLY_GROUP_PLATFORM_IMMUTABLE",
+			"GitHub Copilot 专用分组的平台必须保持为 OpenAI",
+		)
 	}
 	if input.RateMultiplier != nil {
 		if *input.RateMultiplier <= 0 {
@@ -890,10 +931,60 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 		group.ReasoningEffortMappings = reasoningEffortMappings
 	}
 	sanitizeGroupMessagesDispatchFields(group)
+	if group.GitHubCopilotOnly {
+		group.AllowMessagesDispatch = true
+		group.AllowLive = false
+		group.RequireOAuthOnly = true
+	}
 	if group.Platform != PlatformOpenAI && group.Platform != PlatformComposite {
 		group.AllowLive = false
 	}
 	sanitizeGroupReasoningEffortPolicy(group)
+
+	// 分组配置必须在任何写入前完成 Copilot-only 账号兼容性预检，
+	// 避免后续复制账号失败时留下已更新配置、未更新绑定的部分状态。
+	if len(input.CopyAccountsFromGroupIDs) > 0 {
+		seen := make(map[int64]struct{}, len(input.CopyAccountsFromGroupIDs))
+		sourceGroupIDs := make([]int64, 0, len(input.CopyAccountsFromGroupIDs))
+		for _, sourceGroupID := range input.CopyAccountsFromGroupIDs {
+			if sourceGroupID == id {
+				return nil, fmt.Errorf("cannot copy accounts from self")
+			}
+			if _, exists := seen[sourceGroupID]; exists {
+				continue
+			}
+			seen[sourceGroupID] = struct{}{}
+			sourceGroupIDs = append(sourceGroupIDs, sourceGroupID)
+		}
+		for _, sourceGroupID := range sourceGroupIDs {
+			sourceGroup, err := s.groupRepo.GetByIDLite(ctx, sourceGroupID)
+			if err != nil {
+				return nil, fmt.Errorf("source group %d not found: %w", sourceGroupID, err)
+			}
+			if !canCopyAccountsFromGroupPlatform(group.Platform, sourceGroup.Platform) {
+				return nil, fmt.Errorf("source group %d platform mismatch: expected %s, got %s", sourceGroupID, group.Platform, sourceGroup.Platform)
+			}
+			if sourceGroup.GitHubCopilotOnly != group.GitHubCopilotOnly {
+				return nil, infraerrors.BadRequest(
+					"COPILOT_ONLY_GROUP_SOURCE_MISMATCH",
+					"GitHub Copilot 专用分组只能与同类专用分组复制账号",
+				)
+			}
+		}
+		accountIDs, err := s.groupRepo.GetAccountIDsByGroupIDs(ctx, sourceGroupIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get accounts from source groups: %w", err)
+		}
+		if group.GitHubCopilotOnly && len(accountIDs) > 0 {
+			accounts, err := s.accountRepo.GetByIDs(ctx, accountIDs)
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch accounts for Copilot-only filter: %w", err)
+			}
+			if err := validateAccountsForTargetGroup(group, accounts); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	if err := s.groupRepo.Update(ctx, group); err != nil {
 		return nil, err

@@ -575,6 +575,7 @@ type AccountSelectionResult struct {
 	Acquired                bool
 	ReleaseFunc             func()
 	WaitPlan                *AccountWaitPlan // nil means no wait allowed
+	PreserveStickyBinding   bool             // overflow serves only this request and must not migrate the existing session binding
 	RuntimePolicyGeneration int64            // request/attempt-scoped Redis admission epoch
 	RuntimePolicyAdmitted   bool             // 本次 selection 已完成 RPM/熔断准入（RPM-only generation 可为 0）
 	// profitGate 携带本次选号真实生效的利润门（无门为 nil）。门安装在调度栈的
@@ -1459,11 +1460,34 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	if platform != "" {
 		filtered := make([]Account, 0)
 		for _, acc := range accounts {
-			if acc.Platform == platform {
+			if (platform == PlatformAnthropic && isMixedSchedulingPlatformAllowed(&acc, platform)) ||
+				(platform != PlatformAnthropic && acc.Platform == platform) {
 				filtered = append(filtered, acc)
 			}
 		}
 		accounts = filtered
+	}
+
+	// Copilot accounts are stored under the OpenAI platform, but their fallback
+	// catalog is not OpenAI's default model list. Preserve explicit mappings and
+	// mixed OpenAI groups; only a strictly Copilot-only, unmapped group receives
+	// the Copilot catalog.
+	if platform == PlatformOpenAI && len(accounts) > 0 {
+		copilotOnlyWithoutMappings := true
+		for i := range accounts {
+			if !accounts[i].IsGitHubCopilot() || len(accounts[i].GetModelMapping()) > 0 {
+				copilotOnlyWithoutMappings = false
+				break
+			}
+		}
+		if copilotOnlyWithoutMappings {
+			models := CopilotDefaultModels()
+			if s.modelsListCache != nil {
+				s.modelsListCache.Set(cacheKey, cloneStringSlice(models), s.modelsListCacheTTL)
+				modelsListCacheStoreTotal.Add(1)
+			}
+			return cloneStringSlice(models)
+		}
 	}
 
 	// Collect unique models from all accounts

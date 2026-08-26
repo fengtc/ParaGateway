@@ -35,6 +35,14 @@ public sealed class NativeAccountCreateModalStyleTests
     }
 
     [Fact]
+    public void CreateAccountPassesTheCopilotProfileToGroupSelection()
+    {
+        var markup = Read("Components", "NativeAccountCreateModal.razor");
+
+        Assert.Contains("githubCopilot: platform == \"copilot\"", markup, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CreateAccountStylesUseTheSharedThemeAndFormMetrics()
     {
         var styles = Read("Components", "NativeAccountCreateModal.razor.css");

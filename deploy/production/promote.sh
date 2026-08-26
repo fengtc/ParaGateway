@@ -29,6 +29,7 @@ test -s "/etc/paragateway/$release/target-commit"
 test -s "/etc/paragateway/$release/Caddyfile.production"
 test -s "/etc/paragateway/$release/paragateway-backend.service"
 test -s "/etc/paragateway/$release/paragateway-gateway.service"
+[ ! -e "/etc/paragateway/$release/candidate-migrations-only" ] || { echo 'release contains candidate-only migrations and cannot be promoted without the separately approved production migration workflow' >&2; exit 1; }
 systemctl is-active --quiet "paragateway-backend@$release.service"
 systemctl is-active --quiet "paragateway-gateway@$release.service"
 bash "$(dirname "$0")/verify-candidate.sh" "$release"

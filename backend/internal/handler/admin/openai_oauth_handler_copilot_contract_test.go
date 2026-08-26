@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,40 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+type copilotGroupValidationAdminService struct {
+	*stubAdminService
+	groupsByID map[int64]*service.Group
+}
+
+func (s *copilotGroupValidationAdminService) GetGroup(_ context.Context, id int64) (*service.Group, error) {
+	group, ok := s.groupsByID[id]
+	if !ok {
+		return nil, service.ErrGroupNotFound
+	}
+	return group, nil
+}
+
+func TestValidateCopilotGroupIDsAllowsOnlyOpenAIAndAnthropic(t *testing.T) {
+	adminService := &copilotGroupValidationAdminService{
+		stubAdminService: &stubAdminService{},
+		groupsByID: map[int64]*service.Group{
+			1: {ID: 1, Platform: service.PlatformOpenAI},
+			2: {ID: 2, Platform: service.PlatformAnthropic},
+			3: {ID: 3, Platform: service.PlatformGemini},
+			4: {ID: 4, Platform: service.PlatformComposite},
+		},
+	}
+	handler := &OpenAIOAuthHandler{adminService: adminService}
+
+	require.NoError(t, handler.validateCopilotGroupIDs(context.Background(), []int64{1, 2}))
+	for _, groupID := range []int64{3, 4} {
+		err := handler.validateCopilotGroupIDs(context.Background(), []int64{groupID})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "OpenAI 或 Anthropic")
+	}
+	require.ErrorIs(t, handler.validateCopilotGroupIDs(context.Background(), []int64{0}), service.ErrGroupNotFound)
+}
 
 func TestCopilotBillingPATValidateRequestAcceptsReferenceTokenField(t *testing.T) {
 	gin.SetMode(gin.TestMode)

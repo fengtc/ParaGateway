@@ -582,6 +582,45 @@ func (s *GroupRepoSuite) TestListWithFilters_AccountCount() {
 	s.Require().Equal(int64(1), groups[0].AccountCount, "AccountCount mismatch")
 }
 
+func (s *GroupRepoSuite) TestListWithFiltersSeparatesOpenAIAndCopilotProductPlatforms() {
+	ordinary := &service.Group{
+		Name:             "product-platform-filter-ordinary",
+		Platform:         service.PlatformOpenAI,
+		RateMultiplier:   1,
+		Status:           service.StatusActive,
+		SubscriptionType: service.SubscriptionTypeStandard,
+	}
+	copilotOnly := &service.Group{
+		Name:                  "product-platform-filter-copilot",
+		Platform:              service.PlatformOpenAI,
+		RateMultiplier:        1,
+		Status:                service.StatusActive,
+		SubscriptionType:      service.SubscriptionTypeStandard,
+		GitHubCopilotOnly:     true,
+		AllowMessagesDispatch: true,
+	}
+	s.Require().NoError(s.repo.Create(s.ctx, ordinary))
+	s.Require().NoError(s.repo.Create(s.ctx, copilotOnly))
+
+	params := pagination.PaginationParams{Page: 1, PageSize: 10}
+	openAIGroups, openAIPage, err := s.repo.ListWithFilters(
+		s.ctx, params, service.PlatformOpenAI, "", "product-platform-filter", nil,
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), openAIPage.Total)
+	s.Require().Len(openAIGroups, 1)
+	s.Require().Equal(ordinary.ID, openAIGroups[0].ID)
+
+	copilotGroups, copilotPage, err := s.repo.ListWithFilters(
+		s.ctx, params, "copilot", "", "product-platform-filter", nil,
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), copilotPage.Total)
+	s.Require().Len(copilotGroups, 1)
+	s.Require().Equal(copilotOnly.ID, copilotGroups[0].ID)
+	s.Require().True(copilotGroups[0].GitHubCopilotOnly)
+}
+
 // --- ListActive / ListActiveByPlatform ---
 
 func (s *GroupRepoSuite) TestListActive() {

@@ -32,6 +32,10 @@ func (w *openAIChatFailingWriter) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
+func (w *openAIChatFailingWriter) WriteString(s string) (int, error) {
+	return w.Write([]byte(s))
+}
+
 type openAIChatStreamReadErrorCloser struct {
 	payload []byte
 	err     error

@@ -104,6 +104,29 @@ func TestCopilotCountTokensReturnsNotImplementedWithoutUpstream(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "GitHub Copilot")
 }
 
+func TestCopilotResponsesInputTokensReturnsNotImplementedWithoutUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	body := []byte(`{"model":"gpt-4.1","input":"hello"}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/input_tokens", bytes.NewReader(body))
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(`{"input_tokens":1}`)),
+	}}
+
+	err := newCopilotGatewayTestService(upstream).ForwardResponsesInputTokens(
+		context.Background(), c, newCopilotGatewayTestAccount(), body,
+	)
+
+	require.Error(t, err)
+	require.Equal(t, http.StatusNotImplemented, infraerrors.Code(err))
+	require.Equal(t, http.StatusNotImplemented, recorder.Code)
+	require.Equal(t, "not_supported_error", gjson.Get(recorder.Body.String(), "error.type").String())
+	require.Contains(t, recorder.Body.String(), "GitHub Copilot")
+	require.Empty(t, upstream.requests, "Copilot credentials must never be sent to the OpenAI input_tokens host")
+}
+
 func TestCopilotLiveAndCompactAreRejectedBeforeNetwork(t *testing.T) {
 	account := newCopilotGatewayTestAccount()
 	service := &OpenAIGatewayService{}

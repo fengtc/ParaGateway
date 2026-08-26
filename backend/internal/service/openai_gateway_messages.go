@@ -35,7 +35,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 ) (*OpenAIForwardResult, error) {
 	beginUpstreamResponseModelObservation(c)
 	if account.IsGitHubCopilot() {
-		return s.forwardAnthropicViaRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+		return s.forwardCopilotAnthropic(ctx, c, account, body, defaultMappedModel)
 	}
 
 	// 入口分流（国产供应商 Anthropic 协议）：上游为供应商原生 Anthropic 端点时，

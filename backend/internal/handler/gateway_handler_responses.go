@@ -202,6 +202,14 @@ func (h *GatewayHandler) Responses(c *gin.Context) {
 			}
 		}
 		account := selection.Account
+		if account.IsGitHubCopilot() {
+			if selection.Acquired && selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			fs.FailedAccountIDs[account.ID] = struct{}{}
+			reqLog.Debug("gateway.responses_skip_copilot", zap.Int64("account_id", account.ID))
+			continue
+		}
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 4. Acquire account concurrency slot

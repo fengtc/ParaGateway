@@ -572,6 +572,17 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if _, suppliedInternalCiphertext := input.Credentials[wifClientSecretCiphertextKey]; suppliedInternalCiphertext {
 		return nil, infraerrors.BadRequest("WIF_CIPHERTEXT_INPUT_FORBIDDEN", "WIF ciphertext is managed by the server and cannot be supplied by clients")
 	}
+	normalizedPlatform, normalizedType, normalizedCredentials, isGitHubCopilot, err := NormalizeGitHubCopilotIdentity(
+		input.Platform,
+		input.Type,
+		input.Credentials,
+	)
+	if err != nil {
+		return nil, err
+	}
+	input.Platform = normalizedPlatform
+	input.Type = normalizedType
+	input.Credentials = normalizedCredentials
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -586,15 +597,24 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	// 如果没有指定分组,自动绑定对应平台的默认分组
 	if len(groupIDs) == 0 && !input.SkipDefaultGroupBind {
 		defaultGroupName := input.Platform + "-default"
+		if isGitHubCopilot {
+			// Legacy Copilot accounts were routed through copilot-default. Keep
+			// that product-level identity even though storage is normalized to
+			// platform=openai + github_copilot_only=true.
+			defaultGroupName = legacyGitHubCopilotPlatform + "-default"
+		}
 		groups, err := s.groupRepo.ListActiveByPlatform(ctx, input.Platform)
 		if err == nil {
 			for _, g := range groups {
-				if g.Name == defaultGroupName {
+				if g.Name == defaultGroupName && g.GitHubCopilotOnly == isGitHubCopilot {
 					groupIDs = []int64{g.ID}
 					break
 				}
 			}
 		}
+	}
+	if err := s.validateAccountGroupIDsForIdentity(ctx, groupIDs, isGitHubCopilot); err != nil {
+		return nil, err
 	}
 
 	// 检查混合渠道风险（除非用户已确认）
@@ -691,12 +711,77 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	return account, nil
 }
 
+func oauthProfileUpdateForbidden() error {
+	return infraerrors.BadRequest(
+		"OAUTH_PROFILE_IMMUTABLE",
+		"oauth_profile and the associated OAuth identity can only be managed through the dedicated OAuth flow",
+	)
+}
+
+func githubCopilotCredentialUpdateForbidden(key string) error {
+	return infraerrors.BadRequest(
+		"COPILOT_CREDENTIAL_MANAGED",
+		fmt.Sprintf("GitHub Copilot credential %q is managed by the dedicated Copilot OAuth flow", key),
+	)
+}
+
+func validateOAuthProfileUpdate(account *Account, input *UpdateAccountInput) error {
+	if account == nil || input == nil {
+		return nil
+	}
+	if account.IsGitHubCopilot() {
+		if input.Type != "" && input.Type != AccountTypeOAuth {
+			return oauthProfileUpdateForbidden()
+		}
+		if incoming, supplied := input.Credentials[accountOAuthProfileCredentialKey]; supplied {
+			incomingProfile, ok := incoming.(string)
+			if !ok || !strings.EqualFold(strings.TrimSpace(incomingProfile), CopilotOAuthProfile) {
+				return oauthProfileUpdateForbidden()
+			}
+		}
+		if key, supplied := firstGitHubCopilotServerCredentialKey(input.Credentials); supplied && !input.AllowManagedCredentialUpdate {
+			return githubCopilotCredentialUpdateForbidden(key)
+		}
+		return nil
+	}
+
+	if incoming, supplied := input.Credentials[accountOAuthProfileCredentialKey]; supplied {
+		incomingProfile, ok := incoming.(string)
+		currentProfile := strings.TrimSpace(account.GetCredential(accountOAuthProfileCredentialKey))
+		if !ok || !strings.EqualFold(strings.TrimSpace(incomingProfile), currentProfile) {
+			return oauthProfileUpdateForbidden()
+		}
+		if currentValue, exists := account.Credentials[accountOAuthProfileCredentialKey]; exists {
+			input.Credentials[accountOAuthProfileCredentialKey] = currentValue
+		} else {
+			delete(input.Credentials, accountOAuthProfileCredentialKey)
+		}
+	}
+
+	targetType := account.Type
+	if input.Type != "" {
+		targetType = input.Type
+	}
+	target := &Account{
+		Platform:    account.Platform,
+		Type:        targetType,
+		Credentials: account.Credentials,
+	}
+	if account.IsGitHubCopilot() != target.IsGitHubCopilot() {
+		return oauthProfileUpdateForbidden()
+	}
+	return nil
+}
+
 func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *UpdateAccountInput) (*Account, error) {
 	if _, suppliedInternalCiphertext := input.Credentials[wifClientSecretCiphertextKey]; suppliedInternalCiphertext {
 		return nil, infraerrors.BadRequest("WIF_CIPHERTEXT_INPUT_FORBIDDEN", "WIF ciphertext is managed by the server and cannot be supplied by clients")
 	}
 	account, err := s.accountRepo.GetByID(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateOAuthProfileUpdate(account, input); err != nil {
 		return nil, err
 	}
 	previousCircuitBreakerThreshold := account.EffectiveCircuitBreakerThreshold()
@@ -979,7 +1064,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 
 	// 先验证分组是否存在（在任何写操作之前）
 	if input.GroupIDs != nil {
-		if err := s.validateGroupIDsExist(ctx, *input.GroupIDs); err != nil {
+		if err := s.validateAccountGroupIDsForIdentity(ctx, *input.GroupIDs, wasGitHubCopilot || account.IsGitHubCopilot()); err != nil {
 			return nil, err
 		}
 
@@ -1165,10 +1250,11 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	needMixedChannelCheck := input.GroupIDs != nil && !input.SkipMixedChannelCheck
+	needGroupCompatibilityCheck := input.GroupIDs != nil
 
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
-	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil ||
+	if len(input.Credentials) > 0 || input.ProxyID != nil || needMixedChannelCheck || needGroupCompatibilityCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil ||
 		input.Weight != nil || input.RPMLimit != nil || input.CircuitBreakerThreshold != nil || input.CircuitBreakerCooldownSeconds != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
@@ -1180,6 +1266,33 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, account := range cachedTargets {
 		if account != nil {
 			targetsByID[account.ID] = account
+		}
+	}
+	if key, supplied := firstGitHubCopilotServerCredentialKey(input.Credentials); supplied {
+		for _, account := range cachedTargets {
+			if account != nil && account.IsGitHubCopilot() {
+				return nil, githubCopilotCredentialUpdateForbidden(key)
+			}
+		}
+		if key == accountOAuthProfileCredentialKey {
+			return nil, infraerrors.BadRequest(
+				"OAUTH_PROFILE_BULK_UPDATE_UNSUPPORTED",
+				"oauth_profile cannot be changed with bulk update; use the dedicated OAuth flow",
+			)
+		}
+	}
+	if input.GroupIDs != nil {
+		groups, err := s.loadAccountBindingGroups(ctx, *input.GroupIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, account := range cachedTargets {
+			if account == nil {
+				continue
+			}
+			if err := validateAccountBindingGroups(account.IsGitHubCopilot(), groups); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if openAISettings.any() {
@@ -1594,6 +1707,10 @@ func (s *adminServiceImpl) CreateShadow(ctx context.Context, parentID int64, opt
 		return nil, infraerrors.New(http.StatusBadRequest, "SPARK_SHADOW_INVALID_PARENT",
 			"spark shadow requires an OpenAI OAuth parent account")
 	}
+	if parent.IsGitHubCopilot() {
+		return nil, infraerrors.New(http.StatusBadRequest, "SPARK_SHADOW_COPILOT_UNSUPPORTED",
+			"GitHub Copilot accounts cannot have spark shadow accounts")
+	}
 	// G6:母账号本身不能是影子,否则会建出二级影子——resolveCredentialAccount 只解一层,
 	// 会解析到无凭据的一级影子,进入坏调度/上游失败。
 	if parent.IsCredentialShadow() {
@@ -1805,6 +1922,96 @@ func (s *adminServiceImpl) validateGroupIDsExist(ctx context.Context, groupIDs [
 		}
 	}
 	return nil
+}
+
+// ValidateGitHubCopilotGroupPlatform keeps Copilot account storage normalized
+// as OpenAI OAuth while allowing it to serve either OpenAI or Anthropic groups.
+func ValidateGitHubCopilotGroupPlatform(groupPlatform string) error {
+	platform := strings.TrimSpace(groupPlatform)
+	if strings.EqualFold(platform, PlatformOpenAI) || strings.EqualFold(platform, PlatformAnthropic) {
+		return nil
+	}
+	return infraerrors.BadRequest(
+		"COPILOT_GROUP_PLATFORM_MISMATCH",
+		"Copilot 账号只能绑定 OpenAI 或 Anthropic 平台分组",
+	)
+}
+
+func validateAccountBindingGroups(isGitHubCopilot bool, groups []*Group) error {
+	for _, group := range groups {
+		if group == nil {
+			return fmt.Errorf("get group: %w", ErrGroupNotFound)
+		}
+		if group.GitHubCopilotOnly && !isGitHubCopilot {
+			return infraerrors.BadRequest(
+				"COPILOT_ONLY_GROUP_ACCOUNT_MISMATCH",
+				"GitHub Copilot 专用分组只能绑定 GitHub Copilot OAuth 账号",
+			)
+		}
+		if isGitHubCopilot {
+			if err := ValidateGitHubCopilotGroupPlatform(group.Platform); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateAccountsForTargetGroup(group *Group, accounts []*Account) error {
+	if group == nil || !group.GitHubCopilotOnly {
+		return nil
+	}
+	for _, account := range accounts {
+		if account == nil || !account.IsGitHubCopilot() {
+			return infraerrors.BadRequest(
+				"COPILOT_ONLY_GROUP_ACCOUNT_MISMATCH",
+				"GitHub Copilot 专用分组只能绑定 GitHub Copilot OAuth 账号",
+			)
+		}
+	}
+	return nil
+}
+
+func (s *adminServiceImpl) loadAccountBindingGroups(ctx context.Context, groupIDs []int64) ([]*Group, error) {
+	if len(groupIDs) == 0 {
+		return nil, nil
+	}
+	if s.groupRepo == nil {
+		return nil, errors.New("group repository not configured")
+	}
+
+	seen := make(map[int64]struct{}, len(groupIDs))
+	groups := make([]*Group, 0, len(groupIDs))
+	for _, groupID := range groupIDs {
+		if groupID <= 0 {
+			return nil, fmt.Errorf("get group: %w", ErrGroupNotFound)
+		}
+		if _, exists := seen[groupID]; exists {
+			continue
+		}
+		seen[groupID] = struct{}{}
+		group, err := s.groupRepo.GetByIDLite(ctx, groupID)
+		if err != nil {
+			return nil, fmt.Errorf("get group: %w", err)
+		}
+		if group == nil {
+			return nil, fmt.Errorf("get group: %w", ErrGroupNotFound)
+		}
+		groups = append(groups, group)
+	}
+	return groups, nil
+}
+
+func (s *adminServiceImpl) validateAccountGroupIDsForIdentity(ctx context.Context, groupIDs []int64, isGitHubCopilot bool) error {
+	groups, err := s.loadAccountBindingGroups(ctx, groupIDs)
+	if err != nil {
+		return err
+	}
+	return validateAccountBindingGroups(isGitHubCopilot, groups)
+}
+
+func (s *adminServiceImpl) validateGitHubCopilotGroupIDs(ctx context.Context, groupIDs []int64) error {
+	return s.validateAccountGroupIDsForIdentity(ctx, groupIDs, true)
 }
 
 // CheckMixedChannelRisk checks whether target groups contain mixed channels for the current account platform.

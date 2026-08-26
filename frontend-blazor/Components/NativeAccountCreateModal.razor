@@ -1515,7 +1515,10 @@
     }
     private static long ParseGroupId(string value) => long.TryParse(value, out var id) ? id : 0;
     private bool IsGroupAvailable(GroupDto group) =>
-        AccountGroupSelectionPolicy.IsSelectable(group, platform == "copilot" ? "openai" : platform);
+        AccountGroupSelectionPolicy.IsSelectable(
+            group,
+            platform == "copilot" ? "openai" : platform,
+            githubCopilot: platform == "copilot");
     private static int ParseInt(object? value, int fallback, int min, int max)
     {
         var parsed = int.TryParse(value?.ToString(), out var result) ? result : fallback;

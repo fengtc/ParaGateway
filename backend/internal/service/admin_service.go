@@ -382,8 +382,8 @@ type CreateAccountInput struct {
 	// IdempotencyKey is server-owned operation identity for recovering an
 	// account when a create response is ambiguous. HTTP account payloads never
 	// bind this field directly.
-	IdempotencyKey                string
-	ProbeEnabled                  *bool
+	IdempotencyKey string
+	ProbeEnabled   *bool
 	// SkipDefaultGroupBind prevents auto-binding to platform default group when GroupIDs is empty.
 	SkipDefaultGroupBind bool
 	// SkipMixedChannelCheck skips the mixed channel risk check when binding groups.
@@ -422,6 +422,9 @@ type UpdateAccountInput struct {
 	ProbeEnabled                  *bool
 	RateSyncEnabled               *bool
 	SkipMixedChannelCheck         bool // 跳过混合渠道检查（用户已确认风险）
+	// AllowManagedCredentialUpdate is internal-only. It permits the trusted
+	// server-side refresh path to rotate managed GitHub Copilot credentials.
+	AllowManagedCredentialUpdate bool
 }
 
 // BulkUpdateAccountsInput describes the payload for bulk updating accounts.

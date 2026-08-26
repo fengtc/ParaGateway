@@ -239,6 +239,9 @@ func (Group) Fields() []ent.Field {
 		field.Bool("allow_messages_dispatch").
 			Default(false).
 			Comment("是否允许 /v1/messages 调度到此 OpenAI 分组"),
+		field.Bool("github_copilot_only").
+			Default(false).
+			Comment("该规范化 OpenAI 分组是否只允许 GitHub Copilot OAuth 账号，并恢复旧 Copilot 网关行为"),
 		field.Bool("allow_live").
 			Default(false).
 			Comment("是否允许此 OpenAI 分组访问 Live 接口"),

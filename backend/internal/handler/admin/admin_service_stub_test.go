@@ -38,6 +38,7 @@ type stubAdminService struct {
 	getAccountResult                    *service.Account
 	updateAccountCalls                  int
 	updateAccountExtraCalls             int
+	clearAccountErrorCalls              int
 	checkMixedErr                       error
 	lastMixedCheck                      struct {
 		accountID int64
@@ -525,6 +526,7 @@ func (s *stubAdminService) RefreshAccountCredentials(ctx context.Context, id int
 }
 
 func (s *stubAdminService) ClearAccountError(ctx context.Context, id int64) (*service.Account, error) {
+	s.clearAccountErrorCalls++
 	account := service.Account{ID: id, Name: "account", Status: service.StatusActive}
 	return &account, nil
 }

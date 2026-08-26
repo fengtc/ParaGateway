@@ -695,7 +695,10 @@ func normalizeCopilotModel(model string) string {
 	model = strings.TrimSpace(model)
 	match := copilotHyphenatedClaudeModel.FindStringSubmatch(model)
 	if len(match) == 4 {
-		return match[1] + "." + match[2] + match[3]
+		// Claude Code may append Anthropic's dated suffix to the public model
+		// alias. Copilot's catalog uses the undated dotted ID, so retaining the
+		// suffix would turn a valid alias into an unknown upstream model.
+		return match[1] + "." + match[2]
 	}
 	return model
 }

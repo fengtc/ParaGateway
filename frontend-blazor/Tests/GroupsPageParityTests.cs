@@ -20,6 +20,8 @@ public sealed class GroupsPageParityTests
         Assert.DoesNotContain("class=\"page-header\"", markup, StringComparison.Ordinal);
         Assert.Contains("搜索分组...", markup, StringComparison.Ordinal);
         Assert.Contains("全部平台", markup, StringComparison.Ordinal);
+        Assert.Contains("value=\"copilot\"", markup, StringComparison.Ordinal);
+        Assert.Contains("GitHub Copilot", markup, StringComparison.Ordinal);
         Assert.Contains("全部状态", markup, StringComparison.Ordinal);
         Assert.Contains("全部分组", markup, StringComparison.Ordinal);
         Assert.Contains("列设置", markup, StringComparison.Ordinal);
@@ -33,6 +35,7 @@ public sealed class GroupsPageParityTests
         Assert.Contains("group-hidden-columns", markup, StringComparison.Ordinal);
         Assert.Contains("GetAdminGroupUsageSummaryAsync", markup, StringComparison.Ordinal);
         Assert.Contains("GetAdminGroupCapacitySummaryAsync", markup, StringComparison.Ordinal);
+        Assert.Contains("group.GitHubCopilotOnly ? \"copilot\" : group.Platform", markup, StringComparison.Ordinal);
         Assert.Contains("UpdateAdminGroupSortOrderAsync", markup, StringComparison.Ordinal);
         foreach (var platform in new[] { "kimi", "zhipu", "deepseek" })
         {
@@ -77,6 +80,7 @@ public sealed class GroupsPageParityTests
               "account_count": 7,
               "active_account_count": 5,
               "rate_limited_account_count": 1,
+              "github_copilot_only": true,
               "sort_order": 20,
               "daily_limit_usd": 10,
               "weekly_limit_usd": 50,
@@ -93,6 +97,7 @@ public sealed class GroupsPageParityTests
         Assert.Equal(7, dto.AccountCount);
         Assert.Equal(5, dto.ActiveAccountCount);
         Assert.Equal(1, dto.RateLimitedAccountCount);
+        Assert.True(dto.GitHubCopilotOnly);
         Assert.Equal(100, dto.MonthlyLimitUsd);
         Assert.Equal(300, dto.RpmLimit);
         Assert.NotNull(capacity);

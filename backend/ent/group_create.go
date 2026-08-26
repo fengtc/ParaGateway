@@ -690,6 +690,20 @@ func (_c *GroupCreate) SetNillableAllowMessagesDispatch(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetGithubCopilotOnly sets the "github_copilot_only" field.
+func (_c *GroupCreate) SetGithubCopilotOnly(v bool) *GroupCreate {
+	_c.mutation.SetGithubCopilotOnly(v)
+	return _c
+}
+
+// SetNillableGithubCopilotOnly sets the "github_copilot_only" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableGithubCopilotOnly(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetGithubCopilotOnly(*v)
+	}
+	return _c
+}
+
 // SetAllowLive sets the "allow_live" field.
 func (_c *GroupCreate) SetAllowLive(v bool) *GroupCreate {
 	_c.mutation.SetAllowLive(v)
@@ -1091,6 +1105,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultAllowMessagesDispatch
 		_c.mutation.SetAllowMessagesDispatch(v)
 	}
+	if _, ok := _c.mutation.GithubCopilotOnly(); !ok {
+		v := group.DefaultGithubCopilotOnly
+		_c.mutation.SetGithubCopilotOnly(v)
+	}
 	if _, ok := _c.mutation.AllowLive(); !ok {
 		v := group.DefaultAllowLive
 		_c.mutation.SetAllowLive(v)
@@ -1282,6 +1300,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.AllowMessagesDispatch(); !ok {
 		return &ValidationError{Name: "allow_messages_dispatch", err: errors.New(`ent: missing required field "Group.allow_messages_dispatch"`)}
+	}
+	if _, ok := _c.mutation.GithubCopilotOnly(); !ok {
+		return &ValidationError{Name: "github_copilot_only", err: errors.New(`ent: missing required field "Group.github_copilot_only"`)}
 	}
 	if _, ok := _c.mutation.AllowLive(); !ok {
 		return &ValidationError{Name: "allow_live", err: errors.New(`ent: missing required field "Group.allow_live"`)}
@@ -1555,6 +1576,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.AllowMessagesDispatch(); ok {
 		_spec.SetField(group.FieldAllowMessagesDispatch, field.TypeBool, value)
 		_node.AllowMessagesDispatch = value
+	}
+	if value, ok := _c.mutation.GithubCopilotOnly(); ok {
+		_spec.SetField(group.FieldGithubCopilotOnly, field.TypeBool, value)
+		_node.GithubCopilotOnly = value
 	}
 	if value, ok := _c.mutation.AllowLive(); ok {
 		_spec.SetField(group.FieldAllowLive, field.TypeBool, value)
@@ -2603,6 +2628,18 @@ func (u *GroupUpsert) SetAllowMessagesDispatch(v bool) *GroupUpsert {
 // UpdateAllowMessagesDispatch sets the "allow_messages_dispatch" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateAllowMessagesDispatch() *GroupUpsert {
 	u.SetExcluded(group.FieldAllowMessagesDispatch)
+	return u
+}
+
+// SetGithubCopilotOnly sets the "github_copilot_only" field.
+func (u *GroupUpsert) SetGithubCopilotOnly(v bool) *GroupUpsert {
+	u.Set(group.FieldGithubCopilotOnly, v)
+	return u
+}
+
+// UpdateGithubCopilotOnly sets the "github_copilot_only" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateGithubCopilotOnly() *GroupUpsert {
+	u.SetExcluded(group.FieldGithubCopilotOnly)
 	return u
 }
 
@@ -3800,6 +3837,20 @@ func (u *GroupUpsertOne) SetAllowMessagesDispatch(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateAllowMessagesDispatch() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateAllowMessagesDispatch()
+	})
+}
+
+// SetGithubCopilotOnly sets the "github_copilot_only" field.
+func (u *GroupUpsertOne) SetGithubCopilotOnly(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetGithubCopilotOnly(v)
+	})
+}
+
+// UpdateGithubCopilotOnly sets the "github_copilot_only" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateGithubCopilotOnly() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateGithubCopilotOnly()
 	})
 }
 
@@ -5190,6 +5241,20 @@ func (u *GroupUpsertBulk) SetAllowMessagesDispatch(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateAllowMessagesDispatch() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateAllowMessagesDispatch()
+	})
+}
+
+// SetGithubCopilotOnly sets the "github_copilot_only" field.
+func (u *GroupUpsertBulk) SetGithubCopilotOnly(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetGithubCopilotOnly(v)
+	})
+}
+
+// UpdateGithubCopilotOnly sets the "github_copilot_only" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateGithubCopilotOnly() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateGithubCopilotOnly()
 	})
 }
 

@@ -1801,6 +1801,9 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatibleReason(ctx con
 	if account == nil {
 		return false, "account_nil"
 	}
+	if IsGitHubCopilotOnly(ctx) && !account.IsGitHubCopilot() {
+		return false, "github_copilot_required"
+	}
 	if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {
 		return false, "runtime_blocked"
 	}
@@ -2195,6 +2198,10 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		}
 		// WaitPlan 尚未取得并发槽；RPM 必须延迟到 handler 真正拿槽后再计数。
 		if !selection.Acquired {
+			if IsGitHubCopilotOnly(ctx) {
+				localExcluded[selection.Account.ID] = struct{}{}
+				continue
+			}
 			return selection, decision, nil
 		}
 		gate, err := acquireAccountRuntimePolicy(ctx, s.accountRuntimePolicy, selection.Account)
@@ -2954,7 +2961,7 @@ func openAIFreshUpstreamBillingRate(account *Account, now time.Time) (float64, b
 }
 
 func openAIQuotaHeadroomFactor(account *Account, now time.Time) float64 {
-	if account == nil || len(account.Extra) == 0 || openAIQuotaHeadroomSnapshotStale(account.Extra, now) {
+	if account == nil || account.IsGitHubCopilot() || len(account.Extra) == 0 || openAIQuotaHeadroomSnapshotStale(account.Extra, now) {
 		return openAIQuotaHeadroomNeutralFactor
 	}
 	primaryUsedPercent, ok := resolveAccountExtraNumber(account.Extra, "codex_primary_used_percent", "codex_7d_used_percent")

@@ -10,6 +10,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // TestIsOpenAIWSTokenEvent_TerminalEventsExcluded 覆盖 isOpenAIWSTokenEvent 的回归用例。
@@ -198,6 +199,20 @@ func TestOpenAIWSTerminalEvent_CopilotQuotaExceededPausesUntilNextUTCMonth(t *te
 	require.Equal(t, CopilotMonthlyQuotaExceededReason, repo.reason)
 	require.Equal(t, nextCopilotMonthlyQuotaReset(time.Now().UTC()), repo.until)
 	require.Equal(t, CopilotMonthlyQuotaExceededReason, account.TempUnschedulableReason)
+}
+
+func TestNormalizeOpenAIWSCopilotQuotaPayload_IsScopedToCopilot(t *testing.T) {
+	payload := []byte(`{"type":"response.failed","response":{"error":{"status_code":402,"code":"quota_exceeded","message":"monthly quota exhausted"}}}`)
+	copilot := newCopilotGatewayTestAccount()
+
+	normalized := normalizeOpenAIWSCopilotQuotaPayload(copilot, payload)
+	require.Equal(t, "quota_exceeded", gjson.GetBytes(normalized, "error.code").String())
+	require.Equal(t, "quota_exceeded", gjson.GetBytes(normalized, "response.error.code").String())
+
+	ordinaryOpenAI := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	require.Equal(t, payload, normalizeOpenAIWSCopilotQuotaPayload(ordinaryOpenAI, payload))
+	nonQuotaPayload := []byte(`{"type":"response.failed","response":{"error":{"status_code":402,"code":"billing_issue"}}}`)
+	require.Equal(t, nonQuotaPayload, normalizeOpenAIWSCopilotQuotaPayload(copilot, nonQuotaPayload))
 }
 
 func TestOpenAIWSDial5xxRecordsModelTransient(t *testing.T) {

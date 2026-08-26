@@ -55,6 +55,11 @@ func (s *OpenAIGatewayService) ForwardResponsesInputTokens(
 		writeOpenAIResponsesInputTokensError(c, http.StatusServiceUnavailable, "api_error", "No available OpenAI accounts")
 		return fmt.Errorf("responses input_tokens: missing account")
 	}
+	if account.IsGitHubCopilot() {
+		err := copilotUnsupportedEndpointError("Responses input_tokens")
+		writeOpenAIResponsesInputTokensError(c, infraerrors.Code(err), "not_supported_error", infraerrors.Message(err))
+		return err
+	}
 
 	prepared, err := prepareNativeOpenAIInputTokensCountRequest(body, account)
 	if err != nil {

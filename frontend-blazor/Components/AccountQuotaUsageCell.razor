@@ -158,10 +158,7 @@
     private AccountUsageInfoDto? CurrentUsage => localUsage ?? Usage;
     private string? CurrentError => localError ?? UsageError ?? (string.IsNullOrWhiteSpace(CurrentUsage?.Error) ? null : CurrentUsage.Error);
     private string AccountMode => ReadCredential("account_mode");
-    private string OAuthProfile => ReadCredential("oauth_profile");
-    private bool IsCopilot => string.Equals(Account.Platform, "copilot", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(OAuthProfile, "github_copilot", StringComparison.OrdinalIgnoreCase)
-        || string.Equals(ReadExtraString("oauth_profile"), "github_copilot", StringComparison.OrdinalIgnoreCase);
+    private bool IsCopilot => AccountProviderIdentity.IsCanonicalGitHubCopilot(Account);
     private bool IsOpenAIOAuth => Account.Platform == "openai" && Account.Type == "oauth" && !IsCopilot;
     private bool IsAnthropicOAuthOrSetupToken => Account.Platform == "anthropic" && (Account.Type == "oauth" || Account.Type == "setup-token");
     private bool ShowsTodayStatsInUsageWindow => !IsOpenAIOAuth && !IsAnthropicOAuthOrSetupToken;

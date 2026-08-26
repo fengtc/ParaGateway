@@ -163,6 +163,40 @@ func TestForwardAsAnthropic_ForceChatCompletionsNonStreaming(t *testing.T) {
 	require.Equal(t, 2, result.Usage.OutputTokens)
 	require.Equal(t, 1, result.Usage.CacheReadInputTokens)
 	require.False(t, result.Stream)
+	require.Equal(t, messagesChatFallbackUpstreamEndpoint, result.UpstreamEndpoint)
+	require.Equal(t, messagesChatFallbackUpstreamEndpoint, GetActualOpenAIUpstreamEndpoint(c))
+}
+
+func TestForwardAsAnthropic_CopilotChatFallbackRestoresLegacyRequestContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	body := []byte(`{"model":"gpt-4.1","max_tokens":9999,"stop_sequences":["END","STOP"],"metadata":{"user_id":"copilot-session-123"},"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/copilot/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "Claude-Code/9.9")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_copilot","object":"chat.completion","model":"gpt-4.1","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+		)),
+	}}
+	svc := newCopilotGatewayTestService(upstream)
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, newCopilotGatewayTestAccount(), body, "", "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, copilotMessagesMaxOutputTokens, int(gjson.GetBytes(upstream.lastBody, "max_tokens").Int()))
+	require.False(t, gjson.GetBytes(upstream.lastBody, "max_completion_tokens").Exists())
+	require.Equal(t, []string{"END", "STOP"}, []string{
+		gjson.GetBytes(upstream.lastBody, "stop.0").String(),
+		gjson.GetBytes(upstream.lastBody, "stop.1").String(),
+	})
+	require.Equal(t, "copilot-session-123", gjson.GetBytes(upstream.lastBody, "user").String())
+	require.Equal(t, "GitHubCopilotChat/0.26.7", upstream.lastReq.Header.Get("User-Agent"))
 }
 
 // Covers the fully-new streaming composition: text block is still open when
@@ -224,6 +258,8 @@ func TestForwardAsAnthropic_ForceChatCompletionsStreamingClosesOpenBlockOnDone(t
 	require.Equal(t, 3, result.Usage.OutputTokens)
 	require.True(t, result.Stream)
 	require.NotNil(t, result.FirstTokenMs)
+	require.Equal(t, messagesChatFallbackUpstreamEndpoint, result.UpstreamEndpoint)
+	require.Equal(t, messagesChatFallbackUpstreamEndpoint, GetActualOpenAIUpstreamEndpoint(c))
 }
 
 // Covers multi-chunk tool_call fragments aggregated by index and finalized as

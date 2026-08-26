@@ -40,6 +40,7 @@ func profitAuthTestAPIKey() *APIKey {
 			ProfitControlEnabled: true,
 			ProfitMinMargin:      0.2,
 			ProfitSafetyBuffer:   0.05,
+			GitHubCopilotOnly:    true,
 		},
 	}
 }
@@ -53,7 +54,7 @@ func TestAPIKeyAuthSnapshotProfitControlRoundtrip(t *testing.T) {
 	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
 	require.NotNil(t, snapshot)
 	require.Equal(t, apiKeyAuthSnapshotVersion, snapshot.Version)
-	require.Equal(t, 20, snapshot.Version, "v20 起认证快照携带分组长上下文与模型定价字段")
+	require.Equal(t, 21, snapshot.Version, "v21 起认证快照携带 Copilot-only 分组标记")
 
 	// 模拟 L2 缓存的完整 JSON 往返（与 apiKeyCache.SetAuthCache/GetAuthCache 同构）。
 	payload, err := json.Marshal(&APIKeyAuthCacheEntry{Snapshot: snapshot})
@@ -66,6 +67,7 @@ func TestAPIKeyAuthSnapshotProfitControlRoundtrip(t *testing.T) {
 	require.True(t, used)
 	require.NotNil(t, materialized.Group)
 	require.True(t, materialized.Group.Hydrated)
+	require.True(t, materialized.Group.GitHubCopilotOnly)
 	require.True(t, materialized.Group.ProfitControlEnabled)
 	require.InDelta(t, 0.2, materialized.Group.ProfitMinMargin, 1e-12)
 	require.InDelta(t, 0.05, materialized.Group.ProfitSafetyBuffer, 1e-12)

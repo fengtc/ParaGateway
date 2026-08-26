@@ -384,10 +384,17 @@ func setGroupContext(c *gin.Context, group *service.Group) {
 	if !service.IsGroupContextValid(group) {
 		return
 	}
+	ctx := c.Request.Context()
+	if group.GitHubCopilotOnly {
+		ctx = service.WithGitHubCopilotOnly(ctx)
+		ctx = context.WithValue(ctx, ctxkey.ForcePlatform, service.PlatformOpenAI)
+		c.Set(string(ContextKeyForcePlatform), service.PlatformOpenAI)
+		c.Request = c.Request.WithContext(ctx)
+	}
 	if existing, ok := c.Request.Context().Value(ctxkey.Group).(*service.Group); ok && existing != nil && existing.ID == group.ID && service.IsGroupContextValid(existing) {
 		return
 	}
-	ctx := context.WithValue(c.Request.Context(), ctxkey.Group, group)
+	ctx = context.WithValue(c.Request.Context(), ctxkey.Group, group)
 	c.Request = c.Request.WithContext(ctx)
 }
 

@@ -431,6 +431,63 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 			},
 		},
 		{
+			name: "filter_by_copilot_matches_only_canonical_identity",
+			setup: func(client *dbent.Client) {
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "canonical-copilot", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+					Credentials: map[string]any{"oauth_profile": service.CopilotOAuthProfile},
+				})
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "ordinary-openai", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+					Credentials: map[string]any{"oauth_profile": "chatgpt"},
+				})
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "wrong-platform", Platform: service.PlatformAnthropic, Type: service.AccountTypeOAuth,
+					Credentials: map[string]any{"oauth_profile": service.CopilotOAuthProfile},
+				})
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "wrong-type", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+					Credentials: map[string]any{"oauth_profile": service.CopilotOAuthProfile},
+				})
+			},
+			platform:  "copilot",
+			wantCount: 1,
+			validate: func(accounts []service.Account) {
+				s.Require().Equal("canonical-copilot", accounts[0].Name)
+				s.Require().True(accounts[0].IsGitHubCopilot())
+			},
+		},
+		{
+			name: "filter_by_openai_excludes_only_canonical_copilot_identity",
+			setup: func(client *dbent.Client) {
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "canonical-copilot", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+					Credentials: map[string]any{"oauth_profile": service.CopilotOAuthProfile},
+				})
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "ordinary-openai-oauth", Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth,
+					Credentials: map[string]any{"oauth_profile": "chatgpt"},
+				})
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "ordinary-openai-apikey", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				})
+				mustCreateAccount(s.T(), client, &service.Account{
+					Name: "noncanonical-profile", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+					Credentials: map[string]any{"oauth_profile": service.CopilotOAuthProfile},
+				})
+			},
+			platform:  service.PlatformOpenAI,
+			wantCount: 3,
+			validate: func(accounts []service.Account) {
+				names := make([]string, 0, len(accounts))
+				for _, account := range accounts {
+					names = append(names, account.Name)
+					s.Require().False(account.IsGitHubCopilot())
+				}
+				s.ElementsMatch([]string{"ordinary-openai-oauth", "ordinary-openai-apikey", "noncanonical-profile"}, names)
+			},
+		},
+		{
 			name: "filter_by_type",
 			setup: func(client *dbent.Client) {
 				mustCreateAccount(s.T(), client, &service.Account{Name: "t1", Type: service.AccountTypeOAuth})

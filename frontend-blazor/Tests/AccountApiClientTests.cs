@@ -190,6 +190,9 @@ public sealed class AccountApiClientTests
             Platform = "openai",
             Type = "oauth",
             BaseUrl = "https://api.githubcopilot.com",
+            AccessToken = "browser-must-not-send",
+            RefreshToken = "browser-refresh-must-not-send",
+            CredentialsJson = """{"oauth_profile":"github_copilot","github_access_token":"github-secret","github_login":"octocat-old","github_user_id":"123","expires_at":"2026-08-26T00:00:00Z","refresh_at":"2026-08-25T23:30:00Z"}""",
             BillingUsername = "octocat",
             BillingPat = string.Empty,
             HasBillingPat = true,
@@ -206,8 +209,8 @@ public sealed class AccountApiClientTests
         using (var update = JsonDocument.Parse(handler.LastRequestBody))
         {
             var credentials = update.RootElement.GetProperty("credentials");
-            Assert.Equal("github_copilot", credentials.GetProperty("oauth_profile").GetString());
-            Assert.Equal("https://api.githubcopilot.com", credentials.GetProperty("base_url").GetString());
+            foreach (var key in new[] { "oauth_profile", "access_token", "refresh_token", "github_access_token", "github_login", "github_user_id", "base_url", "expires_at", "refresh_at" })
+                Assert.False(credentials.TryGetProperty(key, out _), $"Copilot edit must not send managed credential '{key}'.");
             Assert.Equal("octocat", credentials.GetProperty("billing_username").GetString());
             Assert.False(credentials.TryGetProperty("billing_pat", out _));
             Assert.Equal("gpt-4.1", credentials.GetProperty("model_mapping").GetProperty("claude-*").GetString());
@@ -225,6 +228,30 @@ public sealed class AccountApiClientTests
         using var replacement = JsonDocument.Parse(handler.LastRequestBody);
         Assert.Equal("replacement-pat-test", replacement.RootElement.GetProperty("credentials").GetProperty("billing_pat").GetString());
         Assert.False(replacement.RootElement.GetProperty("extra").TryGetProperty("billing_auto_pause_disabled", out _));
+    }
+
+    [Fact]
+    public async Task CopilotCreateStillWritesCanonicalProfile()
+    {
+        var handler = new AccountHandler(string.Empty);
+        var api = CreateApi(handler);
+
+        await api.CreateAccountAsync(new AccountInput
+        {
+            IsCopilotProfile = true,
+            Name = "Copilot create",
+            Platform = "openai",
+            Type = "oauth",
+            AccessToken = "short-lived-token",
+            BaseUrl = "https://api.githubcopilot.com",
+            BillingUsername = "octocat"
+        });
+
+        using var request = JsonDocument.Parse(handler.LastRequestBody);
+        var credentials = request.RootElement.GetProperty("credentials");
+        Assert.Equal("github_copilot", credentials.GetProperty("oauth_profile").GetString());
+        Assert.Equal("short-lived-token", credentials.GetProperty("access_token").GetString());
+        Assert.Equal("https://api.githubcopilot.com", credentials.GetProperty("base_url").GetString());
     }
 
     [Theory]

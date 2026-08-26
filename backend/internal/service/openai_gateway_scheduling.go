@@ -151,6 +151,9 @@ func (s *OpenAIGatewayService) GenerateSessionHash(c *gin.Context, body []byte) 
 	if c == nil {
 		return ""
 	}
+	if c.Request != nil && IsGitHubCopilotOnly(c.Request.Context()) {
+		return ""
+	}
 
 	sessionID := explicitOpenAIRequestSessionID(c, body)
 	if sessionID == "" && len(body) > 0 {
@@ -354,6 +357,9 @@ func isOpenAICompatibleAccountEligibleForRequestBeforeProfit(ctx context.Context
 	if account == nil || account.Platform != platform || !account.IsOpenAICompatible() || !account.IsSchedulableForModelWithContext(ctx, requestedModel) {
 		return false
 	}
+	if IsGitHubCopilotOnly(ctx) && !account.IsGitHubCopilot() {
+		return false
+	}
 	if account.IsOpenAI() {
 		if paused, reason := shouldAutoPauseOpenAIAccountByQuota(ctx, account); paused {
 			// Debug level: this fires per-candidate on the scheduling hot path, so Info
@@ -465,7 +471,7 @@ func grokQuotaSnapshotStaleForPause(snapshot *xai.QuotaSnapshot, now time.Time) 
 }
 
 func shouldAutoPauseOpenAIAccountByQuota(ctx context.Context, account *Account) (bool, openAIQuotaAutoPauseDecision) {
-	if account == nil || !account.IsOpenAI() {
+	if account == nil || !account.IsOpenAI() || account.IsGitHubCopilot() {
 		return false, openAIQuotaAutoPauseDecision{}
 	}
 	// Per-account explicit-disable flags must take precedence over the global default.
@@ -1028,6 +1034,10 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 		}
 		// WaitPlan 尚未取得并发槽；RPM 必须延迟到 handler 真正拿槽后再计数。
 		if !selection.Acquired {
+			if IsGitHubCopilotOnly(ctx) {
+				localExcluded[selection.Account.ID] = struct{}{}
+				continue
+			}
 			return selection, nil
 		}
 		gate, err := acquireAccountRuntimePolicy(ctx, s.accountRuntimePolicy, selection.Account)

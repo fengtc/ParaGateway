@@ -1595,6 +1595,36 @@ func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_AutoPauseBy5hT
 	require.Equal(t, int64(35002), account.ID)
 }
 
+func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_CopilotIgnoresCodexQuotaAutoPause(t *testing.T) {
+	ctx := WithGitHubCopilotOnly(context.Background())
+	copilot := Account{
+		ID:          35901,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"oauth_profile": CopilotOAuthProfile,
+		},
+		Extra: map[string]any{
+			"codex_5h_used_percent":   100.0,
+			"codex_7d_used_percent":   100.0,
+			"auto_pause_5h_threshold": 0.95,
+			"auto_pause_7d_threshold": 0.95,
+		},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo: schedulerTestOpenAIAccountRepo{accounts: []Account{copilot}},
+		cfg:         &config.Config{},
+	}
+
+	account, err := svc.SelectAccountForModelWithExclusions(ctx, nil, "", "gpt-5.1", nil)
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	require.Equal(t, copilot.ID, account.ID)
+}
+
 func TestOpenAIGatewayService_SelectAccountForModelWithExclusions_AllowsBelow5hThreshold(t *testing.T) {
 	ctx := context.Background()
 	primary := Account{
@@ -3249,6 +3279,63 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_LoadBalanceTopKExcludes
 	// Only the healthy account should ever enter the candidate pool; the paused one
 	// must be filtered out at the initial-filter stage.
 	require.Equal(t, 1, decision.CandidateCount)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+}
+
+func TestOpenAIGatewayService_SelectAccountWithScheduler_CopilotIgnoresCodexQuotaAutoPause(t *testing.T) {
+	ctx := WithGitHubCopilotOnly(context.Background())
+	groupID := int64(112)
+	copilot := Account{
+		ID:          37201,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Priority:    0,
+		GroupIDs:    []int64{groupID},
+		Credentials: map[string]any{
+			"oauth_profile": CopilotOAuthProfile,
+		},
+		Extra: map[string]any{
+			"codex_5h_used_percent":   100.0,
+			"codex_7d_used_percent":   100.0,
+			"auto_pause_5h_threshold": 0.95,
+			"auto_pause_7d_threshold": 0.95,
+		},
+	}
+	concurrencyCache := schedulerTestConcurrencyCache{
+		loadMap: map[int64]*AccountLoadInfo{
+			copilot.ID: {AccountID: copilot.ID, LoadRate: 0, WaitingCount: 0},
+		},
+		acquireResults: map[int64]bool{
+			copilot.ID: true,
+		},
+	}
+	svc := &OpenAIGatewayService{
+		accountRepo:        schedulerTestOpenAIAccountRepo{accounts: []Account{copilot}},
+		cache:              &schedulerTestGatewayCache{},
+		cfg:                &config.Config{},
+		rateLimitService:   newOpenAIAdvancedSchedulerRateLimitService("true"),
+		concurrencyService: NewConcurrencyService(concurrencyCache),
+	}
+
+	selection, _, err := svc.SelectAccountWithScheduler(
+		ctx,
+		&groupID,
+		"",
+		"",
+		"gpt-5.1",
+		nil,
+		OpenAIUpstreamTransportAny,
+		false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, copilot.ID, selection.Account.ID)
 	if selection.ReleaseFunc != nil {
 		selection.ReleaseFunc()
 	}

@@ -318,7 +318,7 @@ func TestImportDataReusesProxyAndSkipsDefaultGroup(t *testing.T) {
 	require.True(t, adminSvc.createdAccounts[0].SkipDefaultGroupBind)
 }
 
-func TestNormalizeLegacyCopilotImportPreservesAccountFieldsAndCredentials(t *testing.T) {
+func TestSharedCopilotIdentityNormalizationPreservesAccountFieldsAndCredentials(t *testing.T) {
 	notes := "legacy account"
 	proxyKey := "https|proxy.example|443|user|pass"
 	rateMultiplier := 1.25
@@ -342,7 +342,16 @@ func TestNormalizeLegacyCopilotImportPreservesAccountFieldsAndCredentials(t *tes
 	}
 	originalCredentials := item.Credentials
 
-	require.NoError(t, normalizeLegacyCopilotImport(&item))
+	platform, accountType, credentials, isGitHubCopilot, err := service.NormalizeGitHubCopilotIdentity(
+		item.Platform,
+		item.Type,
+		item.Credentials,
+	)
+	require.NoError(t, err)
+	require.True(t, isGitHubCopilot)
+	item.Platform = platform
+	item.Type = accountType
+	item.Credentials = credentials
 	require.Equal(t, service.PlatformOpenAI, item.Platform)
 	require.Equal(t, service.AccountTypeOAuth, item.Type)
 	require.Equal(t, "gh-legacy", item.Credentials["github_access_token"])
@@ -373,7 +382,7 @@ func TestNormalizeLegacyCopilotImportPreservesAccountFieldsAndCredentials(t *tes
 	require.Equal(t, expiresAt, *item.ExpiresAt)
 }
 
-func TestNormalizeLegacyCopilotImportRejectsMalformedLegacyRecords(t *testing.T) {
+func TestSharedCopilotIdentityNormalizationRejectsMalformedLegacyRecords(t *testing.T) {
 	canonicalSecret := "canonical-secret-must-not-echo"
 	tests := []struct {
 		name string
@@ -388,23 +397,22 @@ func TestNormalizeLegacyCopilotImportRejectsMalformedLegacyRecords(t *testing.T)
 		{
 			name: "wrong type",
 			item: DataAccount{Platform: "copilot", Type: service.AccountTypeOAuth, Credentials: map[string]any{"github_token": "gh-legacy"}},
-			want: "type apikey",
+			want: "type=apikey",
 		},
 		{
-			name: "canonical access token already present",
+			name: "conflicting token aliases",
 			item: DataAccount{Platform: "copilot", Type: service.AccountTypeAPIKey, Credentials: map[string]any{"github_token": "gh-legacy", "github_access_token": canonicalSecret}},
-			want: "contains canonical OAuth credentials",
-		},
-		{
-			name: "canonical OAuth profile already present",
-			item: DataAccount{Platform: "copilot", Type: service.AccountTypeAPIKey, Credentials: map[string]any{"github_token": "gh-legacy", "oauth_profile": canonicalSecret}},
-			want: "contains canonical OAuth credentials",
+			want: "COPILOT_GITHUB_TOKEN_CONFLICT",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := normalizeLegacyCopilotImport(&tt.item)
+			_, _, _, _, err := service.NormalizeGitHubCopilotIdentity(
+				tt.item.Platform,
+				tt.item.Type,
+				tt.item.Credentials,
+			)
 			require.ErrorContains(t, err, tt.want)
 			require.NotContains(t, err.Error(), canonicalSecret)
 			require.Equal(t, "copilot", tt.item.Platform)
@@ -412,7 +420,7 @@ func TestNormalizeLegacyCopilotImportRejectsMalformedLegacyRecords(t *testing.T)
 	}
 }
 
-func TestNormalizeLegacyCopilotImportLeavesNonLegacyAccountUntouched(t *testing.T) {
+func TestSharedCopilotIdentityNormalizationLeavesNonLegacyAccountUntouched(t *testing.T) {
 	item := DataAccount{
 		Name:        "ordinary-openai",
 		Platform:    service.PlatformOpenAI,
@@ -420,10 +428,18 @@ func TestNormalizeLegacyCopilotImportLeavesNonLegacyAccountUntouched(t *testing.
 		Credentials: map[string]any{"api_key": "sk-normal", "github_token": "unrelated-value"},
 		Extra:       map[string]any{"preserved": true},
 	}
-	want := item
-
-	require.NoError(t, normalizeLegacyCopilotImport(&item))
-	require.Equal(t, want, item)
+	platform, accountType, credentials, isGitHubCopilot, err := service.NormalizeGitHubCopilotIdentity(
+		item.Platform,
+		item.Type,
+		item.Credentials,
+	)
+	require.NoError(t, err)
+	require.False(t, isGitHubCopilot)
+	require.Equal(t, item.Platform, platform)
+	require.Equal(t, item.Type, accountType)
+	require.Equal(t, item.Credentials, credentials)
+	credentials["api_key"] = "changed-clone"
+	require.Equal(t, "sk-normal", item.Credentials["api_key"])
 }
 
 func TestImportDataLegacyCopilotNormalizesAndRejectsMalformedRecordsWithoutEchoingSecrets(t *testing.T) {
@@ -455,6 +471,15 @@ func TestImportDataLegacyCopilotNormalizesAndRejectsMalformedRecordsWithoutEchoi
 					"type":        "apikey",
 					"credentials": map[string]any{"billing_pat": "must-not-echo"},
 				},
+				{
+					"name":     "legacy-conflict",
+					"platform": "copilot",
+					"type":     "apikey",
+					"credentials": map[string]any{
+						"github_token":        "legacy-conflict-secret",
+						"github_access_token": "canonical-conflict-secret",
+					},
+				},
 			},
 		},
 	}
@@ -469,6 +494,8 @@ func TestImportDataLegacyCopilotNormalizesAndRejectsMalformedRecordsWithoutEchoi
 	require.NotContains(t, rec.Body.String(), "gh-import-secret")
 	require.NotContains(t, rec.Body.String(), "billing-import-secret")
 	require.NotContains(t, rec.Body.String(), "must-not-echo")
+	require.NotContains(t, rec.Body.String(), "legacy-conflict-secret")
+	require.NotContains(t, rec.Body.String(), "canonical-conflict-secret")
 
 	var response struct {
 		Code int `json:"code"`
@@ -481,10 +508,12 @@ func TestImportDataLegacyCopilotNormalizesAndRejectsMalformedRecordsWithoutEchoi
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
 	require.Equal(t, 0, response.Code)
 	require.Equal(t, 1, response.Data.AccountCreated)
-	require.Equal(t, 1, response.Data.AccountFailed)
-	require.Len(t, response.Data.Errors, 1)
+	require.Equal(t, 2, response.Data.AccountFailed)
+	require.Len(t, response.Data.Errors, 2)
 	require.Equal(t, "legacy-invalid", response.Data.Errors[0].Name)
 	require.Contains(t, response.Data.Errors[0].Message, "non-empty github_token")
+	require.Equal(t, "legacy-conflict", response.Data.Errors[1].Name)
+	require.Contains(t, response.Data.Errors[1].Message, "COPILOT_GITHUB_TOKEN_CONFLICT")
 
 	require.Len(t, adminSvc.createdAccounts, 1)
 	created := adminSvc.createdAccounts[0]

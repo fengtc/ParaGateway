@@ -102,6 +102,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
 		SetMcpXMLInject(groupIn.MCPXMLInject).
 		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
+		SetGithubCopilotOnly(groupIn.GitHubCopilotOnly).
 		SetAllowLive(groupIn.AllowLive).
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
@@ -190,11 +191,23 @@ func (r *groupRepository) CreateFromSource(ctx context.Context, groupIn *service
 		 WHERE ag.group_id = $1
 		   AND a.deleted_at IS NULL
 		   AND (NOT $3 OR a.type <> $4)
+		   AND (
+		       NOT $5
+		       OR (
+		           a.platform = $6
+		           AND a.type = $7
+		           AND LOWER(BTRIM(COALESCE(a.credentials ->> 'oauth_profile', ''))) = $8
+		       )
+		   )
 		 ON CONFLICT (account_id, group_id) DO NOTHING`,
 		sourceGroupID,
 		groupIn.ID,
 		groupIn.RequireOAuthOnly,
 		service.AccountTypeAPIKey,
+		groupIn.GitHubCopilotOnly,
+		service.PlatformOpenAI,
+		service.AccountTypeOAuth,
+		service.CopilotOAuthProfile,
 	)
 	if err != nil {
 		return err
@@ -278,6 +291,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetModelRoutingEnabled(groupIn.ModelRoutingEnabled).
 		SetMcpXMLInject(groupIn.MCPXMLInject).
 		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
+		SetGithubCopilotOnly(groupIn.GitHubCopilotOnly).
 		SetAllowLive(groupIn.AllowLive).
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
 		SetRequirePrivacySet(groupIn.RequirePrivacySet).
@@ -419,7 +433,22 @@ func (r *groupRepository) List(ctx context.Context, params pagination.Pagination
 func (r *groupRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, status, search string, isExclusive *bool) ([]service.Group, *pagination.PaginationResult, error) {
 	q := r.client.Group.Query()
 
-	if platform != "" {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "copilot":
+		q = q.Where(
+			group.PlatformEQ(service.PlatformOpenAI),
+			group.GithubCopilotOnlyEQ(true),
+		)
+	case service.PlatformOpenAI:
+		// Copilot groups retain the legacy product identity even though their
+		// persisted platform is OpenAI for scheduler compatibility.
+		q = q.Where(
+			group.PlatformEQ(service.PlatformOpenAI),
+			group.GithubCopilotOnlyEQ(false),
+		)
+	case "":
+		// No platform filter.
+	default:
 		q = q.Where(group.PlatformEQ(platform))
 	}
 	if status != "" {

@@ -125,6 +125,7 @@ public sealed class AccountPageParityTests
         Assert.Contains("启用账号调度", markup, StringComparison.Ordinal);
         Assert.Contains("SetAccountSchedulableAsync(saved.Id, form.Schedulable)", markup, StringComparison.Ordinal);
         Assert.Contains("AccountGroupSelectionPolicy.IsSelectable", markup, StringComparison.Ordinal);
+        Assert.Contains("githubCopilot: editingIsCopilot", markup, StringComparison.Ordinal);
         Assert.Contains("editorContext.Validate()", markup, StringComparison.Ordinal);
         Assert.Contains("editorContext.GetValidationMessages()", markup, StringComparison.Ordinal);
         Assert.Contains("@onclick=\"SubmitEditorAsync\"", markup, StringComparison.Ordinal);
@@ -189,6 +190,7 @@ public sealed class AccountPageParityTests
         var create = Read("Components", "NativeAccountCreateModal.razor");
         var edit = Read("Pages", "Providers.razor");
         var client = Read("Services", "ApiClient.cs");
+        var identity = Read("Models", "AccountProviderIdentity.cs");
 
         foreach (var value in new[]
         {
@@ -221,7 +223,10 @@ public sealed class AccountPageParityTests
         var disposeBody = create[disposeStart..disposeEnd];
         Assert.True(disposeBody.IndexOf("await pollingTask", StringComparison.Ordinal)
             < disposeBody.IndexOf("await CancelCopilotFlowBestEffortAsync();", StringComparison.Ordinal));
-        Assert.Contains("oauth_profile", edit, StringComparison.Ordinal);
+        Assert.Contains("AccountProviderIdentity.IsCanonicalGitHubCopilot(row)", edit, StringComparison.Ordinal);
+        Assert.Contains("GitHub Copilot（待迁移）", edit, StringComparison.Ordinal);
+        Assert.Contains("ReadString(account?.Credentials, \"oauth_profile\")", identity, StringComparison.Ordinal);
+        Assert.DoesNotContain("account?.Extra", identity, StringComparison.Ordinal);
         Assert.Contains("BillingUsername = editingIsCopilot ? ReadCopilotBillingUsername(account)", edit, StringComparison.Ordinal);
         Assert.Contains("ReadCredential(row, \"github_login\")", edit, StringComparison.Ordinal);
         Assert.Contains("HasBillingPat = editingIsCopilot && HasCredentialStatus", edit, StringComparison.Ordinal);
@@ -232,7 +237,8 @@ public sealed class AccountPageParityTests
         Assert.DoesNotContain("<InputText id=\"account-copilot-billing-", edit, StringComparison.Ordinal);
         Assert.Contains("留空表示保留原值", edit, StringComparison.Ordinal);
         Assert.Contains("/admin/accounts/copilot-billing-pat/validate", client, StringComparison.Ordinal);
-        Assert.Contains("credentials[\"oauth_profile\"] = \"github_copilot\"", client, StringComparison.Ordinal);
+        Assert.Contains("if (!input.IsEditing) credentials[\"oauth_profile\"] = AccountProviderIdentity.GitHubCopilotProfile;", client, StringComparison.Ordinal);
+        Assert.Contains("var isCopilotEdit = input.IsEditing && input.IsCopilotProfile;", client, StringComparison.Ordinal);
         Assert.Contains("ValidateCopilotEditBillingIdentity(input);", client, StringComparison.Ordinal);
 
         var fingerprintStart = edit.IndexOf("private string EditorConnectionFingerprint()", StringComparison.Ordinal);
@@ -358,7 +364,8 @@ public sealed class AccountPageParityTests
     {
         var markup = Read("Pages", "Providers.razor");
 
-        Assert.Contains("string.Equals(row.Platform, \"copilot\"", markup, StringComparison.Ordinal);
+        Assert.Contains("AccountProviderIdentity.IsCanonicalGitHubCopilot(row)", markup, StringComparison.Ordinal);
+        Assert.Contains("AccountProviderIdentity.IsLegacyGitHubCopilot(row)", markup, StringComparison.Ordinal);
         Assert.Contains("if (IsCopilot(row)) return \"GitHub Copilot 凭据\";", markup, StringComparison.Ordinal);
         Assert.Contains("row.CredentialsStatus?.Values.Any(value => value) == true", markup, StringComparison.Ordinal);
         Assert.Contains("CredentialConfigured(row) ? \"凭据已配置\" : \"凭据待补充\"", markup, StringComparison.Ordinal);

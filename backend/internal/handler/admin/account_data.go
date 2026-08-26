@@ -421,7 +421,12 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 
 	for i := range dataPayload.Accounts {
 		item := dataPayload.Accounts[i]
-		if err := normalizeLegacyCopilotImport(&item); err != nil {
+		normalizedPlatform, normalizedType, normalizedCredentials, _, err := service.NormalizeGitHubCopilotIdentity(
+			item.Platform,
+			item.Type,
+			item.Credentials,
+		)
+		if err != nil {
 			result.AccountFailed++
 			result.Errors = append(result.Errors, DataImportError{
 				Kind:    "account",
@@ -430,6 +435,9 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			})
 			continue
 		}
+		item.Platform = normalizedPlatform
+		item.Type = normalizedType
+		item.Credentials = normalizedCredentials
 		if err := validateDataAccount(item); err != nil {
 			result.AccountFailed++
 			result.Errors = append(result.Errors, DataImportError{
@@ -757,42 +765,6 @@ func validateDataAccount(item DataAccount) error {
 	if (item.CircuitBreakerThreshold == 0) != (item.CircuitBreakerCooldownSeconds == 0) {
 		return errors.New("circuit breaker threshold and cooldown must both be zero or both be positive")
 	}
-	return nil
-}
-
-// normalizeLegacyCopilotImport converts the pre-profile Copilot account shape
-// into the OpenAI OAuth profile used by the current scheduler. A malformed
-// legacy record is rejected per-account rather than being imported into a
-// platform that no longer participates in OpenAI-compatible scheduling.
-func normalizeLegacyCopilotImport(item *DataAccount) error {
-	if item == nil || !strings.EqualFold(strings.TrimSpace(item.Platform), "copilot") {
-		return nil
-	}
-	if !strings.EqualFold(strings.TrimSpace(item.Type), service.AccountTypeAPIKey) {
-		return errors.New("legacy Copilot account must use type apikey")
-	}
-	if _, exists := item.Credentials["github_access_token"]; exists {
-		return errors.New("legacy Copilot account contains canonical OAuth credentials")
-	}
-	if _, exists := item.Credentials["oauth_profile"]; exists {
-		return errors.New("legacy Copilot account contains canonical OAuth credentials")
-	}
-	githubToken, ok := item.Credentials["github_token"].(string)
-	if !ok || strings.TrimSpace(githubToken) == "" {
-		return errors.New("legacy Copilot account requires a non-empty github_token")
-	}
-
-	credentials := make(map[string]any, len(item.Credentials)+1)
-	for key, value := range item.Credentials {
-		if key != "github_token" {
-			credentials[key] = value
-		}
-	}
-	credentials["github_access_token"] = strings.TrimSpace(githubToken)
-	credentials["oauth_profile"] = service.CopilotOAuthProfile
-	item.Platform = service.PlatformOpenAI
-	item.Type = service.AccountTypeOAuth
-	item.Credentials = credentials
 	return nil
 }
 

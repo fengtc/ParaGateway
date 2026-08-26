@@ -2983,14 +2983,17 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
     private static Dictionary<string, object?>? BuildCredentials(AccountInput input, bool requireCredentials)
     {
         ValidateCopilotEditBillingIdentity(input);
-        var credentials = ParseObject(input.CredentialsJson, "账号凭据") ?? new(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(input.ApiKey)) credentials["api_key"] = input.ApiKey.Trim();
-        if (!string.IsNullOrWhiteSpace(input.AccessToken)) credentials["access_token"] = input.AccessToken.Trim();
-        if (!string.IsNullOrWhiteSpace(input.RefreshToken)) credentials["refresh_token"] = input.RefreshToken.Trim();
-        if (!string.IsNullOrWhiteSpace(input.BaseUrl)) credentials["base_url"] = input.BaseUrl.Trim();
+        var isCopilotEdit = input.IsEditing && input.IsCopilotProfile;
+        var credentials = isCopilotEdit
+            ? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            : ParseObject(input.CredentialsJson, "账号凭据") ?? new(StringComparer.OrdinalIgnoreCase);
+        if (!isCopilotEdit && !string.IsNullOrWhiteSpace(input.ApiKey)) credentials["api_key"] = input.ApiKey.Trim();
+        if (!isCopilotEdit && !string.IsNullOrWhiteSpace(input.AccessToken)) credentials["access_token"] = input.AccessToken.Trim();
+        if (!isCopilotEdit && !string.IsNullOrWhiteSpace(input.RefreshToken)) credentials["refresh_token"] = input.RefreshToken.Trim();
+        if (!isCopilotEdit && !string.IsNullOrWhiteSpace(input.BaseUrl)) credentials["base_url"] = input.BaseUrl.Trim();
         if (input.IsCopilotProfile)
         {
-            credentials["oauth_profile"] = "github_copilot";
+            if (!input.IsEditing) credentials["oauth_profile"] = AccountProviderIdentity.GitHubCopilotProfile;
             credentials["billing_username"] = input.BillingUsername.Trim();
             if (!string.IsNullOrWhiteSpace(input.BillingPat))
                 credentials["billing_pat"] = input.BillingPat.Trim();

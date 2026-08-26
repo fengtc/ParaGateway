@@ -112,8 +112,30 @@ func TestMergePreservingGitHubCopilotCreds_PreservesServerMetadata(t *testing.T)
 	require.Equal(t, "copilot-secret", out["access_token"])
 	require.Equal(t, "billing-secret", out["billing_pat"])
 	require.Equal(t, map[string]any{"gpt-new": "gpt-new"}, out["model_mapping"])
-	require.NotContains(t, out, "billing_username", "editable billing username may be removed")
-	require.NotContains(t, out, "obsolete")
+	require.Equal(t, "old-user", out["billing_username"], "omitted editable metadata is preserved by patch semantics")
+	require.Equal(t, "remove-me", out["obsolete"], "omitted custom credentials are preserved by patch semantics")
+}
+
+func TestMergePreservingGitHubCopilotCreds_AppliesExplicitPatchWithoutMutatingInputs(t *testing.T) {
+	existing := map[string]any{
+		"oauth_profile":    CopilotOAuthProfile,
+		"billing_username": "old-user",
+		"custom":           "keep-me",
+	}
+	incoming := map[string]any{
+		"billing_username": "new-user",
+		"model_mapping":    map[string]any{},
+	}
+
+	out := MergePreservingGitHubCopilotCreds(existing, incoming)
+
+	require.Equal(t, CopilotOAuthProfile, out["oauth_profile"])
+	require.Equal(t, "new-user", out["billing_username"])
+	require.Equal(t, "keep-me", out["custom"])
+	require.Equal(t, map[string]any{}, out["model_mapping"])
+	require.Equal(t, "old-user", existing["billing_username"])
+	require.NotContains(t, existing, "model_mapping")
+	require.NotContains(t, incoming, "custom")
 }
 
 func TestMergePreservingGitHubCopilotCreds_AllowsExplicitMetadataRotation(t *testing.T) {

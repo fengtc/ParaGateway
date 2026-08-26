@@ -16,6 +16,10 @@ import (
 	"go.uber.org/zap"
 )
 
+const messagesChatFallbackUpstreamEndpoint = "/v1/chat/completions"
+
+const copilotMessagesMaxOutputTokens = 4096
+
 // forwardAnthropicViaRawChatCompletions serves /v1/messages clients through
 // an OpenAI-compatible upstream that only supports /v1/chat/completions.
 //
@@ -49,6 +53,9 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 		return nil, fmt.Errorf("missing model in request")
 	}
 	applyOpenAICompatModelNormalization(&anthropicReq)
+	if account.IsGitHubCopilot() {
+		sanitizeCopilotAnthropicToolHistory(&anthropicReq)
+	}
 	clientStream := anthropicReq.Stream
 
 	// 2. Anthropic → Chat Completions (direct, no Responses intermediary)
@@ -56,6 +63,9 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	if err != nil {
 		writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert anthropic to chat completions: %w", err)
+	}
+	if account.IsGitHubCopilot() {
+		applyCopilotMessagesChatFallbackContract(chatReq, &anthropicReq)
 	}
 
 	billingModel := resolveOpenAIForwardModel(account, anthropicReq.Model, defaultMappedModel)
@@ -105,6 +115,7 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	if err != nil {
 		return nil, err
 	}
+	SetActualOpenAIUpstreamEndpoint(c, messagesChatFallbackUpstreamEndpoint)
 	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
 	if err != nil {
 		return nil, err
@@ -127,6 +138,23 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 		return s.streamChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
 	}
 	return s.bufferChatCompletionsAsAnthropic(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+}
+
+func applyCopilotMessagesChatFallbackContract(chatReq *apicompat.ChatCompletionsRequest, anthropicReq *apicompat.AnthropicRequest) {
+	if chatReq == nil || anthropicReq == nil {
+		return
+	}
+	chatReq.User = strings.TrimSpace(gjson.GetBytes(anthropicReq.Metadata, "user_id").String())
+	if anthropicReq.MaxTokens > 0 {
+		maxTokens := min(anthropicReq.MaxTokens, copilotMessagesMaxOutputTokens)
+		chatReq.MaxTokens = &maxTokens
+		chatReq.MaxCompletionTokens = nil
+	}
+	if len(anthropicReq.StopSeqs) > 0 {
+		if stop, err := json.Marshal(anthropicReq.StopSeqs); err == nil {
+			chatReq.Stop = stop
+		}
+	}
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
@@ -152,15 +180,16 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 	c.JSON(http.StatusOK, anthropicResp)
 
 	return &OpenAIForwardResult{
-		RequestID:       requestID,
-		Usage:           usage,
-		Model:           originalModel,
-		BillingModel:    billingModel,
-		UpstreamModel:   upstreamModel,
-		ReasoningEffort: reasoningEffort,
-		ServiceTier:     serviceTier,
-		Stream:          false,
-		Duration:        time.Since(startTime),
+		RequestID:        requestID,
+		Usage:            usage,
+		Model:            originalModel,
+		BillingModel:     billingModel,
+		UpstreamModel:    upstreamModel,
+		ReasoningEffort:  reasoningEffort,
+		ServiceTier:      serviceTier,
+		UpstreamEndpoint: messagesChatFallbackUpstreamEndpoint,
+		Stream:           false,
+		Duration:         time.Since(startTime),
 	}, nil
 }
 
@@ -219,6 +248,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 			UpstreamModel:    upstreamModel,
 			ReasoningEffort:  reasoningEffort,
 			ServiceTier:      serviceTier,
+			UpstreamEndpoint: messagesChatFallbackUpstreamEndpoint,
 			Stream:           true,
 			Duration:         time.Since(startTime),
 			FirstTokenMs:     scan.FirstTokenMs,
@@ -254,6 +284,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 		UpstreamModel:    upstreamModel,
 		ReasoningEffort:  reasoningEffort,
 		ServiceTier:      serviceTier,
+		UpstreamEndpoint: messagesChatFallbackUpstreamEndpoint,
 		Stream:           true,
 		Duration:         time.Since(startTime),
 		FirstTokenMs:     scan.FirstTokenMs,

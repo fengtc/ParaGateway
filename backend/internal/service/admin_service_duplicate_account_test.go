@@ -343,7 +343,11 @@ func TestDuplicateAccountReturnsExistingCopyForSameOperationKey(t *testing.T) {
 func TestCreateAccountReturnsCommittedAccountForSameIdempotencyKey(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
-	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	groupRepo := &groupRepoStubForAdmin{getByIDByID: map[int64]*Group{
+		7: {ID: 7, Platform: PlatformOpenAI},
+		3: {ID: 3, Platform: PlatformAnthropic},
+	}}
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo, groupRepo: groupRepo}
 	newInput := func() *CreateAccountInput {
 		return &CreateAccountInput{
 			Name:                  "Copilot durable create",
@@ -376,7 +380,11 @@ func TestCreateAccountAtomicFailureLeavesNoAccountOrGroups(t *testing.T) {
 	ctx := context.Background()
 	repo := newDuplicateAccountRepoStub()
 	repo.atomicCreateErr = errors.New("group transaction failed")
-	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo}
+	groupRepo := &groupRepoStubForAdmin{getByIDByID: map[int64]*Group{
+		7: {ID: 7, Platform: PlatformOpenAI},
+		3: {ID: 3, Platform: PlatformAnthropic},
+	}}
+	svc := &adminServiceImpl{accountRepo: repo, accountDuplicateRepo: repo, groupRepo: groupRepo}
 
 	_, err := svc.CreateAccount(ctx, &CreateAccountInput{
 		Name:                  "Copilot atomic create",
