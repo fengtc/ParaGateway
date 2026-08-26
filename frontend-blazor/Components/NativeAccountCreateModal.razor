@@ -279,7 +279,10 @@
                             </section>
                         }
 
-                        <AccountModelRestrictionEditor Model="form" />
+                        @if (AccountModelRestrictions.ShouldShow(form.Platform, form.Type))
+                        {
+                            <AccountModelRestrictionEditor @key="ModelRestrictionEditorKey" Model="form" />
+                        }
 
                         @if (ShouldShowOptions)
                         {
@@ -567,6 +570,7 @@
     private bool IsOAuthFlow => accountCategory == "oauth-based";
     private bool IsCNPlatform => platform is "kimi" or "zhipu" or "deepseek";
     private bool ShouldShowOptions => true;
+    private string ModelRestrictionEditorKey => $"{form.Platform}:{form.Type}";
     private string ProxyValue => form.ProxyId?.ToString() ?? string.Empty;
     private string LoadFactorValue => form.LoadFactor?.ToString() ?? string.Empty;
     private string PlatformTitle => platform switch

@@ -341,15 +341,11 @@
                 }
                 else if (form.Type is "apikey" or "upstream")
                 {
-                    @if (form.Type == "apikey")
-                    {
-                        <div class="inline-alert info full"><Icon Name="info" Size="18" /><span>“账号管理”保留原平台账号与官方 OAuth 接入。Worker 风格的连接、WIF、权重、RPM 和熔断策略请在独立的“兼容上游连接”页面配置。</span><a class="button secondary small" href="/admin/upstream-accounts">前往兼容上游连接</a></div>
-                    }
-                    <div class="form-field full"><label for="account-api-key">API Key（编辑时留空表示不修改）</label><InputText id="account-api-key" @bind-Value="form.ApiKey" type="password" autocomplete="new-password" /><ValidationMessage For="() => form.ApiKey" /></div>
                     @if (!IsCNPlatform(form.Platform) || form.ApiProtocol != "adaptive")
                     {
-                        <div class="form-field full"><label for="account-base-url">Base URL（可选）</label><InputText id="account-base-url" @bind-Value="form.BaseUrl" type="url" placeholder="https://api.openai.com" /><ValidationMessage For="() => form.BaseUrl" /></div>
+                        <div class="form-field full"><label for="account-base-url">Base URL（可选）</label><InputText id="account-base-url" @bind-Value="form.BaseUrl" type="url" placeholder="@DefaultApiBaseUrl(form)" /><ValidationMessage For="() => form.BaseUrl" /></div>
                     }
+                    <div class="form-field full"><label for="account-api-key">API Key（编辑时留空表示不修改）</label><InputText id="account-api-key" @bind-Value="form.ApiKey" type="password" autocomplete="new-password" placeholder="@ApiKeyPlaceholder(form.Platform)" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" /><ValidationMessage For="() => form.ApiKey" /></div>
                     @if (IsCNPlatform(form.Platform))
                     {
                         <div class="form-field"><label for="account-cn-mode">账号模式</label><select id="account-cn-mode" value="@form.AccountMode" @onchange="CNAccountModeEditorChanged"><option value="payg">按量付费（PAYG）</option>@if (form.Platform != "deepseek") { <option value="coding">Coding Plan</option> }</select></div>
@@ -1196,6 +1192,25 @@
         || string.Equals(OAuthProfile(row), "github_copilot", StringComparison.OrdinalIgnoreCase);
     private static string AccountTypeLabel(AccountDto row) => TypeLabel(row.Type);
     private static bool CanRefreshToken(AccountDto row) => row.ParentAccountId is null && row.Type is "oauth" or "setup-token";
+    private static string DefaultApiBaseUrl(AccountInput input) => IsCNPlatform(input.Platform)
+        ? DefaultCNBaseUrl(input.Platform, input.AccountMode, input.ApiProtocol)
+        : input.Platform.ToLowerInvariant() switch
+        {
+            "anthropic" => "https://api.anthropic.com",
+            "gemini" => "https://generativelanguage.googleapis.com",
+            "antigravity" => "https://cloudcode-pa.googleapis.com",
+            "grok" => "https://api.x.ai/v1",
+            _ => "https://api.openai.com"
+        };
+    private static string ApiKeyPlaceholder(string platform) => platform.ToLowerInvariant() switch
+    {
+        "anthropic" => "sk-ant-...",
+        "gemini" => "AIza...",
+        "antigravity" => "sk-...",
+        "grok" => "xai-...",
+        "kimi" or "zhipu" or "deepseek" => "sk-...",
+        _ => "sk-proj-..."
+    };
     private static string AccountBaseUrl(AccountDto row)
     {
         var configured = ReadCredential(row, "base_url");

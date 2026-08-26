@@ -382,6 +382,7 @@ public sealed class AccountApiClientTests
             Platform = "openai",
             Type = "apikey",
             ApiKey = "sk-test",
+            BaseUrl = "https://upstream.example/v1",
             ModelRestrictionMode = "whitelist",
             AllowedModels = ["gpt-5.4", "gpt-5.6-sol"]
         };
@@ -390,7 +391,11 @@ public sealed class AccountApiClientTests
 
         using (var createRequest = JsonDocument.Parse(handler.LastRequestBody))
         {
-            var mapping = createRequest.RootElement.GetProperty("credentials").GetProperty("model_mapping");
+            var credentials = createRequest.RootElement.GetProperty("credentials");
+            Assert.Equal("sk-test", credentials.GetProperty("api_key").GetString());
+            Assert.Equal("https://upstream.example/v1", credentials.GetProperty("base_url").GetString());
+            Assert.False(createRequest.RootElement.TryGetProperty("model_whitelist", out _));
+            var mapping = credentials.GetProperty("model_mapping");
             Assert.Equal("gpt-5.4", mapping.GetProperty("gpt-5.4").GetString());
             Assert.Equal("gpt-5.6-sol", mapping.GetProperty("gpt-5.6-sol").GetString());
         }
@@ -401,8 +406,11 @@ public sealed class AccountApiClientTests
         await api.UpdateAccountAsync("42", input);
 
         using var updateRequest = JsonDocument.Parse(handler.LastRequestBody);
-        Assert.Equal(JsonValueKind.Object, updateRequest.RootElement.GetProperty("credentials").GetProperty("model_mapping").ValueKind);
-        Assert.Empty(updateRequest.RootElement.GetProperty("credentials").GetProperty("model_mapping").EnumerateObject());
+        var updateCredentials = updateRequest.RootElement.GetProperty("credentials");
+        Assert.False(updateCredentials.TryGetProperty("api_key", out _));
+        Assert.Equal("https://upstream.example/v1", updateCredentials.GetProperty("base_url").GetString());
+        Assert.Equal(JsonValueKind.Object, updateCredentials.GetProperty("model_mapping").ValueKind);
+        Assert.Empty(updateCredentials.GetProperty("model_mapping").EnumerateObject());
     }
 
     [Fact]
