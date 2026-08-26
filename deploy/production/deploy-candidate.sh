@@ -117,9 +117,11 @@ cat > "$nuget_config" <<EOF
 </configuration>
 EOF
 frontend_project="$source_dir/frontend-blazor/ParaGateway.Frontend.csproj"
-dotnet restore "$frontend_project" --configfile "$nuget_config" --nologo
-DevExpress_License="$(cat "$devexpress_license_file")" \
-  dotnet publish "$frontend_project" -c Release -o "$frontend_build_dir" --no-restore -p:UseAppHost=false --nologo 2>&1 | tee "$frontend_log"
+MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0 \
+  dotnet restore "$frontend_project" --configfile "$nuget_config" --disable-build-servers --nologo
+DevExpress_License="$(cat "$devexpress_license_file")" MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0 \
+  dotnet publish "$frontend_project" -c Release -o "$frontend_build_dir" --no-restore --disable-build-servers \
+    -p:UseAppHost=false -p:UseSharedCompilation=false --nologo 2>&1 | tee "$frontend_log"
 if grep -Eq 'DX1000|DX1001|DX1002|DX1003|For evaluation purposes only' "$frontend_log"; then
   echo 'DevExpress license was not accepted by the frontend build' >&2
   exit 1

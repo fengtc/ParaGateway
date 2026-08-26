@@ -27,6 +27,8 @@ public sealed class DeploymentScriptTests
         Assert.Contains(".NET 10 SDK is required", script, StringComparison.Ordinal);
         Assert.Contains("dotnet restore", script, StringComparison.Ordinal);
         Assert.Contains("dotnet publish", script, StringComparison.Ordinal);
+        Assert.Contains("--disable-build-servers", script, StringComparison.Ordinal);
+        Assert.Contains("UseSharedCompilation=false", script, StringComparison.Ordinal);
         Assert.Contains("DevExpress_License=", script, StringComparison.Ordinal);
         Assert.Contains("frontend WASM does not contain the DevExpress license marker", script, StringComparison.Ordinal);
         Assert.DoesNotContain("FRONTEND_ARCHIVE", script, StringComparison.Ordinal);
