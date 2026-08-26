@@ -384,7 +384,7 @@ func resolveCNProviderTestModel(account *Account, modelID string) string {
 	if testModelID == "" {
 		switch account.Platform {
 		case PlatformZhipu:
-			testModelID = "glm-4.7"
+			testModelID = "glm-5.2"
 		default:
 			testModelID = openai.DefaultTestModel
 		}

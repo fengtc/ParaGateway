@@ -201,7 +201,7 @@ func TestAccountTestService_ZhipuCodingPlanUsesRealUpstreamModelWhenTestModelIsE
 	err := svc.TestAccountConnection(c, account.ID, "", "", AccountTestModeDefault)
 
 	require.NoError(t, err)
-	require.Equal(t, "glm-4.7", gjson.GetBytes(upstream.bodies[0], "model").String())
+	require.Equal(t, "glm-5.2", gjson.GetBytes(upstream.bodies[0], "model").String())
 }
 
 func TestResolveCNProviderTestModelPreservesExplicitModelMapping(t *testing.T) {
