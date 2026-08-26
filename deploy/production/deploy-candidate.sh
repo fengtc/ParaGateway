@@ -8,8 +8,8 @@ release_dir=/opt/paragateway/releases/$release
 candidate_env=${CANDIDATE_ENV_FILE:?set CANDIDATE_ENV_FILE}
 production_env=${PRODUCTION_ENV_FILE:-/etc/paragateway/production.env}
 production_config=${PRODUCTION_CONFIG_FILE:-/etc/paragateway/production-config.yaml}
-frontend_archive=${FRONTEND_ARCHIVE:?set FRONTEND_ARCHIVE}
-frontend_archive_sha256=${FRONTEND_ARCHIVE_SHA256:?set FRONTEND_ARCHIVE_SHA256}
+devexpress_packages_dir=${DEVEXPRESS_PACKAGES_DIR:-/opt/paragateway/build/devexpress-packages}
+devexpress_license_file=${DEVEXPRESS_LICENSE_FILE:-/etc/paragateway/build/devexpress-license}
 expected_candidate_redis_db=${CANDIDATE_REDIS_DB_EXPECTED:-15}
 allow_candidate_migrations=${ALLOW_CANDIDATE_MIGRATIONS:-0}
 [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo 'commit must be a full lowercase SHA-1' >&2; exit 1; }
@@ -19,8 +19,11 @@ allow_candidate_migrations=${ALLOW_CANDIDATE_MIGRATIONS:-0}
 command -v flock >/dev/null || { echo 'flock is required' >&2; exit 1; }
 exec 9>/run/lock/paragateway-release.lock
 flock -n 9 || { echo 'another ParaGateway release operation is running' >&2; exit 1; }
-test -f "$candidate_env" && test -f "$production_env" && test -f "$production_config" && test -f "$frontend_archive"
-[ "$(sha256sum "$frontend_archive" | awk '{print $1}')" = "$frontend_archive_sha256" ] || { echo 'frontend archive SHA-256 mismatch' >&2; exit 1; }
+test -f "$candidate_env" && test -f "$production_env" && test -f "$production_config"
+test -d "$devexpress_packages_dir" || { echo 'DevExpress offline package source is missing' >&2; exit 1; }
+test -s "$devexpress_license_file" || { echo 'DevExpress build license is missing' >&2; exit 1; }
+command -v dotnet >/dev/null || { echo '.NET SDK is required for the frontend build' >&2; exit 1; }
+dotnet --list-sdks | grep -q '^10\.' || { echo '.NET 10 SDK is required for the frontend build' >&2; exit 1; }
 command -v ss >/dev/null
 for port in 8282 8284; do
   if ss -H -ltn "sport = :$port" | grep -q .; then
@@ -94,11 +97,42 @@ fi
 tmp=$(mktemp)
 dropin_tmp=$(mktemp)
 data_env_tmp=$(mktemp)
-trap 'rm -f "$tmp" "$dropin_tmp" "$data_env_tmp"' EXIT
+frontend_build_dir=$(mktemp -d)
+nuget_config=$(mktemp)
+frontend_log=$(mktemp)
+trap 'rm -f "$tmp" "$dropin_tmp" "$data_env_tmp" "$nuget_config" "$frontend_log"; rm -rf "$frontend_build_dir"' EXIT
 (cd "$source_dir/backend" && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags='-s -w' -o "$tmp" ./cmd/server)
+cat > "$nuget_config" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="DevExpress Offline" value="$devexpress_packages_dir" />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+  </packageSources>
+  <packageSourceMapping>
+    <packageSource key="DevExpress Offline"><package pattern="DevExpress.*" /></packageSource>
+    <packageSource key="nuget.org"><package pattern="*" /></packageSource>
+  </packageSourceMapping>
+</configuration>
+EOF
+frontend_project="$source_dir/frontend-blazor/ParaGateway.Frontend.csproj"
+dotnet restore "$frontend_project" --configfile "$nuget_config" --nologo
+DevExpress_License="$(cat "$devexpress_license_file")" \
+  dotnet publish "$frontend_project" -c Release -o "$frontend_build_dir" --no-restore -p:UseAppHost=false --nologo 2>&1 | tee "$frontend_log"
+if grep -Eq 'DX1000|DX1001|DX1002|DX1003|For evaluation purposes only' "$frontend_log"; then
+  echo 'DevExpress license was not accepted by the frontend build' >&2
+  exit 1
+fi
+test -s "$frontend_build_dir/wwwroot/index.html"
+mapfile -t app_wasm < <(find "$frontend_build_dir/wwwroot/_framework" -maxdepth 1 -type f -name 'ParaGateway.Frontend*.wasm')
+[ "${#app_wasm[@]}" -eq 1 ] || { echo 'could not uniquely identify the frontend application WASM' >&2; exit 1; }
+[ "$(grep -aoc 'LCPv1!' "${app_wasm[0]}")" -eq 1 ] || { echo 'frontend WASM does not contain the DevExpress license marker' >&2; exit 1; }
+printf '%s' "$commit" > "$frontend_build_dir/wwwroot/release-commit.txt"
 install -d -o sub2api -g sub2api -m 750 "$release_dir/backend" "$release_dir/frontend"
 install -o sub2api -g sub2api -m 750 "$tmp" "$release_dir/backend/paragateway-backend"
-tar -xzf "$frontend_archive" -C "$release_dir/frontend"
+cp -a "$frontend_build_dir/." "$release_dir/frontend/"
+chown -R sub2api:sub2api "$release_dir/frontend"
 test -s "$release_dir/frontend/wwwroot/index.html"
 release_commit_file="$release_dir/frontend/wwwroot/release-commit.txt"
 test -s "$release_commit_file"

@@ -18,20 +18,18 @@
 
 候选验证通过、晋级生产后，在“系统设置 -> 安全高级设置”中关闭“信任代理转发 IP”，使 `server.trusted_proxies` 成为唯一可信来源。变更后从公网发起一条受控请求，确认审计日志和用量记录显示真实公网 IP；异常时先恢复该开关，再执行版本回滚。
 
-先在 Windows 构建机生成带许可证的前端归档。脚本要求 Git 工作区干净，会清理 Release 缓存，拒绝包含 DevExpress 评估/过期警告或缺少许可证属性的构建，并且不会把许可证文件放入归档：
+服务器统一从 GitHub 拉取指定提交，并在服务器构建 Go 后端和 Blazor WASM 前端。本机不再生成或上传前端归档。服务器需要预先安装 Go、.NET 10 SDK，并配置：
 
-```powershell
-$commit = (git rev-parse HEAD).Trim()
-.\deploy\production\build-frontend-archive.ps1 -Commit $commit
-```
+- DevExpress 离线包源：`/opt/paragateway/build/devexpress-packages`
+- DevExpress 构建许可证：`/etc/paragateway/build/devexpress-license`（`root:root`、权限 `600`）
+
+许可证只作为构建进程环境变量读取，不进入 Git、发布目录或前端静态文件。脚本会拒绝包含 DevExpress 评估/过期警告或缺少许可证标记的产物。
 
 ```bash
 export CANDIDATE_ENV_FILE=/etc/paragateway/candidate.env
 export PRODUCTION_COMMIT=<当前生产后端完整提交号>
 export PRODUCTION_ENV_FILE=/etc/paragateway/<production-release>/production.env
 export PRODUCTION_CONFIG_FILE=/etc/paragateway/<production-release>/config.yaml
-export FRONTEND_ARCHIVE=/var/tmp/paragateway-frontend-<commit>.tar.gz
-export FRONTEND_ARCHIVE_SHA256=<build-frontend-archive.ps1 输出的 sha256>
 ./deploy-candidate.sh <commit>
 ./verify-candidate.sh <release>
 ./promote.sh <release>

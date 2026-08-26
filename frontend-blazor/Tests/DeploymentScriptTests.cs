@@ -22,9 +22,14 @@ public sealed class DeploymentScriptTests
         Assert.Contains("ALLOW_CANDIDATE_MIGRATIONS", script, StringComparison.Ordinal);
         Assert.Contains("candidate-migrations-only", script, StringComparison.Ordinal);
         Assert.Contains("candidate port $port is already in use", script, StringComparison.Ordinal);
-        Assert.Contains("FRONTEND_ARCHIVE_SHA256", script, StringComparison.Ordinal);
-        Assert.Contains("frontend archive SHA-256 mismatch", script, StringComparison.Ordinal);
-        Assert.Contains("frontend archive commit does not match the requested commit", script, StringComparison.Ordinal);
+        Assert.Contains("DEVEXPRESS_PACKAGES_DIR", script, StringComparison.Ordinal);
+        Assert.Contains("DEVEXPRESS_LICENSE_FILE", script, StringComparison.Ordinal);
+        Assert.Contains(".NET 10 SDK is required", script, StringComparison.Ordinal);
+        Assert.Contains("dotnet restore", script, StringComparison.Ordinal);
+        Assert.Contains("dotnet publish", script, StringComparison.Ordinal);
+        Assert.Contains("DevExpress_License=", script, StringComparison.Ordinal);
+        Assert.Contains("frontend WASM does not contain the DevExpress license marker", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("FRONTEND_ARCHIVE", script, StringComparison.Ordinal);
         Assert.Contains("release-commit.txt", script, StringComparison.Ordinal);
         Assert.Contains("merge-base --is-ancestor", script, StringComparison.Ordinal);
         Assert.Contains("commit is not published on origin/main", script, StringComparison.Ordinal);
