@@ -585,7 +585,7 @@
     {
         try
         {
-            var groupsTask = Api.GetGroupsAsync();
+            var groupsTask = Api.GetActiveGroupsAsync();
             var proxiesTask = Api.GetProxiesAsync();
             await Task.WhenAll(groupsTask, proxiesTask);
             groups = await groupsTask;

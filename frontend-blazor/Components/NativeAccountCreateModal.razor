@@ -372,20 +372,31 @@
                                 <small>留空表示永不过期。</small>
                             </div>
 
-                            @if (Groups.Count > 0)
-                            {
-                                <div class="native-field">
-                                    <label>所属分组</label>
-                                    <div class="native-group-picker">
-                                        @foreach (var group in Groups.Where(IsGroupAvailable))
+                            <div class="native-field">
+                                <label>所属分组 <span class="native-field-count">已选择 @form.GroupIds.Count 个</span></label>
+                                <div class="native-group-picker">
+                                    @if (AvailableGroups.Count == 0)
+                                    {
+                                        <div class="native-group-empty">
+                                            <span>暂无 @PlatformTitle 可用分组，请先创建平台为 @PlatformTitle 的分组。</span>
+                                            <a href="/admin/groups" target="_blank" rel="noopener noreferrer">前往分组管理<Icon Name="arrow-right" Size="14" /></a>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var group in AvailableGroups)
                                         {
                                             var groupId = ParseGroupId(group.Id);
-                                            <label class="native-check-option"><input type="checkbox" checked="@form.GroupIds.Contains(groupId)" @onchange="e => ToggleGroup(groupId, e.Value is true)" /><span>@group.Name</span></label>
+                                            <label class="native-check-option">
+                                                <input type="checkbox" checked="@form.GroupIds.Contains(groupId)" @onchange="e => ToggleGroup(groupId, e.Value is true)" />
+                                                <span>@group.Name</span>
+                                                <small>@group.AccountCount</small>
+                                            </label>
                                         }
-                                    </div>
-                                    <small>可选择多个分组；分组策略会参与模型路由和计费。</small>
+                                    }
                                 </div>
-                            }
+                                <small>可选择多个分组；分组策略会参与模型路由和计费。</small>
+                            </div>
 
                             <div class="native-options-section native-secondary-options">
                                 <div class="native-option-row">
@@ -1514,6 +1525,7 @@
         else if (!selected) form.GroupIds.Remove(id);
     }
     private static long ParseGroupId(string value) => long.TryParse(value, out var id) ? id : 0;
+    private IReadOnlyList<GroupDto> AvailableGroups => Groups.Where(IsGroupAvailable).ToList();
     private bool IsGroupAvailable(GroupDto group) =>
         AccountGroupSelectionPolicy.IsSelectable(
             group,

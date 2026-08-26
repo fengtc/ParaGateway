@@ -265,6 +265,10 @@ public sealed class AccountPageParityTests
         Assert.Contains("https://api.kimi.com/coding/v1", createModal, StringComparison.Ordinal);
         Assert.Contains("https://open.bigmodel.cn/api/coding/paas/v4", createModal, StringComparison.Ordinal);
         Assert.Contains("https://api.deepseek.com/anthropic", createModal, StringComparison.Ordinal);
+        Assert.Contains("AvailableGroups.Count == 0", createModal, StringComparison.Ordinal);
+        Assert.Contains("暂无 @PlatformTitle 可用分组", createModal, StringComparison.Ordinal);
+        Assert.Contains("href=\"/admin/groups\"", createModal, StringComparison.Ordinal);
+        Assert.Contains("Api.GetActiveGroupsAsync()", page, StringComparison.Ordinal);
         Assert.Contains("<AccountQuotaUsageCell Account=\"row\"", page, StringComparison.Ordinal);
         Assert.Contains("GetAccountUsageBatchAsync", page, StringComparison.Ordinal);
         Assert.Contains("usageByAccountId", page, StringComparison.Ordinal);

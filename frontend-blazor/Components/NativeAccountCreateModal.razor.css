@@ -506,6 +506,42 @@
     border-radius: 5px;
 }
 
+.native-field-count {
+    margin-left: 6px;
+    color: var(--muted);
+    font-size: .7rem;
+    font-weight: 500;
+}
+
+.native-group-empty {
+    display: flex;
+    grid-column: 1 / -1;
+    min-height: 48px;
+    padding: 9px 10px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px dashed var(--line);
+    border-radius: 5px;
+    font-size: .74rem;
+}
+
+.native-group-empty a {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    color: var(--primary-strong);
+    font-weight: 650;
+    text-decoration: none;
+}
+
+.native-group-empty a:hover {
+    text-decoration: underline;
+}
+
 .native-check-option {
     display: flex;
     min-width: 0;
@@ -532,6 +568,12 @@
     height: 16px;
     margin: 0;
     accent-color: var(--primary);
+}
+
+.native-check-option > small {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: .68rem;
 }
 
 .native-account-alert {
@@ -744,6 +786,11 @@
 
     .native-option-row {
         align-items: flex-start;
+    }
+
+    .native-group-empty {
+        align-items: flex-start;
+        flex-direction: column;
     }
 
     .native-oauth-intro {

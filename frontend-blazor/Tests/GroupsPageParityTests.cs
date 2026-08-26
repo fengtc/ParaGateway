@@ -55,6 +55,8 @@ public sealed class GroupsPageParityTests
 
         Assert.Contains("/admin/groups?", client, StringComparison.Ordinal);
         Assert.Contains("/admin/groups/all?include_inactive=true", client, StringComparison.Ordinal);
+        Assert.Contains("GetActiveGroupsAsync", client, StringComparison.Ordinal);
+        Assert.Contains("$\"{ApiPrefix}/admin/groups/all\"", client, StringComparison.Ordinal);
         Assert.Contains("/admin/groups/{Uri.EscapeDataString(id)}/duplicate", client, StringComparison.Ordinal);
         Assert.Contains("Idempotency-Key", client, StringComparison.Ordinal);
         Assert.Contains("/admin/groups/usage-summary", client, StringComparison.Ordinal);

@@ -399,6 +399,21 @@ public sealed class AccountApiClientTests
     }
 
     [Fact]
+    public async Task AccountGroupPickerLoadsOnlyActiveGroups()
+    {
+        var handler = new AccountHandler(string.Empty);
+        var api = CreateApi(handler);
+
+        var groups = await api.GetActiveGroupsAsync();
+
+        Assert.Equal("/api/v1/admin/groups/all", handler.LastRequestPath);
+        Assert.Equal(string.Empty, handler.LastRequestQuery);
+        var group = Assert.Single(groups);
+        Assert.Equal("zhipu", group.Platform);
+        Assert.Equal("智谱 Coding Plan", group.Name);
+    }
+
+    [Fact]
     public async Task AccountCreateAndEditSerializeModelRestrictionsIntoCredentials()
     {
         var handler = new AccountHandler("data: {\"type\":\"test_complete\",\"success\":true}\n\n");
@@ -786,6 +801,11 @@ public sealed class AccountApiClientTests
                 || (request.Method == HttpMethod.Put && path == "/api/v1/admin/groups/12"))
             {
                 return GroupResponse();
+            }
+
+            if (request.Method == HttpMethod.Get && path == "/api/v1/admin/groups/all")
+            {
+                return JsonResponse("""{"code":0,"message":"success","data":[{"id":18,"name":"智谱 Coding Plan","platform":"zhipu","status":"active","account_count":1}]}""");
             }
 
             if (request.Method == HttpMethod.Post && path == "/api/v1/admin/accounts")

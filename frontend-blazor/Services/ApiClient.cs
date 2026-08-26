@@ -1126,6 +1126,12 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         return groups.Select(GroupDto.From).ToList();
     }
 
+    public async Task<List<GroupDto>> GetActiveGroupsAsync()
+    {
+        var groups = await SendAsync<List<GoGroup>>(HttpMethod.Get, $"{ApiPrefix}/admin/groups/all");
+        return groups.Select(GroupDto.From).ToList();
+    }
+
     public async Task<PagedEnvelope<GroupDto>> GetAdminGroupsAsync(
         int page = 1,
         int pageSize = 20,

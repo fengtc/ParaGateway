@@ -61,4 +61,15 @@ public sealed class AccountGroupSelectionPolicyTests
         Assert.False(AccountGroupSelectionPolicy.IsSelectable(group, "openai"));
         Assert.True(AccountGroupSelectionPolicy.IsSelectable(group, "openai", githubCopilot: true));
     }
+
+    [Fact]
+    public void ZhipuAccountOnlySelectsZhipuOrCompositeGroups()
+    {
+        Assert.True(AccountGroupSelectionPolicy.IsSelectable(
+            new GroupDto { Id = "1", Platform = "zhipu" }, "zhipu"));
+        Assert.True(AccountGroupSelectionPolicy.IsSelectable(
+            new GroupDto { Id = "2", Platform = "composite" }, "zhipu"));
+        Assert.False(AccountGroupSelectionPolicy.IsSelectable(
+            new GroupDto { Id = "3", Platform = "openai" }, "zhipu"));
+    }
 }
