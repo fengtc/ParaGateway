@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -209,4 +210,30 @@ func TestResolveCNProviderTestModelPreservesExplicitModelMapping(t *testing.T) {
 	account.Credentials["model_mapping"] = map[string]any{"glm-test": "glm-5.2"}
 
 	require.Equal(t, "glm-5.2", resolveCNProviderTestModel(account, "glm-test"))
+}
+
+func TestResolveOpenAIAccountTestModelRecognizesLegacyZhipuCodingPlan(t *testing.T) {
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"base_url": "https://open.bigmodel.cn/api/coding/paas/v4/",
+			"model_mapping": map[string]any{
+				"glm-5.2": "glm-5.2",
+			},
+		},
+	}
+
+	require.Equal(t, "glm-5.2", resolveOpenAIAccountTestModel(account, ""))
+}
+
+func TestResolveOpenAIAccountTestModelKeepsOfficialOpenAIDefault(t *testing.T) {
+	account := &Account{
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Credentials: map[string]any{"base_url": "https://api.openai.com/v1"},
+	}
+
+	require.Equal(t, openai.DefaultTestModel, resolveOpenAIAccountTestModel(account, ""))
+	require.Equal(t, "custom-model", resolveOpenAIAccountTestModel(account, "custom-model"))
 }

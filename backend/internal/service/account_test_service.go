@@ -392,6 +392,32 @@ func resolveCNProviderTestModel(account *Account, modelID string) string {
 	return account.GetMappedModel(testModelID)
 }
 
+func resolveOpenAIAccountTestModel(account *Account, modelID string) string {
+	testModelID := strings.TrimSpace(modelID)
+	if testModelID == "" {
+		testModelID = openai.DefaultTestModel
+		if isLegacyZhipuCodingPlanAccount(account) {
+			testModelID = "glm-5.2"
+		}
+	}
+	return account.GetMappedModel(testModelID)
+}
+
+// Older imports represented Zhipu Coding Plan as an OpenAI API-key account.
+// Keep those accounts compatible without changing ordinary OpenAI defaults.
+func isLegacyZhipuCodingPlanAccount(account *Account) bool {
+	if account == nil || !account.IsOpenAIApiKey() {
+		return false
+	}
+	parsed, err := url.Parse(strings.TrimSpace(account.GetOpenAIBaseURL()))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	path := strings.ToLower(strings.TrimRight(parsed.Path, "/"))
+	return host == "open.bigmodel.cn" && strings.Contains(path, "/api/coding/")
+}
+
 // testClaudeAccountConnection tests an Anthropic Claude account's connection
 func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account *Account, modelID string) error {
 	ctx := c.Request.Context()
@@ -698,17 +724,11 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	ctx := c.Request.Context()
 	mode = normalizeAccountTestMode(mode)
 
-	// Default to openai.DefaultTestModel for OpenAI testing
-	testModelID := modelID
-	if testModelID == "" {
-		testModelID = openai.DefaultTestModel
-	}
-
 	// Align test routing with gateway behavior: OpenAI accounts apply normal
 	// account model mapping. Native remote compaction v2 rides the ordinary
 	// /responses wire and does NOT apply the legacy compact-only mapping
 	// (post-#5641 semantics: compact_model_mapping is /responses/compact-only).
-	testModelID = account.GetMappedModel(testModelID)
+	testModelID := resolveOpenAIAccountTestModel(account, modelID)
 	if mode == AccountTestModeCompact {
 		return s.testOpenAICompactConnection(c, account, testModelID)
 	}
