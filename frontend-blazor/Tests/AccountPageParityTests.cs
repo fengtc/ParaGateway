@@ -278,7 +278,7 @@ public sealed class AccountPageParityTests
     }
 
     [Fact]
-    public void AllAccountUsageWindowsRenderTodayAccountAndUserCosts()
+    public void OAuthUsageWindowsHideTodayStatsAndKeepWindowCosts()
     {
         var page = Read("Pages", "Providers.razor");
         var quotaCell = Read("Components", "AccountQuotaUsageCell.razor");
@@ -287,8 +287,12 @@ public sealed class AccountPageParityTests
         Assert.Contains("TodayStatsLoading=\"@todayStatsLoading\"", page, StringComparison.Ordinal);
         Assert.Contains("!IsColumnVisible(\"today\") && !IsColumnVisible(\"usage\")", page, StringComparison.Ordinal);
         Assert.Contains("var todayStats = TodayStats ?? new AccountTodayStatsDto();", quotaCell, StringComparison.Ordinal);
-        Assert.DoesNotContain("ShowsTodayStatsInUsageWindow", quotaCell, StringComparison.Ordinal);
-        Assert.DoesNotContain("!TodayStatsLoading && TodayStats is null", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("@if (ShowsTodayStatsInUsageWindow && TodayStatsLoading && TodayStats is null)", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("else if (ShowsTodayStatsInUsageWindow)", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("private bool IsOpenAIOAuth => Account.Platform == \"openai\" && Account.Type == \"oauth\" && !IsCopilot;", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("private bool IsAnthropicOAuthOrSetupToken => Account.Platform == \"anthropic\"", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("(Account.Type == \"oauth\" || Account.Type == \"setup-token\")", quotaCell, StringComparison.Ordinal);
+        Assert.Contains("private bool ShowsTodayStatsInUsageWindow => !IsOpenAIOAuth && !IsAnthropicOAuthOrSetupToken;", quotaCell, StringComparison.Ordinal);
         Assert.Contains("UiFormat.Usd(0)", page, StringComparison.Ordinal);
 
         foreach (var value in new[] { "Requests req", "FormatCompact(todayStats.Tokens)", "A @UiFormat.Usd(todayStats.Cost)", "U @UiFormat.Usd(todayStats.UserCost)" })

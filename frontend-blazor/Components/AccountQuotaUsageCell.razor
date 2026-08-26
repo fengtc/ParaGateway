@@ -2,11 +2,11 @@
 @inject IJSRuntime JS
 
 <div class="account-quota-cell" data-platform="@Account.Platform">
-    @if (TodayStatsLoading && TodayStats is null)
+    @if (ShowsTodayStatsInUsageWindow && TodayStatsLoading && TodayStats is null)
     {
         <div class="today-stats-loading" aria-label="正在加载今日账号统计"><span></span><span></span><span></span></div>
     }
-    else
+    else if (ShowsTodayStatsInUsageWindow)
     {
         var todayStats = TodayStats ?? new AccountTodayStatsDto();
         <div class="quota-stats account-today-stats" aria-label="今日 API 账号统计">
@@ -163,9 +163,11 @@
         || string.Equals(OAuthProfile, "github_copilot", StringComparison.OrdinalIgnoreCase)
         || string.Equals(ReadExtraString("oauth_profile"), "github_copilot", StringComparison.OrdinalIgnoreCase);
     private bool IsOpenAIOAuth => Account.Platform == "openai" && Account.Type == "oauth" && !IsCopilot;
+    private bool IsAnthropicOAuthOrSetupToken => Account.Platform == "anthropic" && (Account.Type == "oauth" || Account.Type == "setup-token");
+    private bool ShowsTodayStatsInUsageWindow => !IsOpenAIOAuth && !IsAnthropicOAuthOrSetupToken;
     private bool IsOfficialUsageAccount => Account.Platform switch
     {
-        "anthropic" => Account.Type is "oauth" or "setup-token",
+        "anthropic" => IsAnthropicOAuthOrSetupToken,
         "openai" => Account.Type == "oauth" && !IsCopilot,
         "gemini" => true,
         "antigravity" or "grok" => Account.Type == "oauth",
