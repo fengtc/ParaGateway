@@ -40,6 +40,25 @@ public sealed class AccountPageParityTests
     }
 
     [Fact]
+    public void OAuthAccountPlatformCellShowsSubscriptionPlanAndExpiry()
+    {
+        var markup = Read("Pages", "Providers.razor");
+        var css = Read("Pages", "Providers.razor.css");
+        var dto = Read("Models", "Dtos.cs");
+
+        Assert.Contains("OAuthSubscriptionDisplay.From(row)", markup, StringComparison.Ordinal);
+        Assert.Contains("class=\"platform-meta-row\"", markup, StringComparison.Ordinal);
+        Assert.Contains("class=\"subscription-meta-row\"", markup, StringComparison.Ordinal);
+        Assert.Contains("subscription-plan-@subscription.PlanTone", markup, StringComparison.Ordinal);
+        Assert.Contains("class=\"subscription-expiry\"", markup, StringComparison.Ordinal);
+        Assert.Contains("@subscription.ExpiryLabel", markup, StringComparison.Ordinal);
+        Assert.Contains(".subscription-plan-pro", css, StringComparison.Ordinal);
+        Assert.Contains(".platform-stack > .subscription-expiry", css, StringComparison.Ordinal);
+        Assert.Contains("parent_plan_type", dto, StringComparison.Ordinal);
+        Assert.Contains("parent_subscription_expires_at", dto, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AccountToolbarAndSchedulingControlsStayAligned()
     {
         var markup = Read("Pages", "Providers.razor");

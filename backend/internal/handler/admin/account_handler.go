@@ -1370,23 +1370,7 @@ func (h *AccountHandler) refreshSingleAccount(ctx context.Context, account *serv
 			return nil, "", err
 		}
 
-		// Copy existing credentials to preserve non-token settings (e.g., intercept_warmup_requests)
-		newCredentials = make(map[string]any)
-		for k, v := range account.Credentials {
-			newCredentials[k] = v
-		}
-
-		// Update token-related fields
-		newCredentials["access_token"] = tokenInfo.AccessToken
-		newCredentials["token_type"] = tokenInfo.TokenType
-		newCredentials["expires_in"] = strconv.FormatInt(tokenInfo.ExpiresIn, 10)
-		newCredentials["expires_at"] = strconv.FormatInt(tokenInfo.ExpiresAt, 10)
-		if strings.TrimSpace(tokenInfo.RefreshToken) != "" {
-			newCredentials["refresh_token"] = tokenInfo.RefreshToken
-		}
-		if strings.TrimSpace(tokenInfo.Scope) != "" {
-			newCredentials["scope"] = tokenInfo.Scope
-		}
+		newCredentials = service.MergeCredentials(account.Credentials, service.BuildClaudeAccountCredentials(tokenInfo))
 	}
 
 	updatedAccount, err := h.adminService.UpdateAccount(ctx, account.ID, &service.UpdateAccountInput{

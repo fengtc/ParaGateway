@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/imroc/req/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -21,12 +22,130 @@ type ClaudeOAuthServiceSuite struct {
 
 // requestCapture holds captured request data for assertions in the main goroutine.
 type requestCapture struct {
-	path        string
-	method      string
-	cookies     []*http.Cookie
-	body        []byte
-	bodyJSON    map[string]any
-	contentType string
+	path          string
+	method        string
+	authorization string
+	anthropicBeta string
+	cookies       []*http.Cookie
+	body          []byte
+	bodyJSON      map[string]any
+	contentType   string
+}
+
+func (s *ClaudeOAuthServiceSuite) TestGetOAuthProfile() {
+	tests := []struct {
+		name         string
+		handler      http.HandlerFunc
+		wantErr      bool
+		wantProfile  *service.ClaudeOAuthProfile
+		validate     func(captured requestCapture, proxyURL string)
+	}{
+		{
+			name: "nested_organization_profile",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{
+					"organization": {
+						"organization_type": "claude_max",
+						"rate_limit_tier": "default_claude_max_20x",
+						"subscription_expires_at": "2026-09-04T00:00:00Z"
+					}
+				}`))
+			},
+			wantProfile: &service.ClaudeOAuthProfile{
+				OrganizationType:       "claude_max",
+				RateLimitTier:          "default_claude_max_20x",
+				SubscriptionExpiresAt: "2026-09-04T00:00:00Z",
+			},
+			validate: func(captured requestCapture, proxyURL string) {
+				require.Equal(s.T(), "/api/oauth/profile", captured.path)
+				require.Equal(s.T(), http.MethodGet, captured.method)
+				require.Equal(s.T(), "Bearer access-token", captured.authorization)
+				require.Equal(s.T(), "oauth-2025-04-20", captured.anthropicBeta)
+				require.Equal(s.T(), "http://proxy.example.test:8080", proxyURL)
+			},
+		},
+		{
+			name: "flat_profile",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{
+					"organization_type": "claude_pro",
+					"rate_limit_tier": "default_claude_pro"
+				}`))
+			},
+			wantProfile: &service.ClaudeOAuthProfile{
+				OrganizationType: "claude_pro",
+				RateLimitTier:    "default_claude_pro",
+			},
+		},
+		{
+			name: "account_subscription_flags",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{
+					"account": {
+						"has_claude_max": true,
+						"has_claude_pro": false
+					}
+				}`))
+			},
+			wantProfile: &service.ClaudeOAuthProfile{
+				HasClaudeMax: claudeOAuthProfileBoolPtr(true),
+				HasClaudePro: claudeOAuthProfileBoolPtr(false),
+			},
+		},
+		{
+			name: "non_200_returns_error",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			var captured requestCapture
+			var capturedProxyURL string
+
+			rt := newInProcessTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				captured.path = r.URL.Path
+				captured.method = r.Method
+				captured.authorization = r.Header.Get("Authorization")
+				captured.anthropicBeta = r.Header.Get("anthropic-beta")
+				tt.handler(w, r)
+			}), nil)
+
+			client, ok := NewClaudeOAuthClient().(*claudeOAuthService)
+			require.True(s.T(), ok, "type assertion failed")
+			client.profileURL = "http://in-process/api/oauth/profile"
+			client.clientFactory = func(proxyURL string) (*req.Client, error) {
+				capturedProxyURL = proxyURL
+				return newTestReqClient(rt), nil
+			}
+
+			profile, err := client.GetOAuthProfile(
+				context.Background(),
+				"access-token",
+				"http://proxy.example.test:8080",
+			)
+			if tt.wantErr {
+				require.Error(s.T(), err)
+				return
+			}
+
+			require.NoError(s.T(), err)
+			require.Equal(s.T(), tt.wantProfile, profile)
+			if tt.validate != nil {
+				tt.validate(captured, capturedProxyURL)
+			}
+		})
+	}
+}
+
+func claudeOAuthProfileBoolPtr(value bool) *bool {
+	return &value
 }
 
 func newTestReqClient(rt http.RoundTripper) *req.Client {

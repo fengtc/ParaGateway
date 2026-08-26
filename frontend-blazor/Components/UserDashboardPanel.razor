@@ -180,7 +180,7 @@
         </section>
 
         <div class="dashboard-chart-grid">
-            <section class="dashboard-card dashboard-chart-card">
+            <section class="dashboard-card dashboard-chart-card model-distribution-card">
                 <div class="dashboard-card-heading"><h2>模型分布</h2></div>
                 @if (loadingCharts)
                 {
@@ -190,25 +190,66 @@
                 {
                     <div class="dashboard-empty danger-text">@chartError</div>
                 }
-                else if (ModelRows.Count == 0)
+                else if (ModelDistributionRows.Count == 0)
                 {
                     <div class="dashboard-empty">暂无数据</div>
                 }
                 else
                 {
-                    <div class="distribution-layout">
-                        <div class="distribution-chart">
-                            <DxPieChart Data="@ModelRows" InnerDiameter="0.55" Width="100%" Height="210px">
-                                <DxPieChartSeries T="UserUsageModelStatDto" TArgument="string" TValue="long"
-                                                  ArgumentField="item => item.Model"
-                                                  ValueField="item => item.TotalTokens" />
+                    <div class="distribution-layout model-distribution-layout">
+                        <div class="distribution-chart model-distribution-chart" aria-label="模型 Token 占比">
+                            <DxChart T="ModelDistributionRow"
+                                     Data="@ModelDistributionRows"
+                                     Rotated="true"
+                                     Width="100%"
+                                     Height="230px"
+                                     CustomizeSeriesPoint="CustomizeModelDistributionPoint">
+                                <DxChartBarSeries T="ModelDistributionRow"
+                                                  TArgument="string"
+                                                  TValue="double"
+                                                  Name="Token 占比"
+                                                  Color="@ModelDistributionColor"
+                                                  ArgumentField="item => item.Label"
+                                                  ValueField="item => item.TokenShare"
+                                                  BarPadding="0.32"
+                                                  CornerRadius="3">
+                                    <DxChartSeriesLabel Visible="true"
+                                                        Position="RelativePosition.Outside"
+                                                        ValueFormat="ChartElementFormat.Percent(1)" />
+                                </DxChartBarSeries>
+                                <DxChartArgumentAxis Inverted="true" />
+                                <DxChartValueAxis>
+                                    <DxChartAxisRange StartValue="0" EndValue="1" />
+                                    <DxChartAxisLabel Format="ChartElementFormat.Percent(0)" />
+                                </DxChartValueAxis>
                                 <DxChartLegend Visible="false" />
-                                <DxChartTooltip Enabled="true" />
-                            </DxPieChart>
+                                <DxChartTooltip Enabled="true">
+                                    @{
+                                        var row = context.Point.DataItems.OfType<ModelDistributionRow>().FirstOrDefault();
+                                    }
+                                    @if (row is not null)
+                                    {
+                                        <div class="model-distribution-tooltip">
+                                            <strong title="@row.FullLabel">@row.FullLabel</strong>
+                                            <dl>
+                                                <div><dt>占比</dt><dd>@FormatPercent(row.TokenShare * 100)</dd></div>
+                                                <div><dt>Token</dt><dd>@FormatTokens(row.TotalTokens)</dd></div>
+                                                <div><dt>请求</dt><dd>@FormatNumber(row.Requests)</dd></div>
+                                                <div><dt>实际费用</dt><dd>$@FormatCost(row.ActualCost)</dd></div>
+                                                <div><dt>标准费用</dt><dd>$@FormatCost(row.Cost)</dd></div>
+                                                @if (row.IsOther)
+                                                {
+                                                    <div><dt>汇总模型</dt><dd>@ModelDistributionOtherCount</dd></div>
+                                                }
+                                            </dl>
+                                        </div>
+                                    }
+                                </DxChartTooltip>
+                            </DxChart>
                         </div>
-                        <div class="compact-table-wrap">
-                            <table class="compact-dashboard-table">
-                                <thead><tr><th>模型</th><th>请求</th><th>Token</th><th>实际</th><th>标准</th></tr></thead>
+                        <div class="compact-table-wrap model-distribution-table-wrap">
+                            <table class="compact-dashboard-table model-distribution-table">
+                                <thead><tr><th>模型</th><th>请求</th><th>Token</th><th>占比</th><th>实际</th><th>标准</th></tr></thead>
                                 <tbody>
                                     @foreach (var model in ModelRows)
                                     {
@@ -216,6 +257,7 @@
                                             <td title="@model.Model">@model.Model</td>
                                             <td>@FormatNumber(model.Requests)</td>
                                             <td>@FormatTokens(model.TotalTokens)</td>
+                                            <td class="model-share">@FormatPercent(GetModelShare(model.TotalTokens))</td>
                                             <td class="success-text">$@FormatCost(model.ActualCost)</td>
                                             <td>$@FormatCost(model.Cost)</td>
                                         </tr>
@@ -366,11 +408,78 @@
     private string? chartError;
     private string? usageError;
     private int rangeGeneration;
+    private IReadOnlyList<UserUsageModelStatDto> modelRows = [];
+    private IReadOnlyList<ModelDistributionRow> modelDistributionRows = [];
+    private long modelTotalTokens;
+    private int modelDistributionOtherCount;
 
     private bool IsSimpleMode => Auth.User?.IsSimpleMode == true;
 
-    private IReadOnlyList<UserUsageModelStatDto> ModelRows =>
-        modelsResponse.Models.OrderByDescending(item => item.TotalTokens).ToList();
+    private IReadOnlyList<UserUsageModelStatDto> ModelRows => modelRows;
+
+    private const int ModelDistributionLimit = 6;
+    private const int ModelDistributionLabelLimit = 24;
+    private const string OtherModelsLabel = "其他模型";
+    private static readonly System.Drawing.Color ModelDistributionColor = System.Drawing.Color.FromArgb(22, 126, 99);
+    private static readonly System.Drawing.Color ModelDistributionOtherColor = System.Drawing.Color.FromArgb(125, 136, 131);
+
+    private long ModelTotalTokens => modelTotalTokens;
+
+    private int ModelDistributionOtherCount => modelDistributionOtherCount;
+
+    private IReadOnlyList<ModelDistributionRow> ModelDistributionRows => modelDistributionRows;
+
+    private void RefreshModelDistribution()
+    {
+        modelRows = modelsResponse.Models
+            .OrderByDescending(item => item.TotalTokens)
+            .ThenByDescending(item => item.Requests)
+            .ThenBy(item => item.Model, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        modelTotalTokens = modelRows.Sum(item => Math.Max(item.TotalTokens, 0));
+
+        var models = modelRows.Where(item => item.TotalTokens > 0).ToList();
+        modelDistributionOtherCount = Math.Max(models.Count - ModelDistributionLimit, 0);
+        if (models.Count == 0)
+        {
+            modelDistributionRows = [];
+            return;
+        }
+
+        var totalTokens = models.Sum(item => item.TotalTokens);
+        var chartLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rows = models.Take(ModelDistributionLimit)
+            .Select(item => new ModelDistributionRow(
+                CreateUniqueModelChartLabel(item.Model, chartLabels),
+                item.Model,
+                item.Requests,
+                item.TotalTokens,
+                item.ActualCost,
+                item.Cost,
+                item.TotalTokens / (double)totalTokens,
+                false))
+            .ToList();
+
+        var otherModels = models.Skip(ModelDistributionLimit).ToList();
+        if (otherModels.Count > 0)
+        {
+            var otherTokens = otherModels.Sum(item => item.TotalTokens);
+            var otherChartLabel = models.Any(item => string.Equals(item.Model?.Trim(), OtherModelsLabel, StringComparison.OrdinalIgnoreCase))
+                ? $"{OtherModelsLabel}（汇总）"
+                : OtherModelsLabel;
+            rows.Add(new ModelDistributionRow(
+                CreateUniqueModelChartLabel(otherChartLabel, chartLabels),
+                otherChartLabel,
+                otherModels.Sum(item => item.Requests),
+                otherTokens,
+                otherModels.Sum(item => item.ActualCost),
+                otherModels.Sum(item => item.Cost),
+                otherTokens / (double)totalTokens,
+                true));
+        }
+
+        modelDistributionRows = rows;
+    }
 
     private IReadOnlyList<UserUsageTrendPointDto> TrendRows =>
         trendResponse.Trend.OrderBy(item => item.Date).ToList();
@@ -433,6 +542,7 @@
             if (generation != rangeGeneration) return;
             trendResponse = await trendTask;
             modelsResponse = await modelsTask;
+            RefreshModelDistribution();
         }
         catch (ApiException ex)
         {
@@ -621,6 +731,43 @@
     private static string FormatQuota(double value) => value.ToString("N2", CultureInfo.InvariantCulture);
     private static string FormatCost(double value) => value.ToString("0.0000", CultureInfo.InvariantCulture);
     private static string FormatNumber(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private double GetModelShare(long tokens) => ModelTotalTokens > 0
+        ? Math.Max(tokens, 0) * 100d / ModelTotalTokens
+        : 0;
+
+    private static void CustomizeModelDistributionPoint(ChartSeriesPointCustomizationSettings settings)
+    {
+        var row = settings.Point.DataItems.OfType<ModelDistributionRow>().FirstOrDefault();
+        settings.PointAppearance.Color = row?.IsOther == true
+            ? ModelDistributionOtherColor
+            : ModelDistributionColor;
+    }
+
+    private static string CreateUniqueModelChartLabel(string value, ISet<string> usedLabels)
+    {
+        var fullLabel = string.IsNullOrWhiteSpace(value) ? "未命名模型" : value.Trim();
+        var textElementIndexes = System.Globalization.StringInfo.ParseCombiningCharacters(fullLabel);
+        for (var index = 1; ; index++)
+        {
+            var suffix = index == 1 ? string.Empty : $" ({index})";
+            var prefixLimit = Math.Max(4, ModelDistributionLabelLimit - suffix.Length);
+            var prefix = textElementIndexes.Length <= prefixLimit
+                ? fullLabel
+                : $"{fullLabel[..textElementIndexes[prefixLimit - 3]]}...";
+            var candidate = prefix + suffix;
+            if (usedLabels.Add(candidate)) return candidate;
+        }
+    }
+
+    private static string FormatPercent(double value) => value switch
+    {
+        >= 10 => $"{value:0.0}%",
+        >= 1 => $"{value:0.00}%",
+        > 0 => $"{value:0.000}%",
+        _ => "0.0%"
+    };
+
     private static string FormatTokens(long value) => value switch
     {
         >= 1_000_000_000 => $"{value / 1_000_000_000d:0.##}B",
@@ -639,6 +786,16 @@
         long TotalRequests,
         long TotalTokens,
         UserPlatformQuotaDto? Quota,
+        bool IsOther);
+
+    private sealed record ModelDistributionRow(
+        string Label,
+        string FullLabel,
+        long Requests,
+        long TotalTokens,
+        double ActualCost,
+        double Cost,
+        double TokenShare,
         bool IsOther);
 
     private sealed record QuotaWindowRow(

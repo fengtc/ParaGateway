@@ -759,6 +759,91 @@ func TestBuildClaudeAccountCredentials_Minimal(t *testing.T) {
 	require.False(t, hasScope, "scope should not be set when empty")
 }
 
+func TestBuildClaudeAccountCredentials_SubscriptionMetadata(t *testing.T) {
+	tokenInfo := &TokenInfo{
+		AccessToken:           "at-subscription",
+		ExpiresAt:             1700003600,
+		PlanType:              " max_20x ",
+		SubscriptionExpiresAt: " 2026-09-04T00:00:00Z ",
+	}
+
+	creds := BuildClaudeAccountCredentials(tokenInfo)
+
+	require.Equal(t, "max_20x", creds["plan_type"])
+	require.Equal(t, "2026-09-04T00:00:00Z", creds["subscription_expires_at"])
+}
+
+func TestBuildClaudeAccountCredentials_DoesNotUseTokenExpiryAsSubscriptionExpiry(t *testing.T) {
+	tokenInfo := &TokenInfo{
+		AccessToken: "at-no-subscription",
+		ExpiresAt:   1700003600,
+		PlanType:    "pro",
+	}
+
+	creds := BuildClaudeAccountCredentials(tokenInfo)
+
+	require.Equal(t, "1700003600", creds["expires_at"])
+	require.NotContains(t, creds, "subscription_expires_at")
+}
+
+func TestClaudeRefreshCredentialsPreserveExistingSubscriptionMetadataWhenProfileIsUnavailable(t *testing.T) {
+	existing := map[string]any{
+		"access_token":            "old-access-token",
+		"plan_type":               "pro",
+		"subscription_expires_at": "2026-09-04T00:00:00Z",
+	}
+	refreshedToken := &TokenInfo{
+		AccessToken: "new-access-token",
+		ExpiresAt:   1700003600,
+	}
+
+	creds := MergeCredentials(existing, BuildClaudeAccountCredentials(refreshedToken))
+
+	require.Equal(t, "new-access-token", creds["access_token"])
+	require.Equal(t, "pro", creds["plan_type"])
+	require.Equal(t, "2026-09-04T00:00:00Z", creds["subscription_expires_at"])
+}
+
+func TestClaudeRefreshCredentialsClearStaleSubscriptionMetadataWhenProfileIsAuthoritative(t *testing.T) {
+	existing := map[string]any{
+		"access_token":            "old-access-token",
+		"plan_type":               "pro",
+		"subscription_expires_at": "2026-09-04T00:00:00Z",
+	}
+	refreshedToken := &TokenInfo{
+		AccessToken:                  "new-access-token",
+		ExpiresAt:                    1700003600,
+		SubscriptionMetadataResolved: true,
+	}
+
+	creds := MergeCredentials(existing, BuildClaudeAccountCredentials(refreshedToken))
+
+	require.Equal(t, "new-access-token", creds["access_token"])
+	require.Contains(t, creds, "plan_type")
+	require.Nil(t, creds["plan_type"])
+	require.Contains(t, creds, "subscription_expires_at")
+	require.Nil(t, creds["subscription_expires_at"])
+}
+
+func TestClaudeRefreshCredentialsClearStaleExpiryWhenCurrentProfileHasNoEndDate(t *testing.T) {
+	existing := map[string]any{
+		"plan_type":               "pro",
+		"subscription_expires_at": "2026-09-04T00:00:00Z",
+	}
+	refreshedToken := &TokenInfo{
+		AccessToken:                  "new-access-token",
+		ExpiresAt:                    1700003600,
+		PlanType:                     "pro",
+		SubscriptionMetadataResolved: true,
+	}
+
+	creds := MergeCredentials(existing, BuildClaudeAccountCredentials(refreshedToken))
+
+	require.Equal(t, "pro", creds["plan_type"])
+	require.Contains(t, creds, "subscription_expires_at")
+	require.Nil(t, creds["subscription_expires_at"])
+}
+
 // refreshAPIAccountRepoWithRace supports returning a different account on subsequent GetByID calls
 // to simulate race conditions where another worker has refreshed the token.
 type refreshAPIAccountRepoWithRace struct {

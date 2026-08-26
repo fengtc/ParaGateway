@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -41,6 +42,25 @@ type ClaudeOAuthClient interface {
 	ExchangeCodeForToken(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error)
 	RefreshToken(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error)
 }
+
+// ClaudeOAuthProfile contains non-secret subscription metadata returned by
+// Anthropic's OAuth profile endpoint.
+type ClaudeOAuthProfile struct {
+	OrganizationType       string
+	RateLimitTier          string
+	SubscriptionExpiresAt string
+	HasClaudeMax           *bool
+	HasClaudePro           *bool
+}
+
+// ClaudeOAuthProfileClient is an optional extension implemented by clients
+// that can query Anthropic OAuth profile metadata. Keeping it separate avoids
+// forcing every ClaudeOAuthClient mock and integration to implement it.
+type ClaudeOAuthProfileClient interface {
+	GetOAuthProfile(ctx context.Context, accessToken, proxyURL string) (*ClaudeOAuthProfile, error)
+}
+
+const claudeOAuthProfileTimeout = 8 * time.Second
 
 // OAuthService handles OAuth authentication flows
 type OAuthService struct {
@@ -132,15 +152,20 @@ type ExchangeCodeInput struct {
 
 // TokenInfo represents the token information stored in credentials
 type TokenInfo struct {
-	AccessToken  string `json:"access_token"`
-	TokenType    string `json:"token_type"`
-	ExpiresIn    int64  `json:"expires_in"`
-	ExpiresAt    int64  `json:"expires_at"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	Scope        string `json:"scope,omitempty"`
-	OrgUUID      string `json:"org_uuid,omitempty"`
-	AccountUUID  string `json:"account_uuid,omitempty"`
-	EmailAddress string `json:"email_address,omitempty"`
+	AccessToken           string `json:"access_token"`
+	TokenType             string `json:"token_type"`
+	ExpiresIn             int64  `json:"expires_in"`
+	ExpiresAt             int64  `json:"expires_at"`
+	RefreshToken          string `json:"refresh_token,omitempty"`
+	Scope                 string `json:"scope,omitempty"`
+	OrgUUID               string `json:"org_uuid,omitempty"`
+	AccountUUID           string `json:"account_uuid,omitempty"`
+	EmailAddress          string `json:"email_address,omitempty"`
+	PlanType              string `json:"plan_type,omitempty"`
+	SubscriptionExpiresAt string `json:"subscription_expires_at,omitempty"`
+	// SubscriptionMetadataResolved distinguishes a successful authoritative
+	// profile result from a best-effort lookup failure during credential merge.
+	SubscriptionMetadataResolved bool `json:"-"`
 }
 
 // ExchangeCode exchanges authorization code for tokens
@@ -282,24 +307,135 @@ func (s *OAuthService) exchangeCodeForToken(ctx context.Context, code, codeVerif
 		}
 	}
 
+	if !isSetupToken {
+		s.enrichTokenInfoWithOAuthProfile(ctx, tokenInfo, proxyURL)
+	}
+
 	return tokenInfo, nil
 }
 
 // RefreshToken refreshes an OAuth token
 func (s *OAuthService) RefreshToken(ctx context.Context, refreshToken string, proxyURL string) (*TokenInfo, error) {
+	return s.refreshToken(ctx, refreshToken, proxyURL, true)
+}
+
+func (s *OAuthService) refreshToken(ctx context.Context, refreshToken, proxyURL string, enrichProfile bool) (*TokenInfo, error) {
 	tokenResp, err := s.oauthClient.RefreshToken(ctx, refreshToken, proxyURL)
 	if err != nil {
 		return nil, err
 	}
 
-	return &TokenInfo{
+	tokenInfo := &TokenInfo{
 		AccessToken:  tokenResp.AccessToken,
 		TokenType:    tokenResp.TokenType,
 		ExpiresIn:    tokenResp.ExpiresIn,
 		ExpiresAt:    time.Now().Unix() + tokenResp.ExpiresIn,
 		RefreshToken: tokenResp.RefreshToken,
 		Scope:        tokenResp.Scope,
-	}, nil
+	}
+	if enrichProfile {
+		s.enrichTokenInfoWithOAuthProfile(ctx, tokenInfo, proxyURL)
+	}
+	return tokenInfo, nil
+}
+
+func (s *OAuthService) enrichTokenInfoWithOAuthProfile(ctx context.Context, tokenInfo *TokenInfo, proxyURL string) {
+	if s == nil || tokenInfo == nil || strings.TrimSpace(tokenInfo.AccessToken) == "" {
+		return
+	}
+	profileClient, ok := s.oauthClient.(ClaudeOAuthProfileClient)
+	if !ok {
+		return
+	}
+
+	profileCtx, cancel := context.WithTimeout(ctx, claudeOAuthProfileTimeout)
+	defer cancel()
+
+	profile, err := profileClient.GetOAuthProfile(profileCtx, tokenInfo.AccessToken, proxyURL)
+	if err != nil {
+		log.Printf("[WARN] Claude OAuth profile lookup failed: %v", err)
+		return
+	}
+	if profile == nil {
+		return
+	}
+
+	tokenInfo.PlanType = claudeOAuthPlanType(
+		profile.OrganizationType,
+		profile.RateLimitTier,
+		profile.HasClaudeMax,
+		profile.HasClaudePro,
+	)
+	tokenInfo.SubscriptionExpiresAt = strings.TrimSpace(profile.SubscriptionExpiresAt)
+	tokenInfo.SubscriptionMetadataResolved = tokenInfo.PlanType != "" ||
+		(profile.HasClaudeMax != nil && profile.HasClaudePro != nil)
+}
+
+func claudeOAuthPlanType(organizationType, rateLimitTier string, hasClaudeMax, hasClaudePro *bool) string {
+	organizationType = normalizeClaudeOAuthPlanSignal(organizationType)
+	rateLimitTier = normalizeClaudeOAuthPlanSignal(rateLimitTier)
+
+	switch organizationType {
+	case "enterprise", "claude_enterprise":
+		return "enterprise"
+	case "team", "claude_team":
+		return "team"
+	case "max", "claude_max":
+		switch {
+		case claudeOAuthTierIs(rateLimitTier, "max_20x", "max20x"):
+			return "max_20x"
+		case claudeOAuthTierIs(rateLimitTier, "max_5x", "max5x"):
+			return "max_5x"
+		default:
+			return "max"
+		}
+	case "pro", "claude_pro":
+		return "pro"
+	case "free", "claude_free":
+		return "free"
+	}
+
+	// Fall back to an explicit tier only when the profile omitted an
+	// organization type that can identify the subscription.
+	switch {
+	case claudeOAuthTierIs(rateLimitTier, "max_20x", "max20x"):
+		return "max_20x"
+	case claudeOAuthTierIs(rateLimitTier, "max_5x", "max5x"):
+		return "max_5x"
+	case claudeOAuthTierIs(rateLimitTier, "max"):
+		return "max"
+	case claudeOAuthTierIs(rateLimitTier, "pro"):
+		return "pro"
+	case claudeOAuthTierIs(rateLimitTier, "enterprise"):
+		return "enterprise"
+	case claudeOAuthTierIs(rateLimitTier, "team"):
+		return "team"
+	case claudeOAuthTierIs(rateLimitTier, "free"):
+		return "free"
+	}
+
+	if hasClaudeMax != nil && *hasClaudeMax {
+		return "max"
+	}
+	if hasClaudePro != nil && *hasClaudePro {
+		return "pro"
+	}
+	return ""
+}
+
+func claudeOAuthTierIs(rateLimitTier string, values ...string) bool {
+	for _, value := range values {
+		if rateLimitTier == value || strings.HasSuffix(rateLimitTier, "_"+value) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeClaudeOAuthPlanSignal(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer("-", "_", " ", "_", "/", "_")
+	return replacer.Replace(value)
 }
 
 // RefreshAccountToken refreshes token for an account
@@ -317,7 +453,7 @@ func (s *OAuthService) RefreshAccountToken(ctx context.Context, account *Account
 		}
 	}
 
-	return s.RefreshToken(ctx, refreshToken, proxyURL)
+	return s.refreshToken(ctx, refreshToken, proxyURL, account.Type == AccountTypeOAuth)
 }
 
 // Stop stops the session store cleanup goroutine

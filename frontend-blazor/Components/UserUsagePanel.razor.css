@@ -117,6 +117,10 @@
     overflow: hidden;
 }
 
+.distribution-bar-card {
+    overflow: visible;
+}
+
 .chart-heading {
     display: flex;
     min-height: 34px;

@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using ParaGateway.Frontend.Models;
 using Xunit;
@@ -43,7 +44,7 @@ public sealed class UserDashboardPageParityTests
         Assert.Contains("Take(5)", component, StringComparison.Ordinal);
         Assert.Contains("DateTime.Today.AddDays(-6)", component, StringComparison.Ordinal);
         Assert.Contains("DxDateRangePicker", component, StringComparison.Ordinal);
-        Assert.Contains("DxPieChart", component, StringComparison.Ordinal);
+        Assert.Contains("DxChart T=\"ModelDistributionRow\"", component, StringComparison.Ordinal);
         Assert.Contains("Cache Hit Rate", component, StringComparison.Ordinal);
         Assert.Contains("href=\"/keys\"", component, StringComparison.Ordinal);
         Assert.Contains("href=\"/usage\"", component, StringComparison.Ordinal);
@@ -57,6 +58,70 @@ public sealed class UserDashboardPageParityTests
         Assert.Contains("stats.TotalCacheCreationTokens + stats.TotalCacheReadTokens", component, StringComparison.Ordinal);
         Assert.Contains("缓存创建", component, StringComparison.Ordinal);
         Assert.Contains("缓存读取", component, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UserDashboardModelDistributionUsesRankedHorizontalBars()
+    {
+        var component = ReadSource("Components", "UserDashboardPanel.razor");
+        var styles = ReadSource("Components", "UserDashboardPanel.razor.css");
+
+        Assert.Contains("ModelDistributionLimit = 6", component, StringComparison.Ordinal);
+        Assert.Contains("ModelDistributionLabelLimit = 24", component, StringComparison.Ordinal);
+        Assert.Contains("OtherModelsLabel = \"其他模型\"", component, StringComparison.Ordinal);
+        Assert.Contains("OrderByDescending(item => item.TotalTokens)", component, StringComparison.Ordinal);
+        Assert.Contains("ThenByDescending(item => item.Requests)", component, StringComparison.Ordinal);
+        Assert.Contains("item.TotalTokens > 0", component, StringComparison.Ordinal);
+        Assert.Contains("Take(ModelDistributionLimit)", component, StringComparison.Ordinal);
+        Assert.Contains("Skip(ModelDistributionLimit)", component, StringComparison.Ordinal);
+        Assert.Contains("OtherModelsLabel}（汇总）", component, StringComparison.Ordinal);
+        Assert.Contains("CreateUniqueModelChartLabel(otherChartLabel, chartLabels)", component, StringComparison.Ordinal);
+        Assert.Contains("ModelDistributionRows.Count == 0", component, StringComparison.Ordinal);
+        Assert.Contains("Data=\"@ModelDistributionRows\"", component, StringComparison.Ordinal);
+        Assert.Contains("Rotated=\"true\"", component, StringComparison.Ordinal);
+        Assert.Contains("<DxChartBarSeries T=\"ModelDistributionRow\"", component, StringComparison.Ordinal);
+        Assert.Contains("<DxChartArgumentAxis Inverted=\"true\" />", component, StringComparison.Ordinal);
+        Assert.Contains("ValueFormat=\"ChartElementFormat.Percent(1)\"", component, StringComparison.Ordinal);
+        Assert.Contains("Format=\"ChartElementFormat.Percent(0)\"", component, StringComparison.Ordinal);
+        Assert.Contains("<th>占比</th>", component, StringComparison.Ordinal);
+        Assert.Contains("GetModelShare(model.TotalTokens)", component, StringComparison.Ordinal);
+        Assert.Contains("RefreshModelDistribution();", component, StringComparison.Ordinal);
+        Assert.Contains("汇总模型", component, StringComparison.Ordinal);
+        Assert.DoesNotContain("<DxPieChart Data=\"@ModelRows\"", component, StringComparison.Ordinal);
+        Assert.DoesNotContain("SeriesClick=\"OnModelDistributionClick\"", component, StringComparison.Ordinal);
+        Assert.DoesNotContain("账号成本", component, StringComparison.Ordinal);
+
+        Assert.Contains(".model-distribution-card", styles, StringComparison.Ordinal);
+        Assert.Contains("overflow: visible;", styles, StringComparison.Ordinal);
+        Assert.Contains(".model-distribution-layout .model-distribution-chart", styles, StringComparison.Ordinal);
+        Assert.Contains(".dxc-arg-elements text", styles, StringComparison.Ordinal);
+        Assert.Contains(".dxc-val-elements text", styles, StringComparison.Ordinal);
+        Assert.Contains("fill: var(--muted) !important;", styles, StringComparison.Ordinal);
+        Assert.Contains(".dxbl-chart-tooltip-content-container", styles, StringComparison.Ordinal);
+        Assert.Contains("background: var(--surface);", styles, StringComparison.Ordinal);
+        Assert.Contains(".model-distribution-table", styles, StringComparison.Ordinal);
+        Assert.Contains("max-height: 230px;", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UserDashboardModelLabelsPreserveUnicodeTextElementsAndRemainUnique()
+    {
+        var method = typeof(ParaGateway.Frontend.Components.UserDashboardPanel).GetMethod(
+            "CreateUniqueModelChartLabel",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var usedLabels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var model = string.Concat(Enumerable.Repeat("😀", 30));
+        var first = Assert.IsType<string>(method.Invoke(null, [model, usedLabels]));
+        var second = Assert.IsType<string>(method.Invoke(null, [model, usedLabels]));
+
+        Assert.Equal(24, System.Globalization.StringInfo.ParseCombiningCharacters(first).Length);
+        Assert.Equal(24, System.Globalization.StringInfo.ParseCombiningCharacters(second).Length);
+        Assert.Equal(first, System.Text.Encoding.UTF8.GetString(System.Text.Encoding.UTF8.GetBytes(first)));
+        Assert.Equal(second, System.Text.Encoding.UTF8.GetString(System.Text.Encoding.UTF8.GetBytes(second)));
+        Assert.NotEqual(first, second);
+        Assert.EndsWith(" (2)", second, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1810,6 +1810,8 @@ public sealed class GoAccount
     [JsonPropertyName("parent_account_id")] public long? ParentAccountId { get; set; }
     [JsonPropertyName("quota_dimension")] public string QuotaDimension { get; set; } = string.Empty;
     [JsonPropertyName("parent_email")] public string ParentEmail { get; set; } = string.Empty;
+    [JsonPropertyName("parent_plan_type")] public string ParentPlanType { get; set; } = string.Empty;
+    [JsonPropertyName("parent_subscription_expires_at")] public string ParentSubscriptionExpiresAt { get; set; } = string.Empty;
     [JsonExtensionData] public Dictionary<string, JsonElement>? ExtensionData { get; set; }
 }
 
@@ -1876,6 +1878,8 @@ public sealed class AccountDto
     public long? ParentAccountId { get; set; }
     public string QuotaDimension { get; set; } = string.Empty;
     public string ParentEmail { get; set; } = string.Empty;
+    public string ParentPlanType { get; set; } = string.Empty;
+    public string ParentSubscriptionExpiresAt { get; set; } = string.Empty;
 
     public static AccountDto From(GoAccount account)
     {
@@ -1904,7 +1908,9 @@ public sealed class AccountDto
             SchedulerScore = account.SchedulerScore, SchedulerScores = account.SchedulerScores ?? [],
             CurrentWindowCost = account.CurrentWindowCost, ActiveSessions = account.ActiveSessions,
             CurrentRpm = account.CurrentRpm, ParentAccountId = account.ParentAccountId,
-            QuotaDimension = account.QuotaDimension, ParentEmail = account.ParentEmail
+            QuotaDimension = account.QuotaDimension, ParentEmail = account.ParentEmail,
+            ParentPlanType = account.ParentPlanType,
+            ParentSubscriptionExpiresAt = account.ParentSubscriptionExpiresAt
         };
     }
 }

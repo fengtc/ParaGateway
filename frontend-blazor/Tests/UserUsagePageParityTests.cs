@@ -33,18 +33,34 @@ public sealed class UserUsagePageParityTests
     }
 
     [Fact]
-    public void UserUsageChartLegendsDoNotCoverChartCanvases()
+    public void UserUsageDistributionsUseRankedHorizontalShareCharts()
     {
         var page = ReadSource("Components", "UserUsagePanel.razor");
-        var styles = ReadSource("Components", "UserUsagePanel.razor.css");
+        var chart = ReadSource("Components", "UsageDistributionBarChart.razor");
+        var styles = ReadSource("Components", "UsageDistributionBarChart.razor.css");
 
-        Assert.Equal(7, page.Split("<DxChartLegend Visible=\"false\" />", StringSplitOptions.None).Length - 1);
+        Assert.Equal(3, page.Split("<UsageDistributionBarChart ", StringSplitOptions.None).Length - 1);
+        Assert.Contains("Rows=\"@ModelDistributionRows\" Metric=\"@modelMetric\"", page, StringComparison.Ordinal);
+        Assert.Contains("Rows=\"@GroupDistributionRows\" Metric=\"@groupMetric\"", page, StringComparison.Ordinal);
+        Assert.Contains("Rows=\"@EndpointDistributionRows\" Metric=\"@endpointMetric\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<DxPieChart", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<DistributionLegend Rows=", page, StringComparison.Ordinal);
+        Assert.Equal(1, page.Split("<DxChartLegend Visible=\"false\" />", StringSplitOptions.None).Length - 1);
+        Assert.Contains("Rotated=\"true\"", chart, StringComparison.Ordinal);
+        Assert.Contains("<DxChartBarSeries", chart, StringComparison.Ordinal);
+        Assert.Contains("ValueField=\"item => item.Share\"", chart, StringComparison.Ordinal);
+        Assert.Contains("ValueFormat=\"ChartElementFormat.Percent(1)\"", chart, StringComparison.Ordinal);
+        Assert.Contains("<DxChartArgumentAxis Inverted=\"true\" />", chart, StringComparison.Ordinal);
+        Assert.Contains("<DxChartAxisRange StartValue=\"0\" EndValue=\"1\" />", chart, StringComparison.Ordinal);
+        Assert.Contains("Format=\"ChartElementFormat.Percent(0)\"", chart, StringComparison.Ordinal);
+        Assert.Contains("title=\"@row.FullLabel\"", chart, StringComparison.Ordinal);
+        Assert.Contains("UsageDistributionChartBuilder.Build(Rows, Metric, OtherLabel)", chart, StringComparison.Ordinal);
+        Assert.Contains("height: 282px;", styles, StringComparison.Ordinal);
+        Assert.Contains("height: 264px;", styles, StringComparison.Ordinal);
+        Assert.Contains("fill: var(--muted) !important;", styles, StringComparison.Ordinal);
+        Assert.Contains("background: var(--surface);", styles, StringComparison.Ordinal);
         Assert.Contains("class=\"usage-trend-legend\"", page, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Token 使用趋势图例\"", page, StringComparison.Ordinal);
-        Assert.Contains(".usage-trend-layout", styles, StringComparison.Ordinal);
-        Assert.Contains(".usage-trend-legend", styles, StringComparison.Ordinal);
-        Assert.Contains("flex-wrap: wrap;", styles, StringComparison.Ordinal);
-        Assert.Contains("white-space: nowrap;", styles, StringComparison.Ordinal);
     }
 
     [Fact]

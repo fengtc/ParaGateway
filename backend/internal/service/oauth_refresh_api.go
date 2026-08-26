@@ -474,5 +474,23 @@ func BuildClaudeAccountCredentials(tokenInfo *TokenInfo) map[string]any {
 	if tokenInfo.Scope != "" {
 		creds["scope"] = tokenInfo.Scope
 	}
+	planType := strings.TrimSpace(tokenInfo.PlanType)
+	if planType != "" {
+		creds["plan_type"] = planType
+	}
+	if strings.TrimSpace(tokenInfo.SubscriptionExpiresAt) != "" {
+		creds["subscription_expires_at"] = strings.TrimSpace(tokenInfo.SubscriptionExpiresAt)
+	}
+	if tokenInfo.SubscriptionMetadataResolved {
+		// Nil values replace stale metadata during MergeCredentials. This keeps
+		// an authoritative no-plan result unlabeled and prevents an old expiry
+		// from being shown when the current profile supplies no end date.
+		if planType == "" {
+			creds["plan_type"] = nil
+		}
+		if strings.TrimSpace(tokenInfo.SubscriptionExpiresAt) == "" {
+			creds["subscription_expires_at"] = nil
+		}
+	}
 	return creds
 }

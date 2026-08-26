@@ -45,73 +45,31 @@
     </section>
 
     <div class="usage-chart-grid">
-        <section class="usage-card chart-card">
+        <section class="usage-card chart-card distribution-bar-card">
             <div class="chart-heading"><h2>模型分布</h2><MetricToggle Value="@modelMetric" OnChange="value => modelMetric = value" /></div>
             @if (modelStatsLoading) { <div class="chart-empty">正在载入…</div> }
-            else if (ModelRows.Count == 0) { <div class="chart-empty">暂无数据</div> }
-            else if (modelMetric == "tokens")
-            {
-                <DxPieChart Data="@ModelRows" InnerDiameter="0.55" Width="100%" Height="245px">
-                    <DxPieChartSeries T="UserUsageModelStatDto" TArgument="string" TValue="long" ArgumentField="item => item.Model" ValueField="item => item.TotalTokens" />
-                    <DxChartLegend Visible="false" />
-                    <DxChartTooltip Enabled="true" />
-                </DxPieChart>
-            }
             else
             {
-                <DxPieChart Data="@ModelRows" InnerDiameter="0.55" Width="100%" Height="245px">
-                    <DxPieChartSeries T="UserUsageModelStatDto" TArgument="string" TValue="double" ArgumentField="item => item.Model" ValueField="item => item.ActualCost" />
-                    <DxChartLegend Visible="false" />
-                    <DxChartTooltip Enabled="true" />
-                </DxPieChart>
+                <UsageDistributionBarChart Rows="@ModelDistributionRows" Metric="@modelMetric" OtherLabel="其他模型" AriaLabel="模型占比分布" />
             }
-            <DistributionLegend Rows="@ModelLegend" Metric="@modelMetric" />
         </section>
 
-        <section class="usage-card chart-card">
+        <section class="usage-card chart-card distribution-bar-card">
             <div class="chart-heading"><h2>分组分布</h2><MetricToggle Value="@groupMetric" OnChange="value => groupMetric = value" /></div>
             @if (chartsLoading) { <div class="chart-empty">正在载入…</div> }
-            else if (GroupRows.Count == 0) { <div class="chart-empty">暂无数据</div> }
-            else if (groupMetric == "tokens")
-            {
-                <DxPieChart Data="@GroupRows" InnerDiameter="0.55" Width="100%" Height="245px">
-                    <DxPieChartSeries T="UserUsageGroupStatDto" TArgument="string" TValue="long" ArgumentField="item => item.GroupName" ValueField="item => item.TotalTokens" />
-                    <DxChartLegend Visible="false" />
-                    <DxChartTooltip Enabled="true" />
-                </DxPieChart>
-            }
             else
             {
-                <DxPieChart Data="@GroupRows" InnerDiameter="0.55" Width="100%" Height="245px">
-                    <DxPieChartSeries T="UserUsageGroupStatDto" TArgument="string" TValue="double" ArgumentField="item => item.GroupName" ValueField="item => item.ActualCost" />
-                    <DxChartLegend Visible="false" />
-                    <DxChartTooltip Enabled="true" />
-                </DxPieChart>
+                <UsageDistributionBarChart Rows="@GroupDistributionRows" Metric="@groupMetric" OtherLabel="其他分组" AriaLabel="分组占比分布" />
             }
-            <DistributionLegend Rows="@GroupLegend" Metric="@groupMetric" />
         </section>
 
-        <section class="usage-card chart-card">
+        <section class="usage-card chart-card distribution-bar-card">
             <div class="chart-heading"><h2>端点分布</h2><MetricToggle Value="@endpointMetric" OnChange="value => endpointMetric = value" /></div>
             @if (statsLoading) { <div class="chart-empty">正在载入…</div> }
-            else if (EndpointRows.Count == 0) { <div class="chart-empty">暂无数据</div> }
-            else if (endpointMetric == "tokens")
-            {
-                <DxPieChart Data="@EndpointRows" InnerDiameter="0.55" Width="100%" Height="245px">
-                    <DxPieChartSeries T="UserUsageEndpointStatDto" TArgument="string" TValue="long" ArgumentField="item => item.Endpoint" ValueField="item => item.TotalTokens" />
-                    <DxChartLegend Visible="false" />
-                    <DxChartTooltip Enabled="true" />
-                </DxPieChart>
-            }
             else
             {
-                <DxPieChart Data="@EndpointRows" InnerDiameter="0.55" Width="100%" Height="245px">
-                    <DxPieChartSeries T="UserUsageEndpointStatDto" TArgument="string" TValue="double" ArgumentField="item => item.Endpoint" ValueField="item => item.ActualCost" />
-                    <DxChartLegend Visible="false" />
-                    <DxChartTooltip Enabled="true" />
-                </DxPieChart>
+                <UsageDistributionBarChart Rows="@EndpointDistributionRows" Metric="@endpointMetric" OtherLabel="其他端点" AriaLabel="端点占比分布" />
             }
-            <DistributionLegend Rows="@EndpointLegend" Metric="@endpointMetric" />
         </section>
 
         <section class="usage-card chart-card trend-card">
@@ -390,9 +348,9 @@
     private IReadOnlyList<UserUsageGroupStatDto> GroupRows => snapshot.Groups.OrderByDescending(item => item.TotalTokens).ToList();
     private IReadOnlyList<UserUsageEndpointStatDto> EndpointRows => stats?.Endpoints.OrderByDescending(item => item.TotalTokens).ToList() ?? [];
     private IReadOnlyList<UserUsageTrendPointDto> TrendRows => snapshot.Trend.OrderBy(item => item.Date).ToList();
-    private IReadOnlyList<DistributionLegendRow> ModelLegend => ModelRows.Select(x => new DistributionLegendRow(x.Model, x.TotalTokens, x.ActualCost)).ToList();
-    private IReadOnlyList<DistributionLegendRow> GroupLegend => GroupRows.Select(x => new DistributionLegendRow(string.IsNullOrWhiteSpace(x.GroupName) ? $"分组 #{x.GroupId}" : x.GroupName, x.TotalTokens, x.ActualCost)).ToList();
-    private IReadOnlyList<DistributionLegendRow> EndpointLegend => EndpointRows.Select(x => new DistributionLegendRow(string.IsNullOrWhiteSpace(x.Endpoint) ? "未知端点" : x.Endpoint, x.TotalTokens, x.ActualCost)).ToList();
+    private IReadOnlyList<DistributionLegendRow> ModelDistributionRows => ModelRows.Select(x => new DistributionLegendRow(x.Model, x.TotalTokens, x.ActualCost)).ToList();
+    private IReadOnlyList<DistributionLegendRow> GroupDistributionRows => GroupRows.Select(x => new DistributionLegendRow(string.IsNullOrWhiteSpace(x.GroupName) ? $"分组 #{x.GroupId}" : x.GroupName, x.TotalTokens, x.ActualCost)).ToList();
+    private IReadOnlyList<DistributionLegendRow> EndpointDistributionRows => EndpointRows.Select(x => new DistributionLegendRow(string.IsNullOrWhiteSpace(x.Endpoint) ? "未知端点" : x.Endpoint, x.TotalTokens, x.ActualCost)).ToList();
     private IEnumerable<string> ModelOptions => modelsResponse.Models.Select(x => x.Model).Append(model).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Order();
     private IEnumerable<string> ErrorModelOptions => errors.Items.Select(x => x.Model).Append(errorModel).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Order();
     private IReadOnlyList<ColumnOption> CurrentToggleableColumns => activeTab == "errors" ? ErrorColumns : UsageColumns;

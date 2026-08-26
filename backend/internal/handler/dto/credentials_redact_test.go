@@ -25,10 +25,12 @@ func TestRedactCredentials_StripsSensitiveKeysAndReportsStatus(t *testing.T) {
 		"private_key":                  "raw-key",
 		"agent_private_key":            "agent-key-secret",
 		// 非敏感
-		"base_url":      "https://api.example.com",
-		"model_mapping": map[string]any{"foo": "bar"},
-		"project_id":    "proj-1",
-		"expires_at":    int64(123456),
+		"base_url":               "https://api.example.com",
+		"model_mapping":          map[string]any{"foo": "bar"},
+		"project_id":             "proj-1",
+		"expires_at":             int64(123456),
+		"plan_type":              "pro",
+		"subscription_expires_at": "2026-09-04T00:00:00Z",
 	}
 
 	out, status := RedactCredentials(in)
@@ -48,6 +50,8 @@ func TestRedactCredentials_StripsSensitiveKeysAndReportsStatus(t *testing.T) {
 	require.Equal(t, map[string]any{"foo": "bar"}, out["model_mapping"])
 	require.Equal(t, "proj-1", out["project_id"])
 	require.Equal(t, int64(123456), out["expires_at"])
+	require.Equal(t, "pro", out["plan_type"])
+	require.Equal(t, "2026-09-04T00:00:00Z", out["subscription_expires_at"])
 
 	require.True(t, status["has_refresh_token"])
 	require.True(t, status["has_access_token"])

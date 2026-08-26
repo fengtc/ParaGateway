@@ -82,6 +82,22 @@ public sealed class AccountApiClientTests
         Assert.Equal("claude@example.test", Assert.IsType<JsonElement>(credentials["email_address"]).GetString());
     }
 
+    [Theory]
+    [InlineData("openai")]
+    [InlineData("anthropic")]
+    public void OAuthCredentialsKeepSubscriptionMetadataWhenProvided(string platform)
+    {
+        var token = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            """{"plan_type":"pro","subscription_expires_at":"2026-09-04T00:00:00Z"}""")!;
+
+        var credentials = ApiClient.BuildOAuthCredentials(platform, token);
+
+        Assert.Equal("pro", Assert.IsType<JsonElement>(credentials["plan_type"]).GetString());
+        Assert.Equal(
+            "2026-09-04T00:00:00Z",
+            Assert.IsType<JsonElement>(credentials["subscription_expires_at"]).GetString());
+    }
+
     [Fact]
     public async Task CopilotDeviceOAuthUsesDedicatedRouteAndFullSettingsContract()
     {

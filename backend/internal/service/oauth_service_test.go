@@ -21,6 +21,18 @@ type mockClaudeOAuthClient struct {
 	refreshTokenFunc func(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error)
 }
 
+type mockClaudeOAuthProfileClient struct {
+	*mockClaudeOAuthClient
+	getOAuthProfileFunc func(ctx context.Context, accessToken, proxyURL string) (*ClaudeOAuthProfile, error)
+}
+
+func (m *mockClaudeOAuthProfileClient) GetOAuthProfile(ctx context.Context, accessToken, proxyURL string) (*ClaudeOAuthProfile, error) {
+	if m.getOAuthProfileFunc != nil {
+		return m.getOAuthProfileFunc(ctx, accessToken, proxyURL)
+	}
+	return nil, nil
+}
+
 func (m *mockClaudeOAuthClient) GetOrganizationUUID(ctx context.Context, sessionKey, proxyURL string) (string, error) {
 	if m.getOrgUUIDFunc != nil {
 		return m.getOrgUUIDFunc(ctx, sessionKey, proxyURL)
@@ -47,6 +59,48 @@ func (m *mockClaudeOAuthClient) RefreshToken(ctx context.Context, refreshToken, 
 		return m.refreshTokenFunc(ctx, refreshToken, proxyURL)
 	}
 	panic("RefreshToken not implemented")
+}
+
+func TestClaudeOAuthPlanType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		organizationType string
+		rateLimitTier    string
+		hasClaudeMax     *bool
+		hasClaudePro     *bool
+		want             string
+	}{
+		{name: "pro", organizationType: "claude_pro", rateLimitTier: "default_claude_pro", want: "pro"},
+		{name: "max", organizationType: "claude_max", want: "max"},
+		{name: "max_5x", organizationType: "claude_max", rateLimitTier: "default_claude_max_5x", want: "max_5x"},
+		{name: "max_20x", organizationType: "claude_max", rateLimitTier: "DEFAULT-CLAUDE-MAX-20X", want: "max_20x"},
+		{name: "max_organization_precedes_non_max_tier", organizationType: "claude_max", rateLimitTier: "default_claude_pro", want: "max"},
+		{name: "team_precedes_member_tier", organizationType: "claude_team", rateLimitTier: "default_claude_pro", want: "team"},
+		{name: "enterprise", organizationType: "enterprise", rateLimitTier: "default_claude_max_20x", want: "enterprise"},
+		{name: "free", organizationType: "claude_free", want: "free"},
+		{name: "tier_precedes_max_flag", rateLimitTier: "default_claude_pro", hasClaudeMax: claudeOAuthTestBoolPtr(true), want: "pro"},
+		{name: "max_flag_fallback", hasClaudeMax: claudeOAuthTestBoolPtr(true), hasClaudePro: claudeOAuthTestBoolPtr(true), want: "max"},
+		{name: "pro_flag_fallback", hasClaudeMax: claudeOAuthTestBoolPtr(false), hasClaudePro: claudeOAuthTestBoolPtr(true), want: "pro"},
+		{name: "explicit_false_flags_are_not_free", hasClaudeMax: claudeOAuthTestBoolPtr(false), hasClaudePro: claudeOAuthTestBoolPtr(false), want: ""},
+		{name: "unknown", organizationType: "unknown", rateLimitTier: "unknown", want: ""},
+		{name: "unknown_values_containing_pro_are_not_inferred", organizationType: "production", rateLimitTier: "experimental_profile", want: ""},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := claudeOAuthPlanType(tt.organizationType, tt.rateLimitTier, tt.hasClaudeMax, tt.hasClaudePro); got != tt.want {
+				t.Fatalf("claudeOAuthPlanType() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func claudeOAuthTestBoolPtr(value bool) *bool {
+	return &value
 }
 
 // --- mock: ProxyRepository (最小实现，仅覆盖 OAuthService 依赖的方法) ---
@@ -319,20 +373,119 @@ func TestOAuthService_ExchangeCode_Success(t *testing.T) {
 	}
 }
 
+func TestOAuthService_ExchangeCode_EnrichesProfileBestEffort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                    string
+		profile                 *ClaudeOAuthProfile
+		profileErr              error
+		wantPlanType            string
+		wantSubscriptionExpires string
+		wantMetadataResolved    bool
+	}{
+		{
+			name: "explicit_subscription_expiry",
+			profile: &ClaudeOAuthProfile{
+				OrganizationType:       "claude_max",
+				RateLimitTier:          "default_claude_max_5x",
+				SubscriptionExpiresAt: "2026-09-04T00:00:00Z",
+			},
+			wantPlanType:            "max_5x",
+			wantSubscriptionExpires: "2026-09-04T00:00:00Z",
+			wantMetadataResolved:    true,
+		},
+		{
+			name: "explicit_no_paid_subscription",
+			profile: &ClaudeOAuthProfile{
+				HasClaudeMax: claudeOAuthTestBoolPtr(false),
+				HasClaudePro: claudeOAuthTestBoolPtr(false),
+			},
+			wantMetadataResolved: true,
+		},
+		{
+			name:       "profile_failure_does_not_fail_exchange",
+			profileErr: fmt.Errorf("profile unavailable"),
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &mockClaudeOAuthProfileClient{
+				mockClaudeOAuthClient: &mockClaudeOAuthClient{
+					exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+						return &oauth.TokenResponse{
+							AccessToken: "access-token",
+							TokenType:   "Bearer",
+							ExpiresIn:   3600,
+						}, nil
+					},
+				},
+				getOAuthProfileFunc: func(ctx context.Context, accessToken, proxyURL string) (*ClaudeOAuthProfile, error) {
+					if accessToken != "access-token" {
+						t.Errorf("accessToken 不匹配: got=%q", accessToken)
+					}
+					deadline, ok := ctx.Deadline()
+					if !ok {
+						t.Error("profile context 应包含独立超时")
+					} else if remaining := time.Until(deadline); remaining <= 0 || remaining > claudeOAuthProfileTimeout {
+						t.Errorf("profile context 超时不合理: remaining=%s", remaining)
+					}
+					return tt.profile, tt.profileErr
+				},
+			}
+
+			svc := NewOAuthService(&mockProxyRepoForOAuth{}, client)
+			defer svc.Stop()
+
+			result, err := svc.GenerateAuthURL(context.Background(), nil)
+			if err != nil {
+				t.Fatalf("GenerateAuthURL 返回错误: %v", err)
+			}
+			tokenInfo, err := svc.ExchangeCode(context.Background(), &ExchangeCodeInput{
+				SessionID: result.SessionID,
+				Code:      "auth-code",
+			})
+			if err != nil {
+				t.Fatalf("ExchangeCode 返回错误: %v", err)
+			}
+			if tokenInfo.PlanType != tt.wantPlanType {
+				t.Fatalf("PlanType = %q, want %q", tokenInfo.PlanType, tt.wantPlanType)
+			}
+			if tokenInfo.SubscriptionExpiresAt != tt.wantSubscriptionExpires {
+				t.Fatalf("SubscriptionExpiresAt = %q, want %q", tokenInfo.SubscriptionExpiresAt, tt.wantSubscriptionExpires)
+			}
+			if tokenInfo.SubscriptionMetadataResolved != tt.wantMetadataResolved {
+				t.Fatalf("SubscriptionMetadataResolved = %t, want %t", tokenInfo.SubscriptionMetadataResolved, tt.wantMetadataResolved)
+			}
+		})
+	}
+}
+
 func TestOAuthService_ExchangeCode_SetupToken(t *testing.T) {
 	t.Parallel()
 
-	client := &mockClaudeOAuthClient{
-		exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
-			if !isSetupToken {
-				t.Error("isSetupToken 应为 true（ScopeInference）")
-			}
-			return &oauth.TokenResponse{
-				AccessToken: "setup-token",
-				TokenType:   "Bearer",
-				ExpiresIn:   3600,
-				Scope:       oauth.ScopeInference,
-			}, nil
+	profileCalls := 0
+	client := &mockClaudeOAuthProfileClient{
+		mockClaudeOAuthClient: &mockClaudeOAuthClient{
+			exchangeCodeFunc: func(ctx context.Context, code, codeVerifier, state, proxyURL string, isSetupToken bool) (*oauth.TokenResponse, error) {
+				if !isSetupToken {
+					t.Error("isSetupToken 应为 true（ScopeInference）")
+				}
+				return &oauth.TokenResponse{
+					AccessToken: "setup-token",
+					TokenType:   "Bearer",
+					ExpiresIn:   3600,
+					Scope:       oauth.ScopeInference,
+				}, nil
+			},
+		},
+		getOAuthProfileFunc: func(ctx context.Context, accessToken, proxyURL string) (*ClaudeOAuthProfile, error) {
+			profileCalls++
+			return &ClaudeOAuthProfile{OrganizationType: "claude_pro"}, nil
 		},
 	}
 
@@ -354,6 +507,9 @@ func TestOAuthService_ExchangeCode_SetupToken(t *testing.T) {
 	}
 	if tokenInfo.AccessToken != "setup-token" {
 		t.Fatalf("AccessToken 不匹配: got=%q", tokenInfo.AccessToken)
+	}
+	if profileCalls != 0 {
+		t.Fatalf("setup-token 不应查询 OAuth profile，调用次数=%d", profileCalls)
 	}
 }
 
@@ -526,6 +682,48 @@ func TestOAuthService_RefreshAccountToken_Success(t *testing.T) {
 	}
 }
 
+func TestOAuthService_RefreshAccountToken_SetupTokenSkipsProfile(t *testing.T) {
+	t.Parallel()
+
+	profileCalls := 0
+	client := &mockClaudeOAuthProfileClient{
+		mockClaudeOAuthClient: &mockClaudeOAuthClient{
+			refreshTokenFunc: func(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error) {
+				return &oauth.TokenResponse{
+					AccessToken: "refreshed-setup-token",
+					TokenType:   "Bearer",
+					ExpiresIn:   3600,
+				}, nil
+			},
+		},
+		getOAuthProfileFunc: func(ctx context.Context, accessToken, proxyURL string) (*ClaudeOAuthProfile, error) {
+			profileCalls++
+			return &ClaudeOAuthProfile{OrganizationType: "claude_pro"}, nil
+		},
+	}
+
+	svc := NewOAuthService(&mockProxyRepoForOAuth{}, client)
+	defer svc.Stop()
+
+	tokenInfo, err := svc.RefreshAccountToken(context.Background(), &Account{
+		ID:       31,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeSetupToken,
+		Credentials: map[string]any{
+			"refresh_token": "setup-refresh-token",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RefreshAccountToken 返回错误: %v", err)
+	}
+	if tokenInfo.AccessToken != "refreshed-setup-token" {
+		t.Fatalf("AccessToken 不匹配: got=%q", tokenInfo.AccessToken)
+	}
+	if profileCalls != 0 {
+		t.Fatalf("setup-token 刷新不应查询 OAuth profile，调用次数=%d", profileCalls)
+	}
+}
+
 func TestOAuthService_RefreshAccountToken_WithProxy(t *testing.T) {
 	t.Parallel()
 
@@ -570,6 +768,71 @@ func TestOAuthService_RefreshAccountToken_WithProxy(t *testing.T) {
 	_, err := svc.RefreshAccountToken(context.Background(), account)
 	if err != nil {
 		t.Fatalf("RefreshAccountToken 返回错误: %v", err)
+	}
+}
+
+func TestOAuthService_RefreshAccountToken_EnrichesProfileWithAccountProxy(t *testing.T) {
+	t.Parallel()
+
+	const wantProxyURL = "socks5://user:pass@socks.example.com:1080"
+	proxyRepo := &mockProxyRepoForOAuth{
+		getByIDFunc: func(ctx context.Context, id int64) (*Proxy, error) {
+			return &Proxy{
+				Protocol: "socks5",
+				Host:     "socks.example.com",
+				Port:     1080,
+				Username: "user",
+				Password: "pass",
+			}, nil
+		},
+	}
+
+	client := &mockClaudeOAuthProfileClient{
+		mockClaudeOAuthClient: &mockClaudeOAuthClient{
+			refreshTokenFunc: func(ctx context.Context, refreshToken, proxyURL string) (*oauth.TokenResponse, error) {
+				if proxyURL != wantProxyURL {
+					t.Errorf("refresh proxyURL = %q, want %q", proxyURL, wantProxyURL)
+				}
+				return &oauth.TokenResponse{
+					AccessToken: "refreshed-access-token",
+					TokenType:   "Bearer",
+					ExpiresIn:   28800,
+				}, nil
+			},
+		},
+		getOAuthProfileFunc: func(ctx context.Context, accessToken, proxyURL string) (*ClaudeOAuthProfile, error) {
+			if proxyURL != wantProxyURL {
+				t.Errorf("profile proxyURL = %q, want %q", proxyURL, wantProxyURL)
+			}
+			return &ClaudeOAuthProfile{
+				OrganizationType:       "claude_pro",
+				RateLimitTier:          "default_claude_pro",
+				SubscriptionExpiresAt: "2026-09-04T00:00:00Z",
+			}, nil
+		},
+	}
+
+	svc := NewOAuthService(proxyRepo, client)
+	defer svc.Stop()
+
+	proxyID := int64(10)
+	tokenInfo, err := svc.RefreshAccountToken(context.Background(), &Account{
+		ID:       4,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeOAuth,
+		ProxyID:  &proxyID,
+		Credentials: map[string]any{
+			"refresh_token": "refresh-token",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RefreshAccountToken 返回错误: %v", err)
+	}
+	if tokenInfo.PlanType != "pro" {
+		t.Fatalf("PlanType = %q, want %q", tokenInfo.PlanType, "pro")
+	}
+	if tokenInfo.SubscriptionExpiresAt != "2026-09-04T00:00:00Z" {
+		t.Fatalf("SubscriptionExpiresAt = %q, want explicit subscription expiry", tokenInfo.SubscriptionExpiresAt)
 	}
 }
 

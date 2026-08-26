@@ -1,0 +1,88 @@
+@if (chartRows.Count == 0)
+{
+    <div class="usage-distribution-empty">暂无可用的@(IsCostMetric ? "费用" : "Token")数据</div>
+}
+else
+{
+    <div class="usage-distribution-chart" aria-label="@AriaLabel">
+        <DxChart T="UsageDistributionChartRow"
+                 Data="@chartRows"
+                 Rotated="true"
+                 Width="100%"
+                 Height="100%"
+                 CustomizeSeriesPoint="CustomizePoint">
+            <DxChartBarSeries T="UsageDistributionChartRow"
+                              TArgument="string"
+                              TValue="double"
+                              Name="占比"
+                              Color="@DistributionColor"
+                              ArgumentField="item => item.Label"
+                              ValueField="item => item.Share"
+                              BarPadding="0.32"
+                              CornerRadius="3">
+                <DxChartSeriesLabel Visible="true"
+                                    Position="RelativePosition.Outside"
+                                    ValueFormat="ChartElementFormat.Percent(1)" />
+            </DxChartBarSeries>
+            <DxChartArgumentAxis Inverted="true" />
+            <DxChartValueAxis>
+                <DxChartAxisRange StartValue="0" EndValue="1" />
+                <DxChartAxisLabel Format="ChartElementFormat.Percent(0)" />
+            </DxChartValueAxis>
+            <DxChartLegend Visible="false" />
+            <DxChartTooltip Enabled="true">
+                @{
+                    var row = context.Point.DataItems.OfType<UsageDistributionChartRow>().FirstOrDefault();
+                }
+                @if (row is not null)
+                {
+                    <div class="usage-distribution-tooltip">
+                        <strong title="@row.FullLabel">@row.FullLabel</strong>
+                        <dl>
+                            <div><dt>占比</dt><dd>@FormatPercent(row.Share)</dd></div>
+                            <div><dt>@(IsCostMetric ? "费用" : "Token")</dt><dd>@FormatValue(row)</dd></div>
+                            @if (row.IsOther)
+                            {
+                                <div><dt>汇总项</dt><dd>@row.ItemCount</dd></div>
+                            }
+                        </dl>
+                    </div>
+                }
+            </DxChartTooltip>
+        </DxChart>
+    </div>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<DistributionLegendRow> Rows { get; set; } = [];
+    [Parameter] public string Metric { get; set; } = "tokens";
+    [Parameter] public string OtherLabel { get; set; } = "其他";
+    [Parameter] public string AriaLabel { get; set; } = "用量占比分布";
+
+    private static readonly System.Drawing.Color DistributionColor = System.Drawing.Color.FromArgb(22, 126, 99);
+    private static readonly System.Drawing.Color OtherColor = System.Drawing.Color.FromArgb(125, 136, 131);
+    private IReadOnlyList<UsageDistributionChartRow> chartRows = [];
+    private bool IsCostMetric => UsageDistributionChartBuilder.IsCostMetric(Metric);
+
+    protected override void OnParametersSet() =>
+        chartRows = UsageDistributionChartBuilder.Build(Rows, Metric, OtherLabel);
+
+    private static void CustomizePoint(ChartSeriesPointCustomizationSettings settings)
+    {
+        var row = settings.Point.DataItems.OfType<UsageDistributionChartRow>().FirstOrDefault();
+        settings.PointAppearance.Color = row?.IsOther == true ? OtherColor : DistributionColor;
+    }
+
+    private string FormatValue(UsageDistributionChartRow row) =>
+        IsCostMetric ? UiFormat.Usd(row.Cost) : FormatTokens(row.Tokens);
+
+    private static string FormatPercent(double share) => $"{share * 100:0.0}%";
+
+    private static string FormatTokens(long value) => value switch
+    {
+        >= 1_000_000_000 => $"{value / 1_000_000_000d:0.00}B",
+        >= 1_000_000 => $"{value / 1_000_000d:0.00}M",
+        >= 1_000 => $"{value / 1_000d:0.00}K",
+        _ => value.ToString("N0")
+    };
+}

@@ -16,14 +16,16 @@ func TestAccountFromServiceShallow_RedactsSensitiveCredentials(t *testing.T) {
 		Platform: "anthropic",
 		Type:     "oauth",
 		Credentials: map[string]any{
-			"access_token":  "at-secret",
-			"refresh_token": "rt-secret",
-			"id_token":      "id-secret",
-			"api_key":       "sk-secret",
-			"github_token":  "gh-secret",
-			"billing_pat":   "pat-secret",
-			"base_url":      "https://api.example.com",
-			"model_mapping": map[string]any{"foo": "bar"},
+			"access_token":            "at-secret",
+			"refresh_token":           "rt-secret",
+			"id_token":                "id-secret",
+			"api_key":                 "sk-secret",
+			"github_token":            "gh-secret",
+			"billing_pat":             "pat-secret",
+			"base_url":                "https://api.example.com",
+			"model_mapping":           map[string]any{"foo": "bar"},
+			"plan_type":               "max_20x",
+			"subscription_expires_at": "2026-09-04T00:00:00Z",
 		},
 	}
 
@@ -40,6 +42,8 @@ func TestAccountFromServiceShallow_RedactsSensitiveCredentials(t *testing.T) {
 	// 非敏感键保留
 	require.Equal(t, "https://api.example.com", got.Credentials["base_url"])
 	require.Equal(t, map[string]any{"foo": "bar"}, got.Credentials["model_mapping"])
+	require.Equal(t, "max_20x", got.Credentials["plan_type"])
+	require.Equal(t, "2026-09-04T00:00:00Z", got.Credentials["subscription_expires_at"])
 
 	// 状态 map 标记敏感键存在
 	require.True(t, got.CredentialsStatus["has_access_token"])
@@ -63,6 +67,8 @@ func TestAccountFromServiceShallow_RedactsSensitiveCredentials(t *testing.T) {
 	require.Contains(t, string(raw), "has_refresh_token")
 	require.Contains(t, string(raw), "has_github_token")
 	require.Contains(t, string(raw), "has_billing_pat")
+	require.Contains(t, string(raw), `"plan_type":"max_20x"`)
+	require.Contains(t, string(raw), `"subscription_expires_at":"2026-09-04T00:00:00Z"`)
 
 	// 原始 service.Account 不应被改动
 	require.Equal(t, "rt-secret", src.Credentials["refresh_token"])

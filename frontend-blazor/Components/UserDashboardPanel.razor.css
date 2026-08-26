@@ -331,6 +331,10 @@
     min-height: 322px;
 }
 
+.model-distribution-card {
+    overflow: visible;
+}
+
 .distribution-layout {
     display: flex;
     min-width: 0;
@@ -343,6 +347,30 @@
 .distribution-chart {
     flex: 0 0 210px;
     width: 210px;
+}
+
+.model-distribution-layout {
+    align-items: stretch;
+    flex-direction: column;
+}
+
+.model-distribution-layout .model-distribution-chart {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    flex: 0 0 auto;
+}
+
+.model-distribution-chart ::deep .dxc-arg-elements text,
+.model-distribution-chart ::deep .dxc-val-elements text {
+    fill: var(--muted) !important;
+}
+
+.model-distribution-chart ::deep .dxbl-chart-tooltip-content-container,
+.model-distribution-chart ::deep .dxbl-chart-tooltip-pointer {
+    color: var(--ink);
+    background: var(--surface);
+    border-color: var(--line);
 }
 
 .trend-chart-layout {
@@ -390,11 +418,31 @@
     overflow: auto;
 }
 
+.model-distribution-table-wrap {
+    width: 100%;
+    max-height: 230px;
+}
+
 .compact-dashboard-table {
     width: 100%;
     border-collapse: collapse;
     font-size: .66rem;
     font-variant-numeric: tabular-nums;
+}
+
+.model-distribution-table {
+    min-width: 580px;
+}
+
+.model-distribution-table th:first-child,
+.model-distribution-table td:first-child {
+    min-width: 180px;
+    max-width: 260px;
+}
+
+.model-distribution-table th:nth-child(4),
+.model-distribution-table td:nth-child(4) {
+    width: 64px;
 }
 
 .compact-dashboard-table th,
@@ -425,6 +473,55 @@
 .compact-dashboard-table td:first-child {
     color: var(--ink);
     font-weight: 600;
+}
+
+.model-share {
+    color: var(--muted);
+    font-weight: 700;
+}
+
+.model-distribution-tooltip {
+    display: grid;
+    min-width: 190px;
+    max-width: 280px;
+    gap: 8px;
+    padding: 10px 12px;
+    color: var(--ink);
+    text-align: left;
+}
+
+.model-distribution-tooltip > strong {
+    overflow-wrap: anywhere;
+    font-size: .78rem;
+    line-height: 1.35;
+}
+
+.model-distribution-tooltip dl {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+}
+
+.model-distribution-tooltip dl > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 18px;
+}
+
+.model-distribution-tooltip dt,
+.model-distribution-tooltip dd {
+    margin: 0;
+    font-size: .72rem;
+}
+
+.model-distribution-tooltip dt {
+    color: var(--muted);
+}
+
+.model-distribution-tooltip dd {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
 }
 
 .dashboard-loading,
@@ -698,6 +795,13 @@
     .distribution-chart {
         width: min(240px, 100%);
         margin: 0 auto;
+        flex-basis: auto;
+    }
+
+    .model-distribution-chart {
+        width: 100%;
+        max-width: none;
+        margin: 0;
         flex-basis: auto;
     }
 

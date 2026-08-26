@@ -1,0 +1,73 @@
+.usage-distribution-chart,
+.usage-distribution-empty {
+    width: 100%;
+    height: 282px;
+    min-width: 0;
+}
+
+.usage-distribution-empty {
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    font-size: .8rem;
+}
+
+.usage-distribution-chart ::deep .dxc-arg-elements text,
+.usage-distribution-chart ::deep .dxc-val-elements text {
+    fill: var(--muted) !important;
+    font-size: .72rem !important;
+}
+
+.usage-distribution-chart ::deep .dxbl-chart-tooltip-content-container,
+.usage-distribution-chart ::deep .dxbl-chart-tooltip-pointer {
+    color: var(--ink);
+    background: var(--surface);
+    border-color: var(--line);
+}
+
+.usage-distribution-tooltip {
+    display: grid;
+    min-width: 180px;
+    max-width: min(320px, 70vw);
+    gap: 8px;
+}
+
+.usage-distribution-tooltip strong {
+    overflow-wrap: anywhere;
+    color: var(--ink);
+    font-size: .76rem;
+}
+
+.usage-distribution-tooltip dl {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+}
+
+.usage-distribution-tooltip dl > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.usage-distribution-tooltip dt {
+    color: var(--muted);
+    font-size: .68rem;
+    font-weight: 500;
+}
+
+.usage-distribution-tooltip dd {
+    margin: 0;
+    color: var(--ink);
+    font-size: .7rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+}
+
+@media (max-width: 560px) {
+    .usage-distribution-chart,
+    .usage-distribution-empty {
+        height: 264px;
+    }
+}

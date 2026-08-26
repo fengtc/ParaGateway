@@ -30,7 +30,7 @@ public sealed class ChartLegendCoverageTests
             }
         }
 
-        Assert.Equal(18, chartCount);
+        Assert.Equal(13, chartCount);
     }
 
     private static DirectoryInfo FindFrontendRoot()

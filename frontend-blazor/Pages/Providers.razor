@@ -179,7 +179,32 @@
                                     <td class="select-column"><input type="checkbox" aria-label="选择账号 @row.Name" checked="@selectedIds.Contains(row.Id)" @onchange="e => ToggleRow(row.Id, e.Value is true)" /></td>
                                     <td><div class="account-name-cell"><strong>@row.Name</strong>@if (!string.IsNullOrWhiteSpace(AccountEmail(row))) { <small title="@AccountEmail(row)">@AccountEmail(row)</small> }</div></td>
                                     @if (IsColumnVisible("id")) { <td><code>#@row.Id</code></td> }
-                                    @if (IsColumnVisible("platform")) { <td><div class="platform-stack"><span class="platform-badge @(IsCopilot(row) ? "platform-copilot" : $"platform-{row.Platform}")">@AccountPlatformLabel(row)</span><small>@AccountTypeLabel(row)</small>@if (row.ParentAccountId.HasValue) { <span class="shadow-badge">@row.QuotaDimension 影子</span> }</div></td> }
+                                    @if (IsColumnVisible("platform"))
+                                    {
+                                        var subscription = OAuthSubscriptionDisplay.From(row);
+                                        <td>
+                                            <div class="platform-stack">
+                                                <div class="platform-meta-row">
+                                                    <span class="platform-badge @(IsCopilot(row) ? "platform-copilot" : $"platform-{row.Platform}")">@AccountPlatformLabel(row)</span>
+                                                    <small class="account-type-label">@AccountTypeLabel(row)</small>
+                                                </div>
+                                                @if (subscription is not null || row.ParentAccountId.HasValue)
+                                                {
+                                                    <div class="subscription-meta-row">
+                                                        @if (subscription is not null)
+                                                        {
+                                                            <span class="subscription-plan subscription-plan-@subscription.PlanTone" title="@subscription.PlanLabel">@subscription.PlanLabel</span>
+                                                        }
+                                                        @if (row.ParentAccountId.HasValue) { <span class="shadow-badge">@row.QuotaDimension 影子</span> }
+                                                    </div>
+                                                }
+                                                @if (!string.IsNullOrWhiteSpace(subscription?.ExpiryLabel))
+                                                {
+                                                    <small class="subscription-expiry" title="@subscription.ExpiryTitle">@subscription.ExpiryLabel</small>
+                                                }
+                                            </div>
+                                        </td>
+                                    }
                                     @if (IsColumnVisible("endpoint")) { <td><div class="endpoint-cell"><code title="@AccountBaseUrl(row)">@AccountBaseUrl(row)</code></div></td> }
                                     @if (IsColumnVisible("auth")) { <td><div class="auth-cell"><strong>@AuthenticationLabel(row)</strong><small class="@(CredentialConfigured(row) ? "configured" : "missing")">@(CredentialConfigured(row) ? "凭据已配置" : "凭据待补充")</small></div></td> }
                                     @if (IsColumnVisible("capacity"))

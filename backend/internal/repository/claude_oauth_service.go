@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/proxyurl"
@@ -18,10 +19,13 @@ import (
 	"github.com/imroc/req/v3"
 )
 
+const defaultClaudeOAuthProfileURL = "https://api.anthropic.com/api/oauth/profile"
+
 func NewClaudeOAuthClient() service.ClaudeOAuthClient {
 	return &claudeOAuthService{
 		baseURL:       "https://claude.ai",
 		tokenURL:      oauth.TokenURL,
+		profileURL:    defaultClaudeOAuthProfileURL,
 		clientFactory: createReqClient,
 	}
 }
@@ -29,7 +33,73 @@ func NewClaudeOAuthClient() service.ClaudeOAuthClient {
 type claudeOAuthService struct {
 	baseURL       string
 	tokenURL      string
+	profileURL    string
 	clientFactory func(proxyURL string) (*req.Client, error)
+}
+
+type claudeOAuthProfileResponse struct {
+	OrganizationType       string `json:"organization_type"`
+	RateLimitTier          string `json:"rate_limit_tier"`
+	SubscriptionExpiresAt string `json:"subscription_expires_at"`
+	HasClaudeMax           *bool  `json:"has_claude_max"`
+	HasClaudePro           *bool  `json:"has_claude_pro"`
+	Account                 struct {
+		HasClaudeMax *bool `json:"has_claude_max"`
+		HasClaudePro *bool `json:"has_claude_pro"`
+	} `json:"account"`
+	Organization           struct {
+		OrganizationType       string `json:"organization_type"`
+		RateLimitTier          string `json:"rate_limit_tier"`
+		SubscriptionExpiresAt string `json:"subscription_expires_at"`
+	} `json:"organization"`
+}
+
+func (s *claudeOAuthService) GetOAuthProfile(ctx context.Context, accessToken, proxyURL string) (*service.ClaudeOAuthProfile, error) {
+	client, err := s.clientFactory(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("create HTTP client: %w", err)
+	}
+
+	var result claudeOAuthProfileResponse
+	resp, err := client.R().
+		SetContext(ctx).
+		SetHeader("Accept", "application/json").
+		SetHeader("Authorization", "Bearer "+strings.TrimSpace(accessToken)).
+		SetHeader("anthropic-beta", claude.BetaOAuth).
+		SetSuccessResult(&result).
+		Get(s.profileURL)
+	if err != nil {
+		return nil, fmt.Errorf("request OAuth profile: %w", err)
+	}
+	if !resp.IsSuccessState() {
+		return nil, fmt.Errorf("OAuth profile returned status %d", resp.StatusCode)
+	}
+
+	return &service.ClaudeOAuthProfile{
+		OrganizationType:       firstClaudeOAuthProfileValue(result.OrganizationType, result.Organization.OrganizationType),
+		RateLimitTier:          firstClaudeOAuthProfileValue(result.RateLimitTier, result.Organization.RateLimitTier),
+		SubscriptionExpiresAt: firstClaudeOAuthProfileValue(result.SubscriptionExpiresAt, result.Organization.SubscriptionExpiresAt),
+		HasClaudeMax:           firstClaudeOAuthProfileBool(result.HasClaudeMax, result.Account.HasClaudeMax),
+		HasClaudePro:           firstClaudeOAuthProfileBool(result.HasClaudePro, result.Account.HasClaudePro),
+	}, nil
+}
+
+func firstClaudeOAuthProfileValue(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func firstClaudeOAuthProfileBool(values ...*bool) *bool {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func (s *claudeOAuthService) GetOrganizationUUID(ctx context.Context, sessionKey, proxyURL string) (string, error) {

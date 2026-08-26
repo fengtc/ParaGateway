@@ -45,8 +45,9 @@
 .account-name-cell small, .capacity-cell small, .today-stats small, .proxy-cell small, .expiry-cell small { color: var(--muted); font-size: .8rem; }
 .copilot-billing-capacity { width: fit-content; padding: 3px 6px; color: #2878b8; background: color-mix(in srgb, #3b82f6 14%, transparent); border-radius: 5px; font-size: .78rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .accounts-data-table code { color: var(--muted); background: transparent; font-size: .83rem; }
-.platform-stack { display: grid; justify-items: start; gap: 4px; }
-.platform-stack > small { color: var(--muted); font-size: .76rem; }
+.platform-stack { display: grid; min-width: 145px; justify-items: start; gap: 3px; }
+.platform-meta-row, .subscription-meta-row { display: flex; max-width: 180px; align-items: center; flex-wrap: wrap; gap: 4px; }
+.account-type-label, .platform-stack > small { color: var(--muted); font-size: .76rem; }
 .platform-badge, .shadow-badge { display: inline-flex; padding: 3px 7px; align-items: center; border-radius: 6px; font-size: .8rem; font-weight: 720; }
 .platform-badge { color: #247b5a; background: rgba(36,123,90,.11); }
 .platform-anthropic { color: #a8662f; background: rgba(168,102,47,.12); }
@@ -54,6 +55,14 @@
 .platform-antigravity { color: #744eb0; background: rgba(116,78,176,.12); }
 .platform-grok { color: var(--ink); background: var(--surface-muted); }
 .platform-copilot { color: #24292f; background: rgba(36,41,47,.1); }
+.subscription-plan { display: inline-flex; max-width: 160px; padding: 2px 6px; align-items: center; overflow: hidden; color: var(--ink); background: color-mix(in srgb, #3b647c 13%, var(--surface)); border: 1px solid color-mix(in srgb, #3b647c 28%, var(--line)); border-radius: 5px; font-size: .72rem; font-weight: 720; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.subscription-plan-free { background: var(--surface-muted); border-color: var(--line); }
+.subscription-plan-plus { background: color-mix(in srgb, #2c93c7 14%, var(--surface)); border-color: color-mix(in srgb, #2c93c7 32%, var(--line)); }
+.subscription-plan-team { background: color-mix(in srgb, #6a78cf 14%, var(--surface)); border-color: color-mix(in srgb, #6a78cf 32%, var(--line)); }
+.subscription-plan-pro { background: color-mix(in srgb, #9167d5 14%, var(--surface)); border-color: color-mix(in srgb, #9167d5 32%, var(--line)); }
+.subscription-plan-max { background: color-mix(in srgb, #c35b91 14%, var(--surface)); border-color: color-mix(in srgb, #c35b91 32%, var(--line)); }
+.subscription-plan-business { background: color-mix(in srgb, #b48a29 14%, var(--surface)); border-color: color-mix(in srgb, #b48a29 32%, var(--line)); }
+.platform-stack > .subscription-expiry { color: var(--muted); font-size: .7rem; font-variant-numeric: tabular-nums; line-height: 1.25; }
 .shadow-badge { color: #9a681d; background: rgba(181,119,28,.11); font-size: .74rem; }
 .endpoint-cell { width: 220px; min-width: 180px; }
 .endpoint-cell code { display: block; max-width: 250px; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
