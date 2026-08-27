@@ -14,6 +14,7 @@ type usageWorkPrepared struct {
 	usageLogID           int64
 	requestID            string
 	apiKeyID             int64
+	recoveryOnly         bool
 	workRelated          string
 	category             string
 	weight               int64

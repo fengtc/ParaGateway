@@ -237,7 +237,7 @@ func TestExecUsageLogInsertNoResult_PersistsRequestedModel(t *testing.T) {
 		WithArgs(anySliceToDriverValues(prepared.args)...).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	err := execUsageLogInsertNoResult(context.Background(), db, prepared)
+	_, err := execUsageLogInsertNoResult(context.Background(), db, prepared)
 	require.NoError(t, err)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
