@@ -46,3 +46,16 @@ func (h *WorkDistributionHandler) Summary(c *gin.Context) {
 	}
 	response.Success(c, result)
 }
+
+func parseOptionalPositiveInt64(c *gin.Context, name string) (int64, bool) {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return 0, true
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		response.BadRequest(c, "Invalid "+name)
+		return 0, false
+	}
+	return value, true
+}
