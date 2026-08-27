@@ -3206,3 +3206,14 @@ html[data-theme="dark"] .bootstrap-banner {
 }
 
 html[data-theme="dark"] .bootstrap-track { background: var(--surface-muted); }
+
+html[data-theme="dark"] .work-distribution-page .collection-notice {
+    color: #fde68a;
+    background: #422006;
+    border-color: #854d0e;
+}
+
+html[data-theme="dark"] .work-distribution-page .summary-icon.neutral { color: #cbd5e1; background: #334155; }
+html[data-theme="dark"] .work-distribution-page .summary-icon.success { color: #6ee7b7; background: #064e3b; }
+html[data-theme="dark"] .work-distribution-page .summary-icon.blue { color: #7dd3fc; background: #0c4a6e; }
+html[data-theme="dark"] .work-distribution-page .summary-icon.amber { color: #fcd34d; background: #78350f; }

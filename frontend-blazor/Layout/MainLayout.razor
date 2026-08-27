@@ -216,6 +216,7 @@
         return path switch
         {
             "dashboard" => new("账户总览", "查看账号使用情况与最近请求"),
+            "admin/work-distribution" => new("工作内容分析", "按人员和工作类别查看内容分布与分类覆盖情况"),
             "admin/ops" => new("运维管理", "查看网关运行状态、队列与服务健康度"),
             "users" or "admin/users" => new("用户管理", "管理用户账号、额度、并发与访问状态"),
             "groups" or "admin/groups" => new("分组管理", "管理 API 密钥分组和费率配置"),

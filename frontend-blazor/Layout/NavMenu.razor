@@ -15,6 +15,10 @@
                     <Icon Name="dashboard" />
                     <span class="nav-label-copy">运营总览</span>
                 </NavLink>
+                <NavLink href="/admin/work-distribution" title="@(Collapsed ? "工作分布" : null)" @onclick="NavigateAsync">
+                    <Icon Name="layers" />
+                    <span class="nav-label-copy">工作分布</span>
+                </NavLink>
                 <NavLink href="/admin/ops" title="@(Collapsed ? "运维管理" : null)" @onclick="NavigateAsync">
                     <Icon Name="activity" />
                     <span class="nav-label-copy">运维管理</span>

@@ -31,6 +31,12 @@ func TestGatewayCacheLiveCallIdentityAndController(t *testing.T) {
 		CreatedAt:             time.Now(),
 		ExpiresAt:             time.Now().Add(time.Hour),
 		Controller:            service.LiveControllerPending,
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "paragateway", RepositoryRef: "fengtc/ParaGateway",
+			SubmissionType: "code", WorkRelated: service.WorkRelatedWork,
+			Category: service.WorkCategoryCoding, Confidence: 0.82,
+			ClassificationSource: "local_rule", ClassifierVersion: "rules-v1",
+		},
 	}
 	require.NoError(t, cache.SaveLiveCall(context.Background(), record, time.Hour))
 
@@ -39,6 +45,17 @@ func TestGatewayCacheLiveCallIdentityAndController(t *testing.T) {
 	require.Equal(t, record.CallID, loaded.CallID)
 	require.Equal(t, record.AccountID, loaded.AccountID)
 	require.Equal(t, record.AttestationCiphertext, loaded.AttestationCiphertext)
+	require.NotNil(t, loaded.WorkAttribution)
+	require.Equal(t, "coding", loaded.WorkAttribution.SubmissionType)
+	require.Equal(t, service.WorkCategoryCoding, loaded.WorkAttribution.Category)
+
+	// Re-saving a legacy/no-attribution record must remove any stale field left
+	// under the same Redis key.
+	record.WorkAttribution = nil
+	require.NoError(t, cache.SaveLiveCall(context.Background(), record, time.Hour))
+	loaded, err = otherInstance.GetLiveCall(context.Background(), record.CallHash)
+	require.NoError(t, err)
+	require.Nil(t, loaded.WorkAttribution)
 
 	claimed, err := cache.ClaimLiveController(context.Background(), record.CallHash, service.LiveControllerObserver, "observer-1")
 	require.NoError(t, err)

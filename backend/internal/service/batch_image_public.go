@@ -257,6 +257,11 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 	accountID := account.ID
 	holdID := BatchImageHoldRequestID(batchID)
 	holdAmount := pricingSnapshot.HoldAmount
+	var workAttribution *UsageWorkAttribution
+	if attribution, ok := UsageWorkAttributionFromContext(ctx); ok {
+		attribution = NormalizeUsageWorkAttribution(attribution)
+		workAttribution = &attribution
+	}
 	job, err := s.Repo.CreateBatchImageJob(ctx, CreateBatchImageJobParams{
 		BatchID:                 batchID,
 		UserID:                  owner.UserID,
@@ -283,6 +288,7 @@ func (s *BatchImagePublicService) Submit(ctx context.Context, owner BatchImageOw
 		IdempotencyKey:          batchImageOptionalStringPtr(idempotencyKey),
 		RequestHash:             batchImageStringPtr(requestHash),
 		SessionID:               normalized.SessionID,
+		WorkAttribution:         workAttribution,
 	})
 	if err != nil {
 		return nil, err

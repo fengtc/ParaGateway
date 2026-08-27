@@ -568,6 +568,7 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 	if repo == nil || usageLog == nil {
 		return
 	}
+	ApplyUsageWorkAttribution(ctx, usageLog)
 	usageCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
 
@@ -892,7 +893,9 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
-		if s.billingCacheService != nil { s.billingCacheService.RecordUserTPM(ctx, usageLog.UserID, usageLog.TotalTokens()) }
+		if s.billingCacheService != nil {
+			s.billingCacheService.RecordUserTPM(ctx, usageLog.UserID, usageLog.TotalTokens())
+		}
 		logger.LegacyPrintf("service.gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
 		return nil
@@ -927,7 +930,9 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 		return billingErr
 	}
-	if applied && s.billingCacheService != nil { s.billingCacheService.RecordUserTPM(ctx, usageLog.UserID, usageLog.TotalTokens()) }
+	if applied && s.billingCacheService != nil {
+		s.billingCacheService.RecordUserTPM(ctx, usageLog.UserID, usageLog.TotalTokens())
+	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 
 	return nil

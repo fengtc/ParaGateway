@@ -201,6 +201,10 @@ type UsageLog struct {
 
 	CreatedAt time.Time
 
+	// WorkAttribution contains only structured metadata and a local classifier
+	// result. It never contains request text, prompt content, or source code.
+	WorkAttribution *UsageWorkAttribution
+
 	User         *User
 	APIKey       *APIKey
 	Account      *Account

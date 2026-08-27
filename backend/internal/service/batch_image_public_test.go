@@ -29,8 +29,14 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		svc, repo, queue, gemini, _ := newTestBatchImagePublicService(true)
 		req := validBatchImageSubmitRequest()
 		req.SessionID = batchImageStringPtr("batch-session-123")
+		submitCtx := WithUsageWorkAttribution(ctx, UsageWorkAttribution{
+			ProjectRef: "paragateway", RepositoryRef: "fengtc/ParaGateway",
+			SubmissionType: "code", WorkRelated: WorkRelatedWork,
+			Category: WorkCategoryCoding, Confidence: 0.8,
+			ClassificationSource: "local_rule", ClassifierVersion: "rules-v1",
+		})
 
-		got, err := svc.Submit(ctx, testBatchImageOwner(), req, "")
+		got, err := svc.Submit(submitCtx, testBatchImageOwner(), req, "")
 		require.NoError(t, err)
 		require.Equal(t, "image.batch", got.Object)
 		require.Equal(t, "queued", got.Status)
@@ -64,6 +70,10 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		require.InDelta(t, 0.125, job.BillableUnitPrice, 1e-12)
 		require.InDelta(t, 0.15, job.HoldUnitPrice, 1e-12)
 		require.Equal(t, "batch-session-123", batchImageDerefString(job.SessionID))
+		require.NotNil(t, job.WorkAttribution)
+		require.Equal(t, "paragateway", job.WorkAttribution.ProjectRef)
+		require.Equal(t, "coding", job.WorkAttribution.SubmissionType)
+		require.Equal(t, WorkCategoryCoding, job.WorkAttribution.Category)
 	})
 
 	t.Run("combines user group image rate account rate discount and hold margin", func(t *testing.T) {

@@ -406,6 +406,96 @@
 .error-detail-section p { margin: 5px 0 0; color: var(--ink); font-size: .8rem; word-break: break-all; }
 .error-detail-section pre { max-height: 40vh; margin: 6px 0 0; padding: 12px; overflow: auto; color: var(--ink); background: var(--surface-soft); border: 1px solid var(--line); border-radius: 7px; font-size: .72rem; white-space: pre-wrap; word-break: break-all; }
 
+.work-classification-card { overflow: hidden; }
+
+.work-classification-heading {
+    display: flex;
+    min-height: 72px;
+    padding: 16px 18px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 1px solid var(--line);
+}
+
+.work-classification-heading h2 { margin: 0; color: var(--ink); font-size: .92rem; }
+.work-classification-heading p { margin: 5px 0 0; color: var(--muted); font-size: .72rem; line-height: 1.5; }
+
+.work-classification-notice {
+    display: flex;
+    margin: 14px 18px;
+    padding: 10px 12px;
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--ink);
+    background: var(--surface-soft);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: .73rem;
+    line-height: 1.55;
+}
+
+.work-classification-notice > svg { flex: 0 0 auto; color: #087f5b; }
+.work-classification-notice.compact { margin: 0 0 16px; }
+.work-classification-state { padding: 0 18px 18px; }
+.work-classification-table-wrap { border-top: 1px solid var(--line); }
+.work-classification-table { min-width: 1120px; table-layout: fixed; }
+.work-classification-table th:nth-child(1) { width: 150px; }
+.work-classification-table th:nth-child(2) { width: 190px; }
+.work-classification-table th:nth-child(3) { width: 105px; }
+.work-classification-table th:nth-child(4),
+.work-classification-table th:nth-child(5) { width: 105px; }
+.work-classification-table th:nth-child(6),
+.work-classification-table th:nth-child(7) { width: 82px; }
+.work-classification-table th:nth-child(8) { width: 120px; }
+.work-classification-table th:nth-child(9) { width: 94px; }
+.work-classification-table th:nth-child(10) { width: 92px; }
+
+.work-metadata-cell,
+.work-source-cell { min-width: 0; }
+
+.work-metadata-cell > span,
+.work-metadata-cell > small,
+.work-source-cell > span,
+.work-source-cell > small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.work-metadata-cell > span { color: var(--ink); font-weight: 650; }
+.work-metadata-cell > small,
+.work-source-cell > small { margin-top: 3px; color: var(--muted); font-size: .66rem; }
+
+.review-status {
+    display: inline-flex;
+    padding: 3px 7px;
+    border-radius: 999px;
+    font-size: .66rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.review-status.pending { color: #b45309; background: #fef3c7; }
+.review-status.approved { color: #047857; background: #d1fae5; }
+.review-status.rejected { color: #b91c1c; background: #fee2e2; }
+.review-status.none { color: var(--muted); background: var(--surface-soft); }
+.work-classification-table .button.compact { min-height: 32px; padding: 5px 9px; font-size: .7rem; white-space: nowrap; }
+
+.appeal-summary {
+    display: grid;
+    margin-bottom: 16px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.appeal-summary > div { display: grid; min-width: 0; gap: 4px; }
+.appeal-summary small { color: var(--muted); font-size: .7rem; font-weight: 650; }
+.appeal-summary strong { overflow-wrap: anywhere; color: var(--ink); font-size: .78rem; }
+.appeal-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.appeal-reason-field { grid-column: 1 / -1; }
+
 @media (max-width: 1180px) {
     .usage-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .usage-filter-card { align-items: stretch; flex-direction: column; }
@@ -425,4 +515,8 @@
     .usage-filter-actions .button { flex: 1 1 auto; }
     .error-detail-grid { grid-template-columns: 1fr; }
     .usage-trend-legend { padding-inline: 0; justify-content: flex-start; gap: 6px 12px; }
+    .work-classification-heading { align-items: stretch; flex-direction: column; }
+    .work-classification-heading .button { width: 100%; }
+    .work-classification-notice { margin-inline: 14px; }
+    .appeal-summary, .appeal-form-grid { grid-template-columns: 1fr; }
 }

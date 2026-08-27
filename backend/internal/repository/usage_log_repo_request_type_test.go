@@ -233,12 +233,13 @@ func TestExecUsageLogInsertNoResult_PersistsRequestedModel(t *testing.T) {
 		CreatedAt:      time.Date(2025, 1, 4, 12, 0, 0, 0, time.UTC),
 	})
 
-	mock.ExpectExec("INSERT INTO usage_logs").
+	mock.ExpectQuery("INSERT INTO usage_logs").
 		WithArgs(anySliceToDriverValues(prepared.args)...).
-		WillReturnResult(sqlmock.NewResult(0, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(99)))
 
-	err := execUsageLogInsertNoResult(context.Background(), db, prepared)
+	inserted, err := execUsageLogInsertNoResult(context.Background(), db, prepared)
 	require.NoError(t, err)
+	require.True(t, inserted)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -263,9 +264,20 @@ func (c *gatewayCache) SaveLiveCall(ctx context.Context, record *service.LiveCal
 		"inbound_endpoint": record.InboundEndpoint,
 		"attestation":      record.AttestationCiphertext,
 	}
+	if record.WorkAttribution != nil {
+		attribution := service.NormalizeUsageWorkAttribution(*record.WorkAttribution)
+		encoded, err := json.Marshal(attribution)
+		if err != nil {
+			return fmt.Errorf("encode live work attribution: %w", err)
+		}
+		values["work_attribution"] = string(encoded)
+	}
 	key := liveCallKey(record.CallHash)
 	pipe := c.rdb.TxPipeline()
 	pipe.HSet(ctx, key, values)
+	if record.WorkAttribution == nil {
+		pipe.HDel(ctx, key, "work_attribution")
+	}
 	pipe.Expire(ctx, key, ttl)
 	_, err := pipe.Exec(ctx)
 	return err
@@ -285,7 +297,7 @@ func (c *gatewayCache) GetLiveCall(ctx context.Context, callHash string) (*servi
 	}
 	createdAt := time.UnixMilli(parseInt("created_at"))
 	expiresAt := time.UnixMilli(parseInt("expires_at"))
-	return &service.LiveCallRecord{
+	record := &service.LiveCallRecord{
 		CallID:                values["call_id"],
 		CallHash:              callHash,
 		AccountID:             parseInt("account_id"),
@@ -303,7 +315,16 @@ func (c *gatewayCache) GetLiveCall(ctx context.Context, callHash string) (*servi
 		IPAddress:             values["ip_address"],
 		InboundEndpoint:       values["inbound_endpoint"],
 		AttestationCiphertext: values["attestation"],
-	}, nil
+	}
+	if raw := strings.TrimSpace(values["work_attribution"]); raw != "" {
+		var attribution service.UsageWorkAttribution
+		if err := json.Unmarshal([]byte(raw), &attribution); err != nil {
+			return nil, fmt.Errorf("decode live work attribution: %w", err)
+		}
+		attribution = service.NormalizeUsageWorkAttribution(attribution)
+		record.WorkAttribution = &attribution
+	}
+	return record, nil
 }
 
 func (c *gatewayCache) ClaimLiveController(ctx context.Context, callHash, controller, owner string) (bool, error) {

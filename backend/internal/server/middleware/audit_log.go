@@ -120,6 +120,18 @@ var auditSensitiveReads = map[string]string{
 	"GET /api/v1/admin/backups/s3-config":                 "admin.backups.s3_config.read",
 	"GET /api/v1/admin/data-management/s3/config":         "admin.data_management.s3_config.read",
 	"GET /api/v1/admin/request-audit/records/:id/content": "admin.request_audit.content.read",
+	"GET /api/v1/admin/work-distribution/summary":         "admin.work_distribution.summary.read",
+	"GET /api/v1/admin/work-distribution/records":         "admin.work_distribution.records.read",
+	"GET /api/v1/admin/work-distribution/reviews":         "admin.work_distribution.reviews.read",
+}
+
+// auditQueryOmittedRoutes contains sensitive reads whose filter values may
+// carry user-provided work labels. Their query is available to handlers but is
+// intentionally excluded from the persisted audit entry.
+var auditQueryOmittedRoutes = map[string]struct{}{
+	"GET /api/v1/admin/work-distribution/summary": {},
+	"GET /api/v1/admin/work-distribution/records": {},
+	"GET /api/v1/admin/work-distribution/reviews": {},
 }
 
 // auditActionOverrides 变更类请求的动作名精确映射（未命中时自动推导）。
@@ -147,19 +159,23 @@ var auditActionOverrides = map[string]string{
 	"PUT /api/v1/admin/request-audit/policy":                  "admin.request_audit.policy.update",
 }
 
-// auditBodyOmittedRoutes 请求体几乎整体由凭证构成的路由（如整块粘贴 auth JSON 的导入接口）。
-// 这类 body 的凭证内嵌在普通字符串值里，键级脱敏无法覆盖，整体不入库。
-var auditBodyOmittedRoutes = map[string]struct{}{
-	"POST /api/v1/auth/passkey/login/finish":                    {},
-	"POST /api/v1/user/passkeys/register/finish":                {},
-	"POST /api/v1/admin/accounts/import/codex-session":          {},
-	"PUT /api/v1/admin/accounts/:id/ollama-cloud-usage/session": {},
-	"PUT /api/v1/admin/prompt-audit/config":                     {},
-	"POST /api/v1/admin/prompt-audit/endpoints/probe":           {},
-	"DELETE /api/v1/admin/prompt-audit/events/:id":              {},
-	"POST /api/v1/admin/prompt-audit/events/batch-delete":       {},
-	"POST /api/v1/admin/prompt-audit/events/delete-preview":     {},
-	"POST /api/v1/admin/prompt-audit/events/delete-by-filter":   {},
+// auditBodyOmittedRoutes contains routes whose request bodies must never be
+// persisted. The map value is the safe audit marker; an empty value keeps the
+// stored RequestBody empty while action, actor, params and status are retained.
+var auditBodyOmittedRoutes = map[string]string{
+	"POST /api/v1/auth/passkey/login/finish":                                      "<credential-bearing body omitted>",
+	"POST /api/v1/user/passkeys/register/finish":                                  "<credential-bearing body omitted>",
+	"POST /api/v1/admin/accounts/import/codex-session":                            "<credential-bearing body omitted>",
+	"PUT /api/v1/admin/accounts/:id/ollama-cloud-usage/session":                   "<credential-bearing body omitted>",
+	"PUT /api/v1/admin/prompt-audit/config":                                       "<credential-bearing body omitted>",
+	"POST /api/v1/admin/prompt-audit/endpoints/probe":                             "<credential-bearing body omitted>",
+	"DELETE /api/v1/admin/prompt-audit/events/:id":                                "<credential-bearing body omitted>",
+	"POST /api/v1/admin/prompt-audit/events/batch-delete":                         "<credential-bearing body omitted>",
+	"POST /api/v1/admin/prompt-audit/events/delete-preview":                       "<credential-bearing body omitted>",
+	"POST /api/v1/admin/prompt-audit/events/delete-by-filter":                     "<credential-bearing body omitted>",
+	"POST /api/v1/usage/work-classifications/:usage_log_id/appeals":               "",
+	"POST /api/v1/admin/work-distribution/records/:usage_log_id/correction":        "",
+	"POST /api/v1/admin/work-distribution/reviews/:review_id/resolve":              "",
 }
 
 // NewAuditLogMiddleware 创建审计中间件。
@@ -193,8 +209,8 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 		// 只读取脱敏解析上限内的字节，超出部分与已读部分拼接回填，
 		// 避免大体积导入请求被完整复制进内存两次。
 		var bodyRedacted string
-		if _, omit := auditBodyOmittedRoutes[routeKey]; omit {
-			bodyRedacted = "<credential-bearing body omitted>"
+		if omittedBody, omit := auditBodyOmittedRoutes[routeKey]; omit {
+			bodyRedacted = omittedBody
 		} else if c.Request.Body != nil && c.Request.Method != "GET" {
 			orig := c.Request.Body
 			raw, err := io.ReadAll(io.LimitReader(orig, service.AuditRequestBodyCaptureLimit+1))
@@ -288,8 +304,10 @@ func NewAuditLogMiddleware(auditService *service.AuditLogService) AuditLogMiddle
 			}
 			extra["params"] = params
 		}
-		if q := service.RedactAuditQuery(c.Request.URL.RawQuery); q != "" {
-			extra["query"] = q
+		if _, omitQuery := auditQueryOmittedRoutes[routeKey]; !omitQuery {
+			if q := service.RedactAuditQuery(c.Request.URL.RawQuery); q != "" {
+				extra["query"] = q
+			}
 		}
 		if len(extra) > 0 {
 			entry.Extra = extra

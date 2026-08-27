@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +136,417 @@ func TestUsageLogRepositoryCreate_BatchPathConcurrent(t *testing.T) {
 	require.Equal(t, total, count)
 }
 
+type usageWorkPersistenceSnapshot struct {
+	projectRef           string
+	repositoryRef        string
+	submissionType       string
+	department           string
+	role                 string
+	metadataSource       string
+	workRelated          string
+	category             string
+	weight               int64
+	confidence           float64
+	classificationSource string
+	classifierVersion    string
+}
+
+func setUsageWorkTestAttribute(t *testing.T, ctx context.Context, userID int64, key, value string) {
+	t.Helper()
+	result, err := integrationDB.ExecContext(ctx, `
+INSERT INTO user_attribute_values (user_id, attribute_id, value, created_at, updated_at)
+SELECT $1, id, $3, NOW(), NOW()
+FROM user_attribute_definitions
+WHERE key = $2 AND deleted_at IS NULL
+ON CONFLICT (user_id, attribute_id) DO UPDATE SET
+  value = EXCLUDED.value,
+  updated_at = NOW()`, userID, key, value)
+	require.NoError(t, err)
+	affected, err := result.RowsAffected()
+	require.NoError(t, err)
+	require.Equal(t, int64(1), affected, "work-distribution attribute definition must exist")
+}
+
+func deleteUsageWorkPersistence(t *testing.T, ctx context.Context, usageLogID int64) {
+	t.Helper()
+	_, err := integrationDB.ExecContext(ctx, "DELETE FROM usage_work_classifications WHERE usage_log_id = $1", usageLogID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM usage_work_metadata WHERE usage_log_id = $1", usageLogID)
+	require.NoError(t, err)
+}
+
+func loadUsageWorkPersistenceSnapshot(t *testing.T, ctx context.Context, usageLogID int64) usageWorkPersistenceSnapshot {
+	t.Helper()
+	var snapshot usageWorkPersistenceSnapshot
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+SELECT
+  COALESCE(wm.project_ref, ''),
+  COALESCE(wm.repository_ref, ''),
+  COALESCE(wm.submission_type, ''),
+  COALESCE(wm.department, ''),
+  COALESCE(wm.role, ''),
+  wm.source,
+  wc.work_related,
+  wc.category,
+  wc.weight,
+  wc.confidence,
+  wc.classification_source,
+  COALESCE(wc.classifier_version, '')
+FROM usage_work_metadata wm
+JOIN usage_work_classifications wc ON wc.usage_log_id = wm.usage_log_id
+WHERE wm.usage_log_id = $1`, usageLogID).Scan(
+		&snapshot.projectRef,
+		&snapshot.repositoryRef,
+		&snapshot.submissionType,
+		&snapshot.department,
+		&snapshot.role,
+		&snapshot.metadataSource,
+		&snapshot.workRelated,
+		&snapshot.category,
+		&snapshot.weight,
+		&snapshot.confidence,
+		&snapshot.classificationSource,
+		&snapshot.classifierVersion,
+	))
+	return snapshot
+}
+
+func usageWorkTestCanary(parts ...string) string {
+	return strings.Join(parts, "")
+}
+
+func TestUsageLogRepositoryCreateSingle_SanitizesWorkDimensionsAtDatabaseBoundary(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	user := mustCreateUser(t, client, &service.User{Email: "usage-dimension-guard-" + uuid.NewString() + "@example.com"})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: usageWorkTestCanary("s", "k-usage-dimension-guard-") + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-dimension-guard-" + uuid.NewString()})
+
+	tests := []struct {
+		name           string
+		department     string
+		role           string
+		wantDepartment string
+		wantRole       string
+	}{
+		{name: "valid Chinese labels", department: "研发平台部", role: "高级研发工程师", wantDepartment: "研发平台部", wantRole: "高级研发工程师"},
+		{name: "valid English labels", department: "AI Platform & Reliability", role: "Senior C# Engineer", wantDepartment: "AI Platform & Reliability", wantRole: "Senior C# Engineer"},
+		{name: "exact length boundaries", department: strings.Repeat("研", 100), role: strings.Repeat("岗", 50), wantDepartment: strings.Repeat("研", 100), wantRole: strings.Repeat("岗", 50)},
+		{name: "23 character identifiers", department: strings.Repeat("A", 23), role: strings.Repeat("B", 23), wantDepartment: strings.Repeat("A", 23), wantRole: strings.Repeat("B", 23)},
+		{name: "control characters", department: "研发\n平台", role: "SRE\tLead", wantDepartment: "unknown", wantRole: "unknown"},
+		{name: "overlong Unicode", department: strings.Repeat("研发", 51), role: strings.Repeat("工程师", 17), wantDepartment: "unknown", wantRole: "unknown"},
+		{name: "JSON and unsupported punctuation", department: `{"team":"研发"}`, role: "Engineer@example", wantDepartment: "unknown", wantRole: "unknown"},
+		{name: "English prompt and code prefixes", department: "please review roadmap", role: "package main", wantDepartment: "unknown", wantRole: "unknown"},
+		{name: "Chinese prompt and source marker", department: "请帮我修改代码", role: "包含完整源代码", wantDepartment: "unknown", wantRole: "unknown"},
+		{name: "authorization credentials", department: usageWorkTestCanary("Bear", "er ", strings.Repeat("a", 16)), role: usageWorkTestCanary("Bas", "ic ", strings.Repeat("b", 16)), wantDepartment: "unknown", wantRole: "unknown"},
+		{name: "provider key prefixes", department: usageWorkTestCanary("s", "k-", strings.Repeat("c", 16)), role: usageWorkTestCanary("r", "k-", strings.Repeat("d", 16)), wantDepartment: "unknown", wantRole: "unknown"},
+		{name: "GitHub credentials", department: usageWorkTestCanary("gh", "p_", strings.Repeat("e", 20)), role: usageWorkTestCanary("github", "_pat_", strings.Repeat("f", 20)), wantDepartment: "unknown", wantRole: "unknown"},
+		{name: "AWS and JWT credentials", department: usageWorkTestCanary("AK", "IA", "1234567890ABCDEF"), role: usageWorkTestCanary("ey", "J", strings.Repeat("g", 10), ".", strings.Repeat("h", 11), ".", strings.Repeat("i", 11)), wantDepartment: "unknown", wantRole: "unknown"},
+		{name: "long token canary", department: strings.Repeat("A", 24), role: usageWorkTestCanary("team_", strings.Repeat("j", 24)), wantDepartment: "unknown", wantRole: "unknown"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			setUsageWorkTestAttribute(t, ctx, user.ID, "department", tc.department)
+			setUsageWorkTestAttribute(t, ctx, user.ID, "job_role", tc.role)
+			log := &service.UsageLog{
+				UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+				RequestID: uuid.NewString(), Model: "claude-3", InputTokens: 5, OutputTokens: 5,
+				TotalCost: 0.1, ActualCost: 0.1, CreatedAt: time.Now().UTC(),
+				WorkAttribution: &service.UsageWorkAttribution{
+					WorkRelated: service.WorkRelatedWork, Category: service.WorkCategoryCoding,
+					Confidence: 0.8, ClassificationSource: "local_rule", ClassifierVersion: "rules-v1",
+				},
+			}
+			inserted, err := repo.createSingle(ctx, integrationDB, log)
+			require.NoError(t, err)
+			require.True(t, inserted)
+
+			snapshot := loadUsageWorkPersistenceSnapshot(t, ctx, log.ID)
+			require.Equal(t, tc.wantDepartment, snapshot.department)
+			require.Equal(t, tc.wantRole, snapshot.role)
+		})
+	}
+}
+
+func TestUsageWorkMetadataCheckRejectsUnsafeDimensionsAndAllowsChineseLabels(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	user := mustCreateUser(t, client, &service.User{Email: "usage-dimension-check-" + uuid.NewString() + "@example.com"})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: usageWorkTestCanary("s", "k-usage-dimension-check-") + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-dimension-check-" + uuid.NewString()})
+	log := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: uuid.NewString(), Model: "claude-3", InputTokens: 5, OutputTokens: 5,
+		TotalCost: 0.1, ActualCost: 0.1, CreatedAt: time.Now().UTC(),
+	}
+	inserted, err := repo.createSingle(ctx, integrationDB, log)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM usage_work_metadata WHERE usage_log_id = $1", log.ID)
+	require.NoError(t, err)
+
+	unsafeValues := []struct {
+		department string
+		role       string
+	}{
+		{department: usageWorkTestCanary("s", "k-", strings.Repeat("k", 16)), role: "SRE"},
+		{department: "研发平台部", role: usageWorkTestCanary("github", "_pat_", strings.Repeat("m", 20))},
+	}
+	for _, unsafe := range unsafeValues {
+		_, err = integrationDB.ExecContext(ctx, `
+INSERT INTO usage_work_metadata (
+  usage_log_id, department, role, source, created_at, updated_at
+) VALUES ($1, $2, $3, 'manual', NOW(), NOW())`, log.ID, unsafe.department, unsafe.role)
+		require.Error(t, err, "database CHECK must reject direct unsafe dimension writes")
+	}
+
+	_, err = integrationDB.ExecContext(ctx, `
+INSERT INTO usage_work_metadata (
+  usage_log_id, department, role, source, created_at, updated_at
+) VALUES ($1, '研发平台部', '高级研发工程师', 'manual', NOW(), NOW())`, log.ID)
+	require.NoError(t, err)
+	var department, role string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+SELECT department, role FROM usage_work_metadata WHERE usage_log_id = $1`, log.ID).Scan(&department, &role))
+	require.Equal(t, "研发平台部", department)
+	require.Equal(t, "高级研发工程师", role)
+}
+
+func TestUsageLogRepositoryCreateSingle_ConflictSelfHealsMissingWorkWithoutResnapshot(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	user := mustCreateUser(t, client, &service.User{Email: "usage-single-self-heal-" + uuid.NewString() + "@example.com"})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: usageWorkTestCanary("s", "k-usage-single-self-heal-") + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-single-self-heal-" + uuid.NewString()})
+	requestID := uuid.NewString()
+
+	setUsageWorkTestAttribute(t, ctx, user.ID, "department", "historical-department")
+	setUsageWorkTestAttribute(t, ctx, user.ID, "job_role", "historical-role")
+	original := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: requestID, Model: "claude-3", InputTokens: 10, OutputTokens: 20,
+		TotalCost: 0.5, ActualCost: 0.5, CreatedAt: time.Now().UTC(),
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "original-project", WorkRelated: service.WorkRelatedWork,
+			Category: service.WorkCategoryCoding, Confidence: 0.8,
+			ClassificationSource: "local_rule", ClassifierVersion: "rules-v1",
+		},
+	}
+	inserted, err := repo.createSingle(ctx, integrationDB, original)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	originalSnapshot := loadUsageWorkPersistenceSnapshot(t, ctx, original.ID)
+	require.Equal(t, "historical-department", originalSnapshot.department)
+	require.Equal(t, "historical-role", originalSnapshot.role)
+
+	deleteUsageWorkPersistence(t, ctx, original.ID)
+	setUsageWorkTestAttribute(t, ctx, user.ID, "department", "current-department")
+	setUsageWorkTestAttribute(t, ctx, user.ID, "job_role", "current-role")
+	recovery := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: requestID, Model: "claude-3", InputTokens: 12, OutputTokens: 24,
+		TotalCost: 0.5, ActualCost: 0.5, CreatedAt: time.Now().UTC(),
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "recovered-project", WorkRelated: service.WorkRelatedWork,
+			Category: service.WorkCategoryDocumentation, Confidence: 0.9,
+			ClassificationSource: "explicit_metadata", ClassifierVersion: "rules-v2",
+		},
+	}
+	inserted, err = repo.createSingle(ctx, integrationDB, recovery)
+	require.NoError(t, err)
+	require.False(t, inserted)
+	require.Equal(t, original.ID, recovery.ID)
+
+	snapshot := loadUsageWorkPersistenceSnapshot(t, ctx, original.ID)
+	require.Equal(t, "recovered-project", snapshot.projectRef)
+	require.Equal(t, "unknown", snapshot.department)
+	require.Equal(t, "unknown", snapshot.role)
+	require.Equal(t, service.WorkCategoryDocumentation, snapshot.category)
+	require.Equal(t, "explicit_metadata", snapshot.classificationSource)
+	require.Equal(t, "rules-v2", snapshot.classifierVersion)
+}
+
+func TestUsageLogRepositoryFlushCreateBatch_ExistingDuplicateSelfHealsFromFirstAttribution(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	user := mustCreateUser(t, client, &service.User{Email: "usage-batch-self-heal-" + uuid.NewString() + "@example.com"})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: usageWorkTestCanary("s", "k-usage-batch-self-heal-") + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-batch-self-heal-" + uuid.NewString()})
+	requestID := uuid.NewString()
+
+	existing := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: requestID, Model: "claude-3", InputTokens: 1, OutputTokens: 1,
+		TotalCost: 0.1, ActualCost: 0.1, CreatedAt: time.Now().UTC(),
+	}
+	inserted, err := repo.createSingle(ctx, integrationDB, existing)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	deleteUsageWorkPersistence(t, ctx, existing.ID)
+
+	first := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: requestID, Model: "claude-3", InputTokens: 17, OutputTokens: 3,
+		TotalCost: 0.2, ActualCost: 0.2, CreatedAt: time.Now().UTC(),
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "first-project", WorkRelated: service.WorkRelatedWork,
+			Category: service.WorkCategoryCoding, Confidence: 0.71,
+			ClassificationSource: "local_rule", ClassifierVersion: "first-v1",
+		},
+	}
+	second := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: requestID, Model: "claude-3", InputTokens: 99, OutputTokens: 1,
+		TotalCost: 0.2, ActualCost: 0.2, CreatedAt: time.Now().UTC(),
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "second-project", WorkRelated: service.WorkRelatedWork,
+			Category: service.WorkCategoryDocumentation, Confidence: 0.99,
+			ClassificationSource: "explicit_metadata", ClassifierVersion: "second-v1",
+		},
+	}
+	batch := []usageLogCreateRequest{
+		{log: first, prepared: prepareUsageLogInsert(first), resultCh: make(chan usageLogCreateResult, 1)},
+		{log: second, prepared: prepareUsageLogInsert(second), resultCh: make(chan usageLogCreateResult, 1)},
+	}
+	repo.flushCreateBatch(integrationDB, batch)
+	for _, req := range batch {
+		result := <-req.resultCh
+		require.NoError(t, result.err)
+		require.False(t, result.inserted)
+	}
+	require.Equal(t, existing.ID, first.ID)
+	require.Equal(t, existing.ID, second.ID)
+
+	snapshot := loadUsageWorkPersistenceSnapshot(t, ctx, existing.ID)
+	require.Equal(t, "first-project", snapshot.projectRef)
+	require.Equal(t, "unknown", snapshot.department)
+	require.Equal(t, "unknown", snapshot.role)
+	require.Equal(t, service.WorkCategoryCoding, snapshot.category)
+	require.Equal(t, int64(20), snapshot.weight)
+	require.InDelta(t, 0.71, snapshot.confidence, 0.0001)
+	require.Equal(t, "first-v1", snapshot.classifierVersion)
+}
+
+func TestUsageLogRepositoryCreateBestEffort_ConflictSelfHealsMissingWork(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	seedRepo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	user := mustCreateUser(t, client, &service.User{Email: "usage-best-effort-self-heal-" + uuid.NewString() + "@example.com"})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: usageWorkTestCanary("s", "k-usage-best-effort-self-heal-") + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-best-effort-self-heal-" + uuid.NewString()})
+	requestID := uuid.NewString()
+
+	existing := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: requestID, Model: "claude-3", InputTokens: 2, OutputTokens: 2,
+		TotalCost: 0.1, ActualCost: 0.1, CreatedAt: time.Now().UTC(),
+	}
+	inserted, err := seedRepo.createSingle(ctx, integrationDB, existing)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	deleteUsageWorkPersistence(t, ctx, existing.ID)
+
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	recovery := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: requestID, Model: "claude-3", InputTokens: 15, OutputTokens: 5,
+		TotalCost: 0.3, ActualCost: 0.3, CreatedAt: time.Now().UTC(),
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "best-effort-project", WorkRelated: service.WorkRelatedWork,
+			Category: service.WorkCategoryOperations, Confidence: 0.83,
+			ClassificationSource: "local_rule", ClassifierVersion: "best-effort-v1",
+		},
+	}
+	require.NoError(t, repo.CreateBestEffort(ctx, recovery))
+
+	snapshot := loadUsageWorkPersistenceSnapshot(t, ctx, existing.ID)
+	require.Equal(t, "best-effort-project", snapshot.projectRef)
+	require.Equal(t, "unknown", snapshot.department)
+	require.Equal(t, "unknown", snapshot.role)
+	require.Equal(t, service.WorkCategoryOperations, snapshot.category)
+	require.Equal(t, int64(20), snapshot.weight)
+	require.Equal(t, "best-effort-v1", snapshot.classifierVersion)
+}
+
+func TestUsageLogRepositoryCreateSingle_ConflictPreservesManualClassificationAndRepairsMissingMetadata(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	user := mustCreateUser(t, client, &service.User{Email: "usage-manual-preserve-" + uuid.NewString() + "@example.com"})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: usageWorkTestCanary("s", "k-usage-manual-preserve-") + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-manual-preserve-" + uuid.NewString()})
+	requestID := uuid.NewString()
+
+	original := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: requestID, Model: "claude-3", InputTokens: 10, OutputTokens: 10,
+		TotalCost: 0.2, ActualCost: 0.2, CreatedAt: time.Now().UTC(),
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "original-project", RepositoryRef: "original/repo",
+			WorkRelated: service.WorkRelatedWork, Category: service.WorkCategoryCoding,
+			Confidence: 0.8, ClassificationSource: "local_rule", ClassifierVersion: "rules-v1",
+		},
+	}
+	inserted, err := repo.createSingle(ctx, integrationDB, original)
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	_, err = integrationDB.ExecContext(ctx, `
+UPDATE usage_work_classifications SET
+  work_related = 'non_work',
+  category = 'non_work',
+  weight = 777,
+  confidence = 0.9876,
+  classification_source = 'manual_review',
+  classifier_version = 'manual-v42'
+WHERE usage_log_id = $1`, original.ID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `
+UPDATE usage_work_metadata SET
+  project_ref = NULL,
+  repository_ref = 'historical/repo',
+  submission_type = NULL,
+  department = 'historical-department',
+  role = NULL,
+  source = 'manual'
+WHERE usage_log_id = $1`, original.ID)
+	require.NoError(t, err)
+	setUsageWorkTestAttribute(t, ctx, user.ID, "job_role", "current-role-must-not-backfill")
+
+	retry := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: requestID, Model: "claude-3", InputTokens: 30, OutputTokens: 40,
+		TotalCost: 0.7, ActualCost: 0.7, CreatedAt: time.Now().UTC(),
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "recovered-project", RepositoryRef: "replacement/repo", SubmissionType: "commit",
+			WorkRelated: service.WorkRelatedWork, Category: service.WorkCategoryDocumentation,
+			Confidence: 0.99, ClassificationSource: "explicit_metadata", ClassifierVersion: "rules-v9",
+		},
+	}
+	inserted, err = repo.createSingle(ctx, integrationDB, retry)
+	require.NoError(t, err)
+	require.False(t, inserted)
+
+	snapshot := loadUsageWorkPersistenceSnapshot(t, ctx, original.ID)
+	require.Equal(t, "recovered-project", snapshot.projectRef)
+	require.Equal(t, "historical/repo", snapshot.repositoryRef)
+	require.Equal(t, "commit", snapshot.submissionType)
+	require.Equal(t, "historical-department", snapshot.department)
+	require.Equal(t, "unknown", snapshot.role)
+	require.Equal(t, "manual", snapshot.metadataSource)
+	require.Equal(t, service.WorkRelatedNonWork, snapshot.workRelated)
+	require.Equal(t, service.WorkCategoryNonWork, snapshot.category)
+	require.Equal(t, int64(777), snapshot.weight)
+	require.InDelta(t, 0.9876, snapshot.confidence, 0.0001)
+	require.Equal(t, "manual_review", snapshot.classificationSource)
+	require.Equal(t, "manual-v42", snapshot.classifierVersion)
+}
+
 func TestUsageLogRepositoryCreate_BatchPathDuplicateRequestID(t *testing.T) {
 	ctx := context.Background()
 	client := testEntClient(t)
@@ -156,6 +568,11 @@ func TestUsageLogRepositoryCreate_BatchPathDuplicateRequestID(t *testing.T) {
 		TotalCost:    0.5,
 		ActualCost:   0.5,
 		CreatedAt:    time.Now().UTC(),
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "original-project", WorkRelated: service.WorkRelatedWork,
+			Category: service.WorkCategoryCoding, Confidence: 0.8,
+			ClassificationSource: "local_rule", ClassifierVersion: "rules-v1",
+		},
 	}
 	log2 := &service.UsageLog{
 		UserID:       user.ID,
@@ -168,6 +585,11 @@ func TestUsageLogRepositoryCreate_BatchPathDuplicateRequestID(t *testing.T) {
 		TotalCost:    0.5,
 		ActualCost:   0.5,
 		CreatedAt:    time.Now().UTC(),
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "replacement-project", WorkRelated: service.WorkRelatedWork,
+			Category: service.WorkCategoryDocumentation, Confidence: 0.9,
+			ClassificationSource: "explicit_metadata", ClassifierVersion: "rules-v2",
+		},
 	}
 
 	inserted1, err1 := repo.Create(ctx, log1)
@@ -181,6 +603,15 @@ func TestUsageLogRepositoryCreate_BatchPathDuplicateRequestID(t *testing.T) {
 	var count int
 	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT COUNT(*) FROM usage_logs WHERE request_id = $1 AND api_key_id = $2", requestID, apiKey.ID).Scan(&count))
 	require.Equal(t, 1, count)
+	var projectRef, category, classificationSource string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+SELECT wm.project_ref, wc.category, wc.classification_source
+FROM usage_work_metadata wm
+JOIN usage_work_classifications wc ON wc.usage_log_id = wm.usage_log_id
+WHERE wm.usage_log_id = $1`, log1.ID).Scan(&projectRef, &category, &classificationSource))
+	require.Equal(t, "original-project", projectRef)
+	require.Equal(t, service.WorkCategoryCoding, category)
+	require.Equal(t, "local_rule", classificationSource)
 }
 
 func TestUsageLogRepositoryFlushCreateBatch_DeduplicatesSameKeyInMemory(t *testing.T) {

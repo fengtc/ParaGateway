@@ -33,11 +33,25 @@ func TestBatchImageRepository_CreateJobAndDuplicates(t *testing.T) {
 		Model:         "gemini-2.5-flash-image",
 		ItemCount:     2,
 		EstimatedCost: 0.02,
+		WorkAttribution: &service.UsageWorkAttribution{
+			ProjectRef: "paragateway", RepositoryRef: "fengtc/ParaGateway",
+			SubmissionType: "documentation", WorkRelated: service.WorkRelatedWork,
+			Category: service.WorkCategoryDocumentation, Confidence: 0.8,
+			ClassificationSource: "local_rule", ClassifierVersion: "rules-v1",
+		},
 	})
 	require.NoError(t, err)
 	require.Equal(t, batchID, job.BatchID)
 	require.Equal(t, service.BatchImageJobStatusCreated, job.Status)
 	require.Equal(t, "USD", job.Currency)
+	require.NotNil(t, job.WorkAttribution)
+	require.Equal(t, "paragateway", job.WorkAttribution.ProjectRef)
+	require.Equal(t, service.WorkCategoryDocumentation, job.WorkAttribution.Category)
+
+	loaded, err := repo.GetBatchImageJobByBatchID(ctx, batchID)
+	require.NoError(t, err)
+	require.NotNil(t, loaded.WorkAttribution)
+	require.Equal(t, "fengtc/ParaGateway", loaded.WorkAttribution.RepositoryRef)
 
 	_, err = repo.CreateBatchImageJob(ctx, service.CreateBatchImageJobParams{
 		BatchID:   batchID,

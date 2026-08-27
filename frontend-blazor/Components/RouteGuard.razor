@@ -51,6 +51,7 @@ else
 
     private bool IsAdminPage => RouteData.PageType == typeof(Pages.Users)
         || RouteData.PageType == typeof(Pages.AdminUsage)
+        || RouteData.PageType == typeof(Pages.AdminWorkDistribution)
         || RouteData.PageType == typeof(Pages.Providers)
         || RouteData.PageType == typeof(Pages.Models)
         || RouteData.PageType == typeof(Pages.Groups)

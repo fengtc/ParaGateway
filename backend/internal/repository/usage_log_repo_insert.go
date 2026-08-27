@@ -111,6 +111,7 @@ type usageLogCreateResult struct {
 
 type usageLogBestEffortRequest struct {
 	prepared usageLogInsertPrepared
+	work     usageWorkPrepared
 	apiKeyID int64
 	resultCh chan error
 }
@@ -183,8 +184,14 @@ func (r *usageLogRepository) CreateBestEffort(ctx context.Context, log *service.
 		return err
 	}
 
+	prepared := prepareUsageLogInsert(log)
+	if prepared.requestID == "" {
+		_, err := r.createSingle(ctx, r.sql, log)
+		return err
+	}
 	req := usageLogBestEffortRequest{
-		prepared: prepareUsageLogInsert(log),
+		prepared: prepared,
+		work:     prepareUsageWork(log),
 		apiKeyID: log.APIKeyID,
 		resultCh: make(chan error, 1),
 	}
@@ -300,12 +307,16 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 				return false, err
 			}
 			log.RateMultiplier = prepared.rateMultiplier
+			useSavepoint := ctx != nil && dbent.TxFromContext(ctx) != nil
+			r.persistUsageWorkByID(ctx, sqlq, log, useSavepoint, true)
 			return false, nil
 		} else {
 			return false, err
 		}
 	}
 	log.RateMultiplier = prepared.rateMultiplier
+	useSavepoint := ctx != nil && dbent.TxFromContext(ctx) != nil
+	r.persistUsageWorkByID(ctx, sqlq, log, useSavepoint, false)
 	return true, nil
 }
 
@@ -484,6 +495,13 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 
 	if len(uniqueOrder) > 0 {
 		insertedMap, stateMap, safeFallback, err := r.batchInsertUsageLogs(db, uniqueOrder, preparedByKey)
+		if workRows := usageWorkRowsForBatch(uniqueOrder, requestsByKey, stateMap, insertedMap); len(workRows) > 0 {
+			workCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if workErr := persistUsageWorkRows(workCtx, db, workRows); workErr != nil {
+				logger.LegacyPrintf("repository.usage_log", "persist batched structured work classification failed: %v", workErr)
+			}
+			cancel()
+		}
 		if err != nil {
 			if safeFallback {
 				for _, key := range uniqueOrder {
@@ -560,6 +578,7 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 
 	type bestEffortGroup struct {
 		prepared usageLogInsertPrepared
+		work     usageWorkPrepared
 		apiKeyID int64
 		key      string
 		reqs     []usageLogBestEffortRequest
@@ -579,6 +598,7 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 		if !exists {
 			group = &bestEffortGroup{
 				prepared: prepared,
+				work:     req.work,
 				apiKeyID: req.apiKeyID,
 				key:      key,
 			}
@@ -600,13 +620,27 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 	defer cancel()
 
 	query, args := buildUsageLogBestEffortInsertQuery(preparedList)
-	if _, err := db.ExecContext(ctx, query, args...); err != nil {
+	insertedRows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
 		logger.LegacyPrintf("repository.usage_log", "best-effort batch insert failed: %v", err)
 		for _, group := range groupOrder {
-			singleErr := execUsageLogInsertNoResult(ctx, db, group.prepared)
+			inserted, singleErr := execUsageLogInsertNoResult(ctx, db, group.prepared)
 			if singleErr != nil {
 				logger.LegacyPrintf("repository.usage_log", "best-effort single fallback insert failed: %v", singleErr)
-			} else if group.prepared.requestID != "" && r != nil && r.bestEffortRecent != nil {
+			}
+			workPersisted := false
+			if singleErr == nil {
+				work := group.work
+				work.requestID = group.prepared.requestID
+				work.apiKeyID = group.apiKeyID
+				work.recoveryOnly = !inserted
+				if workErr := persistUsageWorkRows(ctx, db, []usageWorkPrepared{work}); workErr != nil {
+					logger.LegacyPrintf("repository.usage_log", "persist best-effort fallback work classification failed: %v", workErr)
+				} else {
+					workPersisted = true
+				}
+			}
+			if workPersisted && group.prepared.requestID != "" && r != nil && r.bestEffortRecent != nil {
 				r.bestEffortRecent.SetDefault(group.key, struct{}{})
 			}
 			for _, req := range group.reqs {
@@ -615,8 +649,46 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 		}
 		return
 	}
+	insertedKeys := make(map[string]bool, len(groupOrder))
+	for insertedRows.Next() {
+		var requestID string
+		var apiKeyID int64
+		if scanErr := insertedRows.Scan(&requestID, &apiKeyID); scanErr != nil {
+			_ = insertedRows.Close()
+			for _, group := range groupOrder {
+				for _, req := range group.reqs {
+					sendUsageLogBestEffortResult(req.resultCh, scanErr)
+				}
+			}
+			return
+		}
+		insertedKeys[usageLogBatchKey(requestID, apiKeyID)] = true
+	}
+	rowsErr := insertedRows.Err()
+	_ = insertedRows.Close()
+	if rowsErr != nil {
+		for _, group := range groupOrder {
+			for _, req := range group.reqs {
+				sendUsageLogBestEffortResult(req.resultCh, rowsErr)
+			}
+		}
+		return
+	}
+	workRows := make([]usageWorkPrepared, 0, len(groupOrder))
 	for _, group := range groupOrder {
-		if group.prepared.requestID != "" && r != nil && r.bestEffortRecent != nil {
+		work := group.work
+		work.requestID = group.prepared.requestID
+		work.apiKeyID = group.apiKeyID
+		work.recoveryOnly = !insertedKeys[group.key]
+		workRows = append(workRows, work)
+	}
+	workPersisted := true
+	if err := persistUsageWorkRows(ctx, db, workRows); err != nil {
+		workPersisted = false
+		logger.LegacyPrintf("repository.usage_log", "persist best-effort work classification failed: %v", err)
+	}
+	for _, group := range groupOrder {
+		if workPersisted && group.prepared.requestID != "" && r != nil && r.bestEffortRecent != nil {
 			r.bestEffortRecent.SetDefault(group.key, struct{}{})
 		}
 		for _, req := range group.reqs {
@@ -1142,13 +1214,15 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			created_at
 		FROM input
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
+		RETURNING request_id, api_key_id
 	`)
 
 	return query.String(), args
 }
 
-func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared usageLogInsertPrepared) error {
-	_, err := sqlq.ExecContext(ctx, `
+func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared usageLogInsertPrepared) (bool, error) {
+	var id int64
+	err := scanSingleRow(ctx, sqlq, `
 		INSERT INTO usage_logs (
 			user_id,
 			api_key_id,
@@ -1218,8 +1292,12 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
-	`, prepared.args...)
-	return err
+		RETURNING id
+	`, prepared.args, &id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {

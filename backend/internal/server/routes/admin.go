@@ -94,6 +94,7 @@ func RegisterAdminRoutes(
 
 		// 使用记录管理
 		registerUsageRoutes(admin, h)
+		registerWorkDistributionRoutes(admin, h)
 
 		// 用户属性管理
 		registerUserAttributeRoutes(admin, h)
@@ -131,6 +132,17 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerWorkDistributionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	work := admin.Group("/work-distribution")
+	{
+		work.GET("/summary", h.Admin.WorkDistribution.Summary)
+		work.GET("/records", h.Admin.WorkDistribution.ListRecords)
+		work.POST("/records/:usage_log_id/correction", h.Admin.WorkDistribution.CreateCorrection)
+		work.GET("/reviews", h.Admin.WorkDistribution.ListReviews)
+		work.POST("/reviews/:review_id/resolve", h.Admin.WorkDistribution.ResolveReview)
 	}
 }
 

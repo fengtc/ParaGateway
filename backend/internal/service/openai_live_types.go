@@ -66,6 +66,9 @@ type LiveCallRecord struct {
 	UserAgent       string
 	IPAddress       string
 	InboundEndpoint string
+	// WorkAttribution contains only normalized structured fields. Prompt text,
+	// source code, and request bodies must never be copied into this record.
+	WorkAttribution *UsageWorkAttribution
 	// AttestationCiphertext 仅用于让同一会话的 Sideband 复用创建时的证明。
 	AttestationCiphertext string
 }

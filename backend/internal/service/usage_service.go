@@ -115,6 +115,7 @@ func (s *UsageService) Create(ctx context.Context, req CreateUsageLogRequest) (*
 		Stream:                req.Stream,
 		DurationMs:            req.DurationMs,
 	}
+	ApplyUsageWorkAttribution(ctx, usageLog)
 
 	inserted, err := s.usageRepo.Create(txCtx, usageLog)
 	if err != nil {

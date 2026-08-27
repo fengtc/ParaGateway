@@ -23,7 +23,7 @@ public sealed class ApplicationShellParityTests
         foreach (var title in new[]
         {
             "运营总览", "账户总览", "运维管理", "用户管理", "内容风控", "提示风控",
-            "请求审计", "分组管理", "订阅管理", "账号管理", "公告管理", "代理管理",
+            "请求审计", "工作内容分析", "分组管理", "订阅管理", "账号管理", "公告管理", "代理管理",
             "用量记录", "审计日志", "系统设置"
         })
         {
@@ -48,6 +48,7 @@ public sealed class ApplicationShellParityTests
         var menu = ReadSource("Layout", "NavMenu.razor");
 
         var dashboard = menu.IndexOf("href=\"/admin/dashboard\"", StringComparison.Ordinal);
+        var workDistribution = menu.IndexOf("href=\"/admin/work-distribution\"", StringComparison.Ordinal);
         var ops = menu.IndexOf("href=\"/admin/ops\"", StringComparison.Ordinal);
         var users = menu.IndexOf("href=\"/admin/users\"", StringComparison.Ordinal);
         var riskControl = menu.IndexOf("href=\"/admin/risk-control\"", StringComparison.Ordinal);
@@ -57,8 +58,9 @@ public sealed class ApplicationShellParityTests
         var accounts = menu.IndexOf("href=\"/admin/accounts\"", StringComparison.Ordinal);
         var settings = menu.IndexOf("href=\"/admin/settings\"", StringComparison.Ordinal);
 
-        Assert.True(dashboard >= 0 && dashboard < ops && ops < users && users < riskControl && riskControl < promptUpgrade && promptUpgrade < requestAudit && requestAudit < groups && groups < accounts && accounts < settings);
+        Assert.True(dashboard >= 0 && dashboard < workDistribution && workDistribution < ops && ops < users && users < riskControl && riskControl < promptUpgrade && promptUpgrade < requestAudit && requestAudit < groups && groups < accounts && accounts < settings);
         Assert.Contains("运营总览", menu, StringComparison.Ordinal);
+        Assert.Contains("工作分布", menu, StringComparison.Ordinal);
         Assert.Contains("运维管理", menu, StringComparison.Ordinal);
         Assert.Contains("内容风控", menu, StringComparison.Ordinal);
         Assert.Contains("提示风控", menu, StringComparison.Ordinal);
@@ -228,7 +230,7 @@ public sealed class ApplicationShellParityTests
             "/admin/channels", "/admin/channels/pricing", "/admin/channels/monitor", "/monitor",
             "/admin/subscriptions", "/admin/accounts", "/admin/upstream-accounts", "/admin/announcements", "/admin/proxies",
             "/admin/redeem", "/admin/promo-codes", "/admin/settings", "/admin/risk-control",
-            "/admin/prompt-audit", "/admin/usage", "/admin/affiliates",
+            "/admin/prompt-audit", "/admin/usage", "/admin/work-distribution", "/admin/affiliates",
             "/admin/affiliates/invites", "/admin/affiliates/rebates", "/admin/affiliates/transfers"
         };
 

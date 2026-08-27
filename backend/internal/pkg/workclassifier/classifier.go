@@ -1,0 +1,196 @@
+// Package workclassifier classifies transient request context without retaining
+// prompt content. It is deterministic, local-only, and performs no I/O or logging.
+package workclassifier
+
+import (
+	"log/slog"
+	"math"
+	"strings"
+)
+
+type Category string
+
+type WorkRelation string
+
+const (
+	CategoryCoding        Category = "coding"
+	CategoryDocumentation Category = "documentation"
+	CategoryAnalysis      Category = "data_analysis"
+	CategoryOperations    Category = "operations"
+	CategoryCommunication Category = "communication"
+	CategoryLearning      Category = "learning"
+	CategoryOther         Category = "other"
+	CategoryNonWork       Category = "non_work"
+	CategoryUnclassified  Category = "unclassified"
+
+	WorkRelationWork      WorkRelation = "work"
+	WorkRelationNonWork   WorkRelation = "non_work"
+	WorkRelationUncertain WorkRelation = "uncertain"
+
+	SourceExplicitMetadata = "explicit_metadata"
+	SourceLocalRule        = "local_rule"
+	SourceUnclassified     = "unclassified"
+
+	ClassifierVersion = "work-content-rules-v1"
+)
+
+var validCategories = map[Category]struct{}{
+	CategoryCoding:        {},
+	CategoryDocumentation: {},
+	CategoryAnalysis:      {},
+	CategoryOperations:    {},
+	CategoryCommunication: {},
+	CategoryLearning:      {},
+	CategoryOther:         {},
+	CategoryNonWork:       {},
+	CategoryUnclassified:  {},
+}
+
+// Input is intentionally excluded from JSON and safe logging. TransientText must
+// only exist for the duration of Classify and must never be stored by callers.
+type Input struct {
+	Project             string        `json:"-"`
+	Repository          string        `json:"-"`
+	SubmissionType      string        `json:"-"`
+	ExplicitWorkRelated *WorkRelation `json:"-"`
+	ExplicitCategory    string        `json:"-"`
+	TransientText       string        `json:"-"`
+}
+
+func (Input) String() string   { return "<workclassifier.Input redacted>" }
+func (Input) GoString() string { return "<workclassifier.Input redacted>" }
+func (Input) LogValue() slog.Value {
+	return slog.StringValue("<workclassifier.Input redacted>")
+}
+
+type Result struct {
+	WorkRelated          WorkRelation `json:"work_related"`
+	Category             Category     `json:"category"`
+	Confidence           float64      `json:"confidence"`
+	ClassificationSource string       `json:"classification_source"`
+	ClassifierVersion    string       `json:"classifier_version"`
+}
+
+// Classify applies explicit metadata first, then local metadata rules, then
+// transient-text rules. Ambiguous or weak matches remain unclassified.
+func Classify(input Input) Result {
+	explicitRelation, hasExplicitRelation := normalizedExplicitRelation(input.ExplicitWorkRelated)
+	explicitCategory, hasExplicitCategory := NormalizeCategory(input.ExplicitCategory)
+	if hasExplicitCategory {
+		if explicitCategory == CategoryUnclassified {
+			if hasExplicitRelation {
+				return newResult(explicitRelation, CategoryUnclassified, 0.60, SourceExplicitMetadata)
+			}
+			return newResult(WorkRelationUncertain, CategoryUnclassified, 0.50, SourceExplicitMetadata)
+		}
+		impliedRelation := relationForCategory(explicitCategory)
+		if hasExplicitRelation && explicitRelation != WorkRelationUncertain && explicitRelation != impliedRelation {
+			return newResult(WorkRelationUncertain, CategoryUnclassified, 0.50, SourceExplicitMetadata)
+		}
+		return newResult(impliedRelation, explicitCategory, 0.78, SourceExplicitMetadata)
+	}
+
+	if hasExplicitRelation && explicitRelation == WorkRelationNonWork {
+		return newResult(WorkRelationNonWork, CategoryNonWork, 0.78, SourceExplicitMetadata)
+	}
+
+	category, confidence, ok := classifyMetadata(input)
+	if ok {
+		inferredRelation := relationForCategory(category)
+		if hasExplicitRelation && explicitRelation != WorkRelationUncertain && explicitRelation != inferredRelation {
+			return newResult(WorkRelationUncertain, CategoryUnclassified, 0.50, SourceExplicitMetadata)
+		}
+		return newResult(inferredRelation, category, confidence, SourceLocalRule)
+	}
+
+	category, confidence, ok = classifyText(input.TransientText)
+	if ok {
+		inferredRelation := relationForCategory(category)
+		if hasExplicitRelation && explicitRelation != WorkRelationUncertain && explicitRelation != inferredRelation {
+			return newResult(WorkRelationUncertain, CategoryUnclassified, 0.50, SourceExplicitMetadata)
+		}
+		return newResult(inferredRelation, category, confidence, SourceLocalRule)
+	}
+
+	if hasExplicitRelation {
+		return newResult(explicitRelation, CategoryUnclassified, 0.60, SourceExplicitMetadata)
+	}
+	return newResult(WorkRelationUncertain, CategoryUnclassified, 0.30, SourceUnclassified)
+}
+
+func newResult(workRelated WorkRelation, category Category, confidence float64, source string) Result {
+	if !IsValidCategory(category) {
+		category = CategoryUnclassified
+	}
+	switch category {
+	case CategoryUnclassified:
+		workRelated = WorkRelationUncertain
+	case CategoryNonWork:
+		workRelated = WorkRelationNonWork
+	default:
+		workRelated = WorkRelationWork
+	}
+	return Result{
+		WorkRelated:          workRelated,
+		Category:             category,
+		Confidence:           math.Round(clamp(confidence, 0, 1)*100) / 100,
+		ClassificationSource: source,
+		ClassifierVersion:    ClassifierVersion,
+	}
+}
+
+func relationForCategory(category Category) WorkRelation {
+	if category == CategoryNonWork {
+		return WorkRelationNonWork
+	}
+	if category == CategoryUnclassified {
+		return WorkRelationUncertain
+	}
+	return WorkRelationWork
+}
+
+func normalizedExplicitRelation(value *WorkRelation) (WorkRelation, bool) {
+	if value == nil {
+		return "", false
+	}
+	return NormalizeWorkRelation(string(*value))
+}
+
+func IsValidCategory(category Category) bool {
+	_, ok := validCategories[category]
+	return ok
+}
+
+func NormalizeCategory(value string) (Category, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+	if normalized == "analysis" {
+		normalized = string(CategoryAnalysis)
+	}
+	category := Category(normalized)
+	return category, IsValidCategory(category)
+}
+
+func NormalizeWorkRelation(value string) (WorkRelation, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on", "work", "work_related":
+		return WorkRelationWork, true
+	case "0", "false", "no", "off", "non_work", "non-work":
+		return WorkRelationNonWork, true
+	case "uncertain", "unknown", "unclassified":
+		return WorkRelationUncertain, true
+	default:
+		return "", false
+	}
+}
+
+func clamp(value, minValue, maxValue float64) float64 {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}

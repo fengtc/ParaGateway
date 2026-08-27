@@ -146,6 +146,146 @@ func TestPromptAuditMutationAuditRoutesHaveStableActionsAndOmitBodies(t *testing
 	}
 }
 
+func TestWorkDistributionSensitiveReadsAreAudited(t *testing.T) {
+	expected := map[string]string{
+		"GET /api/v1/admin/work-distribution/summary": "admin.work_distribution.summary.read",
+		"GET /api/v1/admin/work-distribution/records": "admin.work_distribution.records.read",
+		"GET /api/v1/admin/work-distribution/reviews": "admin.work_distribution.reviews.read",
+	}
+	for route, action := range expected {
+		require.Equal(t, action, auditSensitiveReads[route])
+		require.Contains(t, auditQueryOmittedRoutes, route)
+	}
+}
+
+func TestWorkDistributionSensitiveReadsDoNotPersistQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+		c.Set(string(ContextKeyUserRole), "admin")
+		c.Set(ContextKeyAuthEmail, "admin@example.test")
+		c.Next()
+	})
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	handler := func(c *gin.Context) {
+		require.Equal(t, "audit-canary-prompt", c.Query("department"))
+		require.Equal(t, "audit-canary-source-token", c.Query("role"))
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
+	routes := []string{
+		"/api/v1/admin/work-distribution/summary",
+		"/api/v1/admin/work-distribution/records",
+		"/api/v1/admin/work-distribution/reviews",
+	}
+	for _, route := range routes {
+		router.GET(route, handler)
+	}
+	for _, route := range routes {
+		request := httptest.NewRequest(http.MethodGet, route+"?department=audit-canary-prompt&role=audit-canary-source-token", nil)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		require.Equal(t, http.StatusOK, recorder.Code)
+	}
+	auditService.Stop()
+
+	repository.mu.Lock()
+	logs := append([]*service.AuditLog(nil), repository.logs...)
+	repository.mu.Unlock()
+	require.Len(t, logs, len(routes))
+	byPath := make(map[string]*service.AuditLog, len(logs))
+	for _, entry := range logs {
+		byPath[entry.Path] = entry
+	}
+	for _, route := range routes {
+		entry := byPath[route]
+		require.NotNil(t, entry)
+		require.NotEmpty(t, entry.Action)
+		require.NotNil(t, entry.ActorUserID)
+		require.Equal(t, int64(77), *entry.ActorUserID)
+		require.Equal(t, "admin", entry.ActorRole)
+		require.Equal(t, http.StatusOK, entry.StatusCode)
+		require.Empty(t, entry.RequestBody)
+		require.Empty(t, entry.Extra)
+	}
+}
+
+func TestWorkClassificationMutationRoutesDoNotPersistAuditBodies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repository := &auditCaptureRepository{}
+	auditService := service.NewAuditLogService(repository, nil)
+	auditService.Start()
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(string(ContextKeyUser), AuthSubject{UserID: 77})
+		c.Set(string(ContextKeyUserRole), "admin")
+		c.Set(ContextKeyAuthEmail, "admin@example.test")
+		c.Next()
+	})
+	router.Use(gin.HandlerFunc(NewAuditLogMiddleware(auditService)))
+	handler := func(c *gin.Context) {
+		var payload map[string]any
+		require.NoError(t, c.ShouldBindJSON(&payload))
+		require.Equal(t, "audit-canary-prompt", payload["prompt"])
+		c.JSON(http.StatusAccepted, gin.H{"ok": true})
+	}
+	router.POST("/api/v1/usage/work-classifications/:usage_log_id/appeals", handler)
+	router.POST("/api/v1/admin/work-distribution/records/:usage_log_id/correction", handler)
+	router.POST("/api/v1/admin/work-distribution/reviews/:review_id/resolve", handler)
+
+	tests := []struct {
+		path       string
+		route      string
+		paramName  string
+		paramValue string
+	}{
+		{path: "/api/v1/usage/work-classifications/101/appeals", route: "POST /api/v1/usage/work-classifications/:usage_log_id/appeals", paramName: "usage_log_id", paramValue: "101"},
+		{path: "/api/v1/admin/work-distribution/records/202/correction", route: "POST /api/v1/admin/work-distribution/records/:usage_log_id/correction", paramName: "usage_log_id", paramValue: "202"},
+		{path: "/api/v1/admin/work-distribution/reviews/303/resolve", route: "POST /api/v1/admin/work-distribution/reviews/:review_id/resolve", paramName: "review_id", paramValue: "303"},
+	}
+	const canaryBody = `{"work_related":"work","category":"coding","reason_code":"other","prompt":"audit-canary-prompt","source_code":"audit-canary-source","note":"audit-canary-note","secret":"audit-canary-secret"}`
+	for _, tc := range tests {
+		require.Contains(t, auditBodyOmittedRoutes, tc.route)
+		require.Empty(t, auditBodyOmittedRoutes[tc.route])
+		request := httptest.NewRequest(http.MethodPost, tc.path, bytes.NewBufferString(canaryBody))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		require.Equal(t, http.StatusAccepted, recorder.Code)
+	}
+	auditService.Stop()
+
+	repository.mu.Lock()
+	logs := append([]*service.AuditLog(nil), repository.logs...)
+	repository.mu.Unlock()
+	require.Len(t, logs, len(tests))
+	byRoute := make(map[string]*service.AuditLog, len(logs))
+	for _, entry := range logs {
+		byRoute[entry.Method+" "+entry.Path] = entry
+	}
+	for _, tc := range tests {
+		entry := byRoute[tc.route]
+		require.NotNil(t, entry)
+		require.Empty(t, entry.RequestBody)
+		for _, canary := range []string{"audit-canary-prompt", "audit-canary-source", "audit-canary-note", "audit-canary-secret"} {
+			require.NotContains(t, entry.RequestBody, canary)
+		}
+		require.NotEmpty(t, entry.Action)
+		require.NotNil(t, entry.ActorUserID)
+		require.Equal(t, int64(77), *entry.ActorUserID)
+		require.Equal(t, "admin", entry.ActorRole)
+		require.Equal(t, http.StatusAccepted, entry.StatusCode)
+		params, ok := entry.Extra["params"].(map[string]string)
+		require.True(t, ok)
+		require.Equal(t, tc.paramValue, params[tc.paramName])
+	}
+}
+
 func TestPasskeyLoginAuditUsesCanonicalLoginActionAndOmitsCredentialBody(t *testing.T) {
 	route := "POST /api/v1/auth/passkey/login/finish"
 	require.Equal(t, service.AuditActionLogin, auditActionOverrides[route])
