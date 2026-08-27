@@ -138,9 +138,6 @@ type BatchImageJob struct {
 	RequestHash    *string
 	ManifestHash   *string
 	SessionID      *string
-	// WorkAttribution is a structured, normalized snapshot captured at submit
-	// time. It never contains prompt text or image content.
-	WorkAttribution *UsageWorkAttribution
 
 	RetryCount int
 	Version    int
@@ -197,11 +194,10 @@ type CreateBatchImageJobParams struct {
 	Currency                string
 	HoldID                  *string
 
-	IdempotencyKey  *string
-	RequestHash     *string
-	ManifestHash    *string
-	SessionID       *string
-	WorkAttribution *UsageWorkAttribution
+	IdempotencyKey *string
+	RequestHash    *string
+	ManifestHash   *string
+	SessionID      *string
 
 	RetryCount int
 

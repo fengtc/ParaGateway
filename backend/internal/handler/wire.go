@@ -198,11 +198,9 @@ func ProvideHandlers(
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
 	requestAuditService *requestaudit.Service,
-	workDistributionService *service.WorkDistributionService,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
-	usageHandler.SetWorkDistributionService(workDistributionService)
 	return &Handlers{
 		Auth:             authHandler,
 		User:             userHandler,

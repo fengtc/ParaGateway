@@ -29,8 +29,7 @@ func TestOpenAISubmitUsageRecordTaskCopiesRequestContext(t *testing.T) {
 	parent := context.WithValue(context.Background(), ctxkey.ClientRequestID, "openai-client-request-123")
 	parent = context.WithValue(parent, ctxkey.RequestID, "openai-request-456")
 	parent = service.WithUsageWorkAttribution(parent, service.UsageWorkAttribution{
-		ProjectRef: "paragateway", RepositoryRef: "fengtc/ParaGateway",
-		SubmissionType: "code", WorkRelated: service.WorkRelatedWork,
+		WorkRelated: service.WorkRelatedWork,
 		Category: service.WorkCategoryCoding, Confidence: 0.8,
 		ClassificationSource: "local_rule", ClassifierVersion: "rules-v1",
 	})
@@ -49,7 +48,5 @@ func TestOpenAISubmitUsageRecordTaskCopiesRequestContext(t *testing.T) {
 	require.Equal(t, "openai-client-request-123", gotClientRequestID)
 	require.Equal(t, "openai-request-456", gotRequestID)
 	require.True(t, gotAttributionOK)
-	require.Equal(t, "paragateway", gotAttribution.ProjectRef)
-	require.Equal(t, "coding", gotAttribution.SubmissionType)
 	require.Equal(t, service.WorkCategoryCoding, gotAttribution.Category)
 }

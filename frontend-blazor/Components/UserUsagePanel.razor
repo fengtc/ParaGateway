@@ -5,8 +5,6 @@
 @inject ToastService Toasts
 
 <div class="user-usage-page">
-    @if (activeTab != "work")
-    {
     <div class="usage-stats-grid" aria-label="用量汇总">
         <article class="usage-stat-card">
             <span class="usage-stat-icon blue"><Icon Name="file-text" Size="20" /></span>
@@ -143,16 +141,14 @@
             }
         </div>
     </section>
-    }
 
-    <div class="usage-tabs" role="tablist" aria-label="使用记录视图">
-        <button type="button" role="tab" aria-selected="@(activeTab == "usage")" class="@(activeTab == "usage" ? "active" : null)" @onclick="ShowUsageAsync">使用记录</button>
-        @if (errorViewEnabled)
-        {
+    @if (errorViewEnabled)
+    {
+        <div class="usage-tabs" role="tablist">
+            <button type="button" role="tab" aria-selected="@(activeTab == "usage")" class="@(activeTab == "usage" ? "active" : null)" @onclick="ShowUsageAsync">使用记录</button>
             <button type="button" role="tab" aria-selected="@(activeTab == "errors")" class="@(activeTab == "errors" ? "active" : null)" @onclick="ShowErrorsAsync">错误请求</button>
-        }
-        <button type="button" role="tab" aria-selected="@(activeTab == "work")" class="@(activeTab == "work" ? "active" : null)" @onclick="ShowWorkClassificationsAsync">工作分类</button>
-    </div>
+        </div>
+    }
 
     @if (activeTab == "usage")
     {
@@ -205,7 +201,7 @@
         </section>
         <UsagePagination Page="@logs.Page" PageSize="@logs.PageSize" Total="@logs.Total" Busy="@logsLoading" OnPage="GoUsagePageAsync" OnPageSize="UsagePageSizeChangedAsync" />
     }
-    else if (activeTab == "errors")
+    else
     {
         @if (!string.IsNullOrWhiteSpace(errorListError)) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@errorListError</span></div> }
         <section class="usage-card usage-table-card">
@@ -254,84 +250,6 @@
         </section>
         <UsagePagination Page="@errors.Page" PageSize="@errors.PageSize" Total="@errors.Total" Busy="@errorLoading" OnPage="GoErrorPageAsync" OnPageSize="ErrorPageSizeChangedAsync" />
     }
-    else
-    {
-        <section class="usage-card work-classification-card" aria-labelledby="work-classification-title">
-            <header class="work-classification-heading">
-                <div>
-                    <h2 id="work-classification-title">工作分类</h2>
-                    <p>仅显示项目、仓库、提交类型和分类结果，不显示密钥、提示词、请求正文或完整源代码。</p>
-                </div>
-                <button type="button" class="button secondary" disabled="@workClassificationsLoading" @onclick="LoadWorkClassificationsAsync">
-                    <Icon Name="refresh" Size="16" /> 刷新
-                </button>
-            </header>
-
-            <div class="work-classification-notice" role="note">
-                <Icon Name="shield-check" Size="18" />
-                <span>自动分类可能有误，分类比例不能作为唯一绩效依据。你可以对本人记录提交结构化申诉。</span>
-            </div>
-
-            @if (workClassificationsLoading)
-            {
-                <LoadingState Text="正在载入工作分类" />
-            }
-            else if (!string.IsNullOrWhiteSpace(workClassificationsError))
-            {
-                <div class="work-classification-state"><div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@workClassificationsError</span></div></div>
-            }
-            else if (workClassifications.Items.Count == 0)
-            {
-                <EmptyState Title="暂无工作分类" Description="完成 API 请求后，结构化分类结果会显示在这里。" />
-            }
-            else
-            {
-                <div class="usage-table-wrap work-classification-table-wrap">
-                    <table class="usage-detail-table work-classification-table">
-                        <thead>
-                            <tr>
-                                <th>时间</th>
-                                <th>项目 / 仓库</th>
-                                <th>提交类型</th>
-                                <th>工作属性</th>
-                                <th>分类</th>
-                                <th>权重</th>
-                                <th>置信度</th>
-                                <th>分类来源</th>
-                                <th>申诉状态</th>
-                                <th>操作</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var row in workClassifications.Items)
-                            {
-                                <tr @key="row.UsageLogId">
-                                    <td><time datetime="@row.CreatedAt.ToString("O")">@row.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</time></td>
-                                    <td class="work-metadata-cell">
-                                        <span title="@row.Metadata?.ProjectRef">@Display(row.Metadata?.ProjectRef)</span>
-                                        <small title="@row.Metadata?.RepositoryRef">@Display(row.Metadata?.RepositoryRef)</small>
-                                    </td>
-                                    <td>@Display(row.Metadata?.SubmissionType)</td>
-                                    <td><span class="tag @WorkRelatedClass(row.Classification?.WorkRelated)">@WorkDistributionLabels.WorkRelated(row.Classification?.WorkRelated)</span></td>
-                                    <td><span class="tag @WorkCategoryClass(row.Classification?.Category)">@WorkDistributionLabels.Category(row.Classification?.Category)</span></td>
-                                    <td title="该权重来自本条记录的 Token 数">@FormatInteger(row.Classification?.Weight ?? row.TotalTokens)</td>
-                                    <td>@FormatConfidence(row.Classification?.Confidence)</td>
-                                    <td class="work-source-cell"><span>@ClassificationSourceLabel(row.Classification?.ClassificationSource)</span>@if (!string.IsNullOrWhiteSpace(row.Classification?.ClassifierVersion)) { <small>@row.Classification.ClassifierVersion</small> }</td>
-                                    <td><span class="review-status @ReviewStatusClass(row.ReviewStatus)">@ReviewStatusLabel(row.ReviewStatus)</span></td>
-                                    <td>
-                                        <button type="button" class="button secondary compact" disabled="@IsAppealPending(row)" title="@(IsAppealPending(row) ? "已有待处理申诉" : "申请纠正分类")" @onclick="() => OpenAppeal(row)">
-                                            <Icon Name="message-circle" Size="15" /> @(IsAppealPending(row) ? "待处理" : "申诉")
-                                        </button>
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
-        </section>
-        <UsagePagination Page="@workClassifications.Page" PageSize="@workClassifications.PageSize" Total="@workClassifications.Total" Busy="@workClassificationsLoading" OnPage="GoWorkClassificationPageAsync" OnPageSize="WorkClassificationPageSizeChangedAsync" />
-    }
 </div>
 
 <AppModal Open="@(detailId is not null)" Title="错误请求详情" MaxWidth="820px" OnClose="CloseErrorDetail">
@@ -356,58 +274,6 @@
     <Footer><button type="button" class="button secondary" @onclick="CloseErrorDetail">关闭</button></Footer>
 </AppModal>
 
-<AppModal Open="@(appealTarget is not null)" Title="提交分类申诉" MaxWidth="620px" OnClose="CloseAppeal">
-    <ChildContent>
-        @if (appealTarget is not null)
-        {
-            <div class="appeal-summary">
-                <div><small>记录时间</small><strong>@appealTarget.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</strong></div>
-                <div><small>当前分类</small><strong>@WorkDistributionLabels.WorkRelated(appealTarget.Classification?.WorkRelated) / @WorkDistributionLabels.Category(appealTarget.Classification?.Category)</strong></div>
-            </div>
-            <div class="work-classification-notice compact" role="note">
-                <Icon Name="info" Size="17" />
-                <span>申诉只提交以下结构化选项，不会附带提示词、请求正文或源代码。</span>
-            </div>
-            @if (!string.IsNullOrWhiteSpace(appealError))
-            {
-                <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@appealError</span></div>
-            }
-            <div class="appeal-form-grid">
-                <div class="usage-filter-field">
-                    <label for="appeal-work-related">工作属性</label>
-                    <select id="appeal-work-related" value="@appealRequest.WorkRelated" disabled="@appealSubmitting" @onchange="AppealWorkRelatedChanged">
-                        <option value="work">工作相关</option>
-                        <option value="non_work">非工作</option>
-                        <option value="uncertain">不确定</option>
-                    </select>
-                </div>
-                <div class="usage-filter-field">
-                    <label for="appeal-category">建议分类</label>
-                    <select id="appeal-category" value="@appealRequest.Category" disabled="@(appealSubmitting || appealRequest.WorkRelated != "work")" @onchange="AppealCategoryChanged">
-                        @foreach (var option in AppealCategoryOptions)
-                        {
-                            <option value="@option.Key">@option.Value</option>
-                        }
-                    </select>
-                </div>
-                <div class="usage-filter-field appeal-reason-field">
-                    <label for="appeal-reason">申诉原因</label>
-                    <select id="appeal-reason" value="@appealRequest.ReasonCode" disabled="@appealSubmitting" @onchange="AppealReasonChanged">
-                        @foreach (var option in AppealReasonOptions)
-                        {
-                            <option value="@option.Key">@option.Value</option>
-                        }
-                    </select>
-                </div>
-            </div>
-        }
-    </ChildContent>
-    <Footer>
-        <button type="button" class="button secondary" disabled="@appealSubmitting" @onclick="CloseAppeal">取消</button>
-        <button type="button" class="button primary" disabled="@(appealSubmitting || appealTarget is null)" @onclick="SubmitAppealAsync">@(appealSubmitting ? "正在提交" : "提交申诉")</button>
-    </Footer>
-</AppModal>
-
 @code {
     private const string UsageHiddenColumnsKey = "user-usage-hidden-columns";
     private const string ErrorHiddenColumnsKey = "user-usage-error-hidden-columns";
@@ -430,26 +296,6 @@
         ["service_unavailable"] = "服务不可用", ["upstream"] = "上游错误", ["internal"] = "内部错误", ["cyber"] = "内容策略", ["other"] = "其他"
     };
     private static readonly int[] CommonErrorStatusCodes = [400, 401, 403, 404, 408, 409, 422, 429, 500, 502, 503, 504];
-    private static readonly IReadOnlyDictionary<string, string> WorkCategoryOptions = new Dictionary<string, string>
-    {
-        ["coding"] = "编码", ["documentation"] = "文档", ["data_analysis"] = "数据分析", ["operations"] = "运维",
-        ["communication"] = "沟通协作", ["learning"] = "学习研究", ["other"] = "其他工作",
-        ["non_work"] = "非工作", ["unclassified"] = "未分类"
-    };
-    private static readonly IReadOnlyDictionary<string, string> WorkOnlyCategoryOptions = new Dictionary<string, string>
-    {
-        ["coding"] = "编码", ["documentation"] = "文档", ["data_analysis"] = "数据分析", ["operations"] = "运维",
-        ["communication"] = "沟通协作", ["learning"] = "学习研究", ["other"] = "其他工作"
-    };
-    private static readonly IReadOnlyDictionary<string, string> NonWorkCategoryOption = new Dictionary<string, string> { ["non_work"] = "非工作" };
-    private static readonly IReadOnlyDictionary<string, string> UncertainCategoryOption = new Dictionary<string, string> { ["unclassified"] = "未分类" };
-    private static readonly IReadOnlyDictionary<string, string> AppealReasonOptions = new Dictionary<string, string>
-    {
-        ["incorrect_category"] = "工作类别不正确",
-        ["incorrect_work_relation"] = "工作属性不正确",
-        ["missing_classification"] = "缺少分类",
-        ["other"] = "其他结构化原因"
-    };
 
     private readonly HashSet<string> hiddenUsageColumns = ["user_agent"];
     private readonly HashSet<string> hiddenErrorColumns = ["user_agent"];
@@ -457,13 +303,10 @@
     private List<GoGroup> groups = [];
     private PagedEnvelope<GoUsageLog> logs = new();
     private PagedEnvelope<UserErrorRequestDto> errors = new();
-    private PagedEnvelope<UserWorkClassificationDto> workClassifications = new();
-    private UserWorkClassificationAppealRequestDto appealRequest = new();
     private UserUsageStatsDto? stats;
     private UserUsageModelsResponseDto modelsResponse = new();
     private UserUsageSnapshotDto snapshot = new();
     private UserErrorRequestDetailDto? errorDetail;
-    private UserWorkClassificationDto? appealTarget;
     private DateTime startDate = DateTime.Today.AddDays(-1);
     private DateTime endDate = DateTime.Today;
     private string granularity = "hour";
@@ -488,8 +331,6 @@
     private string? logsError;
     private string? errorListError;
     private string? detailError;
-    private string? workClassificationsError;
-    private string? appealError;
     private long? detailId;
     private bool errorViewEnabled;
     private bool logsLoading = true;
@@ -498,20 +339,10 @@
     private bool chartsLoading = true;
     private bool errorLoading;
     private bool detailLoading;
-    private bool workClassificationsLoading;
-    private bool workClassificationsLoaded;
-    private bool appealSubmitting;
-    private IReadOnlyDictionary<string, string> AppealCategoryOptions => appealRequest.WorkRelated switch
-    {
-        "non_work" => NonWorkCategoryOption,
-        "uncertain" => UncertainCategoryOption,
-        _ => WorkOnlyCategoryOptions
-    };
     private bool exporting;
     private bool showColumnMenu;
     private int usagePageSize = 20;
     private int errorPageSize = 20;
-    private int workClassificationPageSize = 20;
 
     private IReadOnlyList<UserUsageModelStatDto> ModelRows => modelsResponse.Models.OrderByDescending(item => item.TotalTokens).ToList();
     private IReadOnlyList<UserUsageGroupStatDto> GroupRows => snapshot.Groups.OrderByDescending(item => item.TotalTokens).ToList();
@@ -592,28 +423,6 @@
         finally { errorLoading = false; }
     }
 
-    private async Task LoadWorkClassificationsAsync()
-    {
-        workClassificationsLoading = true;
-        workClassificationsError = null;
-        try
-        {
-            workClassifications = await Api.GetMyWorkClassificationsAsync(
-                workClassifications.Page <= 0 ? 1 : workClassifications.Page,
-                workClassificationPageSize);
-        }
-        catch (ApiException ex)
-        {
-            workClassificationsError = ex.Message;
-            workClassifications = new PagedEnvelope<UserWorkClassificationDto> { Page = 1, PageSize = workClassificationPageSize };
-        }
-        finally
-        {
-            workClassificationsLoaded = true;
-            workClassificationsLoading = false;
-        }
-    }
-
     private UserUsageQuery BuildUsageQuery(int page, int pageSize) => new()
     {
         Page = page, PageSize = pageSize, ApiKeyId = ParseLong(apiKeyId), GroupId = ParseLong(groupId), Model = model,
@@ -659,12 +468,6 @@
     private async Task ErrorStatusChangedAsync(ChangeEventArgs e) { errorStatusCode = e.Value?.ToString() ?? string.Empty; await ApplyErrorFiltersAsync(); }
     private Task ShowUsageAsync() { activeTab = "usage"; showColumnMenu = false; return Task.CompletedTask; }
     private async Task ShowErrorsAsync() { activeTab = "errors"; showColumnMenu = false; if (errors.Items.Count == 0) await LoadErrorsAsync(); }
-    private async Task ShowWorkClassificationsAsync()
-    {
-        activeTab = "work";
-        showColumnMenu = false;
-        if (!workClassificationsLoaded) await LoadWorkClassificationsAsync();
-    }
 
     private async Task ChangeUsageSortAsync(string key) { if (usageSortBy == key) usageSortOrder = usageSortOrder == "asc" ? "desc" : "asc"; else { usageSortBy = key; usageSortOrder = "asc"; } logs.Page = 1; await LoadLogsAsync(); }
     private async Task ChangeErrorSortAsync(string key) { if (errorSortBy == key) errorSortOrder = errorSortOrder == "asc" ? "desc" : "asc"; else { errorSortBy = key; errorSortOrder = "asc"; } errors.Page = 1; await LoadErrorsAsync(); }
@@ -673,8 +476,6 @@
     private async Task UsagePageSizeChangedAsync(int size) { usagePageSize = Math.Clamp(size, 1, 100); logs.Page = 1; await LoadLogsAsync(); }
     private async Task GoErrorPageAsync(int target) { errors.Page = Math.Max(1, target); await LoadErrorsAsync(); }
     private async Task ErrorPageSizeChangedAsync(int size) { errorPageSize = Math.Clamp(size, 1, 100); errors.Page = 1; await LoadErrorsAsync(); }
-    private async Task GoWorkClassificationPageAsync(int target) { workClassifications.Page = Math.Max(1, target); await LoadWorkClassificationsAsync(); }
-    private async Task WorkClassificationPageSizeChangedAsync(int size) { workClassificationPageSize = Math.Clamp(size, 1, 100); workClassifications.Page = 1; await LoadWorkClassificationsAsync(); }
 
     private void ToggleColumnMenu() => showColumnMenu = !showColumnMenu;
     private bool IsUsageColumnVisible(string key) => !hiddenUsageColumns.Contains(key);
@@ -764,105 +565,6 @@
 
     private void CloseErrorDetail() { detailId = null; errorDetail = null; detailError = null; }
 
-    private void OpenAppeal(UserWorkClassificationDto row)
-    {
-        if (IsAppealPending(row)) return;
-        appealTarget = row;
-        appealError = null;
-
-        var workRelated = row.Classification?.WorkRelated?.Trim().ToLowerInvariant();
-        if (workRelated is not ("work" or "non_work" or "uncertain")) workRelated = "uncertain";
-        var category = row.Classification?.Category?.Trim().ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(category) || !WorkCategoryOptions.ContainsKey(category)) category = "unclassified";
-        appealRequest = new UserWorkClassificationAppealRequestDto
-        {
-            WorkRelated = workRelated,
-            Category = category,
-            ReasonCode = row.Classification is null ? "missing_classification" : "incorrect_category"
-        };
-        NormalizeAppealSelection();
-    }
-
-    private void CloseAppeal()
-    {
-        if (appealSubmitting) return;
-        appealTarget = null;
-        appealError = null;
-        appealRequest = new();
-    }
-
-    private void AppealWorkRelatedChanged(ChangeEventArgs e)
-    {
-        appealRequest.WorkRelated = e.Value?.ToString() ?? "uncertain";
-        NormalizeAppealSelection();
-    }
-
-    private void AppealCategoryChanged(ChangeEventArgs e)
-    {
-        appealRequest.Category = e.Value?.ToString() ?? "unclassified";
-        if (appealRequest.Category == "unclassified") appealRequest.WorkRelated = "uncertain";
-        else if (appealRequest.Category == "non_work") appealRequest.WorkRelated = "non_work";
-        else if (appealRequest.WorkRelated == "non_work") appealRequest.WorkRelated = "work";
-    }
-
-    private void AppealReasonChanged(ChangeEventArgs e) => appealRequest.ReasonCode = e.Value?.ToString() ?? "other";
-
-    private void NormalizeAppealSelection()
-    {
-        appealRequest.WorkRelated = appealRequest.WorkRelated?.Trim().ToLowerInvariant() switch
-        {
-            "non_work" => "non_work",
-            "uncertain" => "uncertain",
-            _ => "work"
-        };
-        appealRequest.Category = appealRequest.WorkRelated switch
-        {
-            "non_work" => "non_work",
-            "uncertain" => "unclassified",
-            _ when WorkOnlyCategoryOptions.ContainsKey(appealRequest.Category) => appealRequest.Category,
-            _ => "coding"
-        };
-    }
-
-    private static bool IsValidAppealPair(string workRelated, string category) => workRelated switch
-    {
-        "non_work" => category == "non_work",
-        "uncertain" => category == "unclassified",
-        "work" => WorkOnlyCategoryOptions.ContainsKey(category),
-        _ => false
-    };
-
-    private async Task SubmitAppealAsync()
-    {
-        if (appealTarget is null || appealSubmitting) return;
-        NormalizeAppealSelection();
-        if (!IsValidAppealPair(appealRequest.WorkRelated, appealRequest.Category)
-            || !AppealReasonOptions.ContainsKey(appealRequest.ReasonCode))
-        {
-            appealError = "请选择有效的工作属性、分类和申诉原因。";
-            return;
-        }
-
-        appealSubmitting = true;
-        appealError = null;
-        try
-        {
-            await Api.CreateMyWorkClassificationAppealAsync(appealTarget.UsageLogId, appealRequest);
-            Toasts.Success("分类申诉已提交，等待管理员处理");
-            appealTarget = null;
-            appealRequest = new();
-            await LoadWorkClassificationsAsync();
-        }
-        catch (ApiException ex)
-        {
-            appealError = ex.Message;
-        }
-        finally
-        {
-            appealSubmitting = false;
-        }
-    }
-
     private RenderFragment TokenCell(GoUsageLog row) => builder =>
     {
         if (row.ImageCount > 0 && BillingModeValue(row) is "image" or "per_request")
@@ -899,13 +601,6 @@
     private static string BillingModeClass(GoUsageLog row) => BillingModeValue(row) switch { "per_request" => "amber", "image" => "violet", "video" => "rose", _ => "green" };
     private static string ReasoningLabel(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value.Trim().ToLowerInvariant() switch { "low" => "Low", "medium" => "Medium", "high" => "High", "xhigh" => "XHigh", "max" => "Max", _ => value };
     private static string ErrorCategoryLabel(string value) => ErrorCategories.TryGetValue(value ?? string.Empty, out var label) ? label : "其他";
-    private static bool IsAppealPending(UserWorkClassificationDto row) => string.Equals(row.ReviewStatus, "pending", StringComparison.OrdinalIgnoreCase);
-    private static string ReviewStatusLabel(string? value) => value?.Trim().ToLowerInvariant() switch { "pending" => "待处理", "approved" => "已采纳", "rejected" => "未采纳", _ => "未申诉" };
-    private static string ReviewStatusClass(string? value) => value?.Trim().ToLowerInvariant() switch { "pending" => "pending", "approved" => "approved", "rejected" => "rejected", _ => "none" };
-    private static string ClassificationSourceLabel(string? value) => value?.Trim().ToLowerInvariant() switch { "explicit_metadata" => "显式元数据", "local_rule" => "本地规则", "manual_review" => "人工复核", "unclassified" or null or "" => "未分类", _ => value.Trim() };
-    private static string WorkRelatedClass(string? value) => value?.Trim().ToLowerInvariant() switch { "work" => "green", "non_work" => "gray", _ => "amber" };
-    private static string WorkCategoryClass(string? value) => value?.Trim().ToLowerInvariant() switch { "coding" => "indigo", "documentation" => "blue", "data_analysis" => "violet", "operations" => "amber", "non_work" => "gray", _ => "green" };
-    private static string FormatConfidence(double? value) => value.HasValue ? Math.Clamp(value.Value, 0, 1).ToString("P0", CultureInfo.InvariantCulture) : "-";
     private static string StatusClass(int code) => code >= 500 ? "danger" : code == 429 ? "warning" : "neutral";
     private static long? ParseLong(string value) => long.TryParse(value, out var parsed) ? parsed : null;
     private static int? ParseInt(string value) => int.TryParse(value, out var parsed) ? parsed : null;

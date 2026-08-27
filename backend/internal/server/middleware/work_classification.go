@@ -46,15 +46,12 @@ func WorkClassification() gin.HandlerFunc {
 			return
 		}
 
-		input := workclassifier.InputFromHeaders(c.Request.Header)
+		input := workclassifier.Input{}
 		if shouldInspectWorkClassificationBody(c.Request) {
 			input.TransientText = readTransientWorkText(c.Request)
 		}
 		result := workclassifier.Classify(input)
 		attribution := service.UsageWorkAttribution{
-			ProjectRef:           input.Project,
-			RepositoryRef:        input.Repository,
-			SubmissionType:       input.SubmissionType,
 			WorkRelated:          string(result.WorkRelated),
 			Category:             string(result.Category),
 			Confidence:           result.Confidence,

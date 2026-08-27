@@ -1,377 +1,107 @@
 @page "/admin/work-distribution"
 @using System.Globalization
 @inject ApiClient Api
-@inject ToastService Toasts
 
 <PageTitle>工作内容分析 · ParaGateway</PageTitle>
 
-<div class="work-distribution-page">
-    <section class="analysis-toolbar" aria-label="工作分布筛选">
-        <div class="filter-grid">
-            <label><span>人员</span><select value="@SelectedUserValue" @onchange="UserChanged"><option value="">全部人员</option>@foreach (var person in people.OrderBy(x => x.Email, StringComparer.OrdinalIgnoreCase)) { <option value="@person.UserId">@PersonName(person)</option> }</select></label>
-            <label><span>部门</span><select value="@department" @onchange="DepartmentChanged"><option value="">全部部门</option>@foreach (var item in departments.OrderBy(x => x, StringComparer.OrdinalIgnoreCase)) { <option value="@item">@DepartmentLabel(item)</option> }</select></label>
-            <label><span>岗位角色</span><select value="@role" @onchange="RoleChanged"><option value="">全部岗位</option>@foreach (var item in roles.OrderBy(RoleLabel, StringComparer.OrdinalIgnoreCase)) { <option value="@item">@RoleLabel(item)</option> }</select></label>
-            <label><span>开始日期</span><input type="date" value="@StartDateValue" @onchange="StartDateChanged" /></label>
-            <label><span>结束日期</span><input type="date" value="@EndDateValue" @onchange="EndDateChanged" /></label>
-            <div class="metric-filter"><span>统计口径</span><div class="segmented-control compact" role="group" aria-label="统计口径"><button type="button" class="@(metric == "requests" ? "active" : null)" @onclick="UseRequestMetricAsync">提交次数（AI 请求）</button><button type="button" class="@(metric == "tokens" ? "active" : null)" @onclick="UseTokenMetricAsync">工作量（Token）</button></div></div>
-        </div>
-        <div class="toolbar-actions">
-            <button type="button" class="button secondary" disabled="@loading" @onclick="ResetFiltersAsync"><Icon Name="rotate-ccw" Size="16" />重置</button>
-            <button type="button" class="button primary" disabled="@loading" @onclick="ApplyFiltersAsync"><Icon Name="filter" Size="16" />应用筛选</button>
-        </div>
+<div class="work-page">
+    <section class="work-filters" aria-label="工作内容筛选">
+        <label><span>人员</span><select value="@SelectedUser" @onchange="UserChanged"><option value="">全部人员</option>@foreach (var item in people.OrderBy(x => x.Email)) { <option value="@item.UserId">@item.Email</option> }</select></label>
+        <label><span>部门</span><select value="@department" @onchange="e => department = e.Value?.ToString() ?? string.Empty"><option value="">全部部门</option>@foreach (var item in departments.Order()) { <option value="@item">@Label(item)</option> }</select></label>
+        <label><span>岗位角色</span><select value="@role" @onchange="e => role = e.Value?.ToString() ?? string.Empty"><option value="">全部岗位</option>@foreach (var item in roles.Order()) { <option value="@item">@Label(item)</option> }</select></label>
+        <label><span>开始日期</span><input type="date" value="@startDate" @onchange="e => startDate = e.Value?.ToString() ?? startDate" /></label>
+        <label><span>结束日期</span><input type="date" value="@endDate" @onchange="e => endDate = e.Value?.ToString() ?? endDate" /></label>
+        <div class="work-actions"><div class="metric-switch"><button class="@(metric == "requests" ? "active" : null)" @onclick='() => SetMetricAsync("requests")'>提交次数</button><button class="@(metric == "tokens" ? "active" : null)" @onclick='() => SetMetricAsync("tokens")'>工作量</button></div><button class="button primary" disabled="@loading" @onclick="LoadAsync"><Icon Name="filter" Size="16" />应用</button></div>
     </section>
 
-    @if (!string.IsNullOrWhiteSpace(validationError))
-    {
-        <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@validationError</span></div>
-    }
-
-    @if (loading && summary is null)
-    {
-        <LoadingState Text="正在载入工作内容分析" />
-    }
-    else if (!string.IsNullOrWhiteSpace(summaryError) && summary is null)
-    {
-        <ErrorState Message="@summaryError" OnRetry="LoadAllAsync" />
-    }
+    @if (loading && summary is null) { <LoadingState Text="正在载入工作内容分析" /> }
+    else if (!string.IsNullOrWhiteSpace(error) && summary is null) { <ErrorState Message="@error" OnRetry="LoadAsync" /> }
     else if (summary is not null)
     {
-        @if (!string.IsNullOrWhiteSpace(summaryError))
-        {
-            <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@summaryError</span><button type="button" class="text-button" @onclick="LoadSummaryAsync">重试</button></div>
-        }
-
-        @if (summary.Coverage.TotalRequests > 0 && summary.Coverage.ClassifiedRequests == 0)
-        {
-            <div class="collection-notice" role="status"><Icon Name="info" Size="19" /><div><strong>历史数据尚未分类</strong><span>所选范围已有 AI 请求，但分类覆盖率为 0。页面只显示真实的“未分类 / 不确定”数据，不推断编码或文档比例。</span></div></div>
-        }
-        else if (summary.Coverage.TotalRequests > 0 && summary.Coverage.ClassifiedPercent < 80)
-        {
-            <div class="collection-notice" role="status"><Icon Name="info" Size="19" /><div><strong>分类覆盖率偏低</strong><span>当前只有 @Percent(summary.Coverage.ClassifiedPercent) 的 AI 请求已分类，解读工作类别占比时应同时查看未分类样本。</span></div></div>
-        }
-
-        <section class="summary-grid" aria-label="分类摘要">
-            <article><span class="summary-icon neutral"><Icon Name="list" Size="18" /></span><div><small>AI 请求样本</small><strong>@Number(summary.Coverage.TotalRequests)</strong><span>@DateRangeLabel</span></div></article>
-            <article><span class="summary-icon success"><Icon Name="circle-check" Size="18" /></span><div><small>已分类</small><strong>@Number(summary.Coverage.ClassifiedRequests)</strong><span>未分类 @Number(summary.Coverage.UnclassifiedRequests)</span></div></article>
-            <article><span class="summary-icon blue"><Icon Name="percent" Size="18" /></span><div><small>分类覆盖率</small><strong>@Percent(summary.Coverage.ClassifiedPercent)</strong><span>@CoverageStatus</span></div></article>
-            <article><span class="summary-icon amber"><Icon Name="shield" Size="18" /></span><div><small>平均置信度</small><strong>@ConfidenceLabel(summary.AverageConfidence)</strong><span>@Number(summary.ConfidenceSampleCount) 个置信度样本</span></div></article>
+        <section class="work-kpis">
+            <article><small>样本数</small><strong>@Number(summary.Coverage.TotalRequests)</strong></article>
+            <article><small>工作相关占比</small><strong>@Percent(WorkShare)</strong></article>
+            <article><small>分类覆盖率</small><strong>@Percent(summary.Coverage.ClassifiedPercent)</strong></article>
+            <article><small>平均置信度</small><strong>@Confidence(summary.AverageConfidence)</strong><span>@Number(summary.ConfidenceSampleCount) 个样本</span></article>
         </section>
 
-        <section class="quality-strip" aria-label="数据质量与隐私说明">
-            <div><Icon Name="shield" Size="17" /><span><strong>低样本隐私状态</strong><small>每人至少 @Number(summary.Privacy.MinSampleSize) 条样本，且所在部门至少 @Number(summary.Privacy.MinCohortSize) 人，才展示个人分布；本次隐藏 @summary.Privacy.SuppressedUsers 人。</small></span></div>
-            <div><Icon Name="activity" Size="17" /><span><strong>覆盖情况</strong><small>@CoverageExplanation</small></span></div>
-            <div><Icon Name="search" Size="17" /><span><strong>分类依据</strong><small>优先使用受管元数据，并由本地规则分析瞬时脱敏上下文；不保存提示词、请求正文或完整源代码。</small></span></div>
-            <div><Icon Name="info" Size="17" /><span><strong>判断边界</strong><small>分类比例用于观察工作内容分布，不应作为单一绩效依据。</small></span></div>
+        <section class="work-panel">
+            <header><div><h2>工作相关占比</h2><p>工作相关、非工作和不确定样本</p></div></header>
+            <div class="chart-list"><article><div class="chart-label"><strong>全部样本</strong><small>@Number(summary.Coverage.TotalRequests) 次</small></div><div class="stacked-chart">@foreach (var segment in RelationSegments) { <span style="@SegmentStyle(segment)" title="@SegmentTitle(segment)"></span> }</div></article></div>
         </section>
 
-        <div class="analysis-tabs" role="tablist" aria-label="工作内容分析视图">
-            <button type="button" role="tab" aria-selected="@(activeTab == "overview")" class="@(activeTab == "overview" ? "active" : null)" @onclick="ShowOverview">分布概览</button>
-            <button type="button" role="tab" aria-selected="@(activeTab == "details")" class="@(activeTab == "details" ? "active" : null)" @onclick="ShowDetailsAsync">分类明细</button>
-            <button type="button" role="tab" aria-selected="@(activeTab == "appeals")" class="@(activeTab == "appeals" ? "active" : null)" @onclick="ShowAppealsAsync">申诉审核</button>
-        </div>
+        <section class="work-panel">
+            <header><div><h2>工作内容分布</h2><p>编码、文档、分析/运维及不确定占比</p></div></header>
+            <div class="work-legend">@foreach (var item in Legend) { <span><i style="background:@item.Color"></i>@item.Label</span> }</div>
+            <div class="chart-list">
+                <article><div class="chart-label"><strong>全部人员</strong><small>@SummaryMeta(summary.Coverage.TotalRequests, summary.AverageConfidence)</small></div><div class="stacked-chart">@foreach (var segment in BuildSegments(summary.Categories)) { <span style="@SegmentStyle(segment)" title="@SegmentTitle(segment)"></span> }</div></article>
+                @foreach (var item in summary.Users) { <article><div class="chart-label"><strong>@item.Email</strong><small>@Label(item.Department) · @Label(item.Role) · @SummaryMeta(item.Requests, item.AverageConfidence)</small></div><div class="stacked-chart">@foreach (var segment in BuildSegments(item.Categories)) { <span style="@SegmentStyle(segment)" title="@SegmentTitle(segment)"></span> }</div></article> }
+            </div>
+        </section>
 
-        @if (activeTab == "overview")
-        {
-            <section class="distribution-section">
-                <header><div><h2>工作相关性</h2><p>独立统计工作相关、非工作和不确定样本；当前口径：@MetricLabel。</p></div><span class="data-status @DataStatusTone">@DataStatusLabel</span></header>
-                @if (RelationSegments.Count == 0)
-                {
-                    <EmptyState Title="暂无工作相关性数据" Description="当前筛选范围没有可统计的 AI 请求样本。" />
-                }
-                else
-                {
-                    <div class="overall-distribution"><div class="bar-label"><strong>全部样本</strong><span>@MetricValueLabel(RelationSegments.Sum(x => x.Value))</span></div><div class="stacked-bar large" role="img" aria-label="@RelationBarAria">@foreach (var segment in RelationSegments) { <span class="bar-segment" style="@SegmentStyle(segment)" title="@SegmentTitle(segment)">@if (segment.Share >= 12) { <b>@segment.Label @Percent(segment.Share)</b> }</span> }</div></div>
-                    <div class="category-legend" aria-label="工作相关性图例">@foreach (var segment in RelationSegments) { <span><i style="background:@segment.Color"></i><b>@segment.Label</b><small>@MetricValueLabel(segment.Value) · @Percent(segment.Share)</small></span> }</div>
-                }
-            </section>
-
-            <section class="distribution-section">
-                <header><div><h2>工作类别分布</h2><p>编码、文档、分析、运维及其他类别按占比降序展示。</p></div></header>
-                @if (CategorySegments.Count == 0)
-                {
-                    <EmptyState Title="暂无工作类别数据" Description="未分类样本不会被推断为任何具体工作类别。" />
-                }
-                else
-                {
-                    <div class="overall-distribution"><div class="bar-label"><strong>全部类别</strong><span>@MetricValueLabel(CategorySegments.Sum(x => x.Value))</span></div><div class="stacked-bar large" role="img" aria-label="@CategoryBarAria">@foreach (var segment in CategorySegments) { <span class="bar-segment" style="@SegmentStyle(segment)" title="@SegmentTitle(segment)">@if (segment.Share >= 12) { <b>@segment.Label @Percent(segment.Share)</b> }</span> }</div></div>
-                    <div class="category-legend" aria-label="工作类别图例">@foreach (var segment in CategorySegments) { <span><i style="background:@segment.Color"></i><b>@segment.Label</b><small>@MetricValueLabel(segment.Value) · @Percent(segment.Share)</small></span> }</div>
-                }
-            </section>
-
-            <section class="department-distribution-section">
-                <header><div><h2>部门工作分布</h2><p>小部门不会单独显示；达到匿名阈值时合并为小样本部门，否则从当前汇总中隐藏。</p></div><span>@summary.Departments.Count 个部门</span></header>
-                @if (summary.Departments.Count == 0)
-                {
-                    <EmptyState Title="暂无部门分布" Description="当前筛选范围没有可统计的部门分类数据。" />
-                }
-                else
-                {
-                    <div class="person-bars department-bars">@foreach (var row in DepartmentChartRows) { <article><div class="person-heading"><span><strong>@row.Name</strong><small>@row.Meta</small></span><span><b>@MetricValueLabel(row.Total)</b><small>置信度 @row.Confidence</small></span></div>@if (row.Segments.Count == 0) { <div class="missing-bar">没有具体工作类别数据</div> } else { <div class="stacked-bar" role="img" aria-label="@row.AriaLabel">@foreach (var segment in row.Segments) { <span class="bar-segment" style="@SegmentStyle(segment)" title="@SegmentTitle(segment)"></span> }</div> }</article> }</div>
-                }
-            </section>
-
-            <section class="people-distribution-section">
-                <header><div><h2>人员工作分布</h2><p>横向堆叠条只展示达到服务端最小样本阈值的人员。</p></div><span>@summary.Users.Count 人</span></header>
-                @if (summary.Users.Count == 0)
-                {
-                    <EmptyState Title="暂无人员分布" Description="当前没有达到隐私样本阈值的人员分类数据。" />
-                }
-                else
-                {
-                    <div class="person-bars">@foreach (var row in UserChartRows) { <article><div class="person-heading"><span><strong>@row.Name</strong><small>@row.Meta</small></span><span><b>@MetricValueLabel(row.Total)</b><small>置信度 @row.Confidence</small></span></div>@if (row.Segments.Count == 0) { <div class="missing-bar">没有具体工作类别数据</div> } else { <div class="stacked-bar" role="img" aria-label="@row.AriaLabel">@foreach (var segment in row.Segments) { <span class="bar-segment" style="@SegmentStyle(segment)" title="@SegmentTitle(segment)"></span> }</div> }</article> }</div>
-                }
-            </section>
-        }
-        else if (activeTab == "details")
-        {
-            <section class="detail-section">
-                <header><div><h2>分类明细与纠正</h2><p>仅包含结构化元数据和分类结果，不展示提示词、源代码或请求正文。</p></div><div class="inline-filters"><select value="@recordWorkRelated" @onchange="RecordRelationChanged"><option value="">全部相关性</option><option value="work">工作相关</option><option value="non_work">非工作</option><option value="uncertain">不确定</option></select><select value="@recordCategory" @onchange="RecordCategoryChanged"><option value="">全部类别</option>@foreach (var option in CategoryOptions) { <option value="@option.Key">@option.Label</option> }</select><select value="@recordReviewStatus" @onchange="RecordReviewChanged"><option value="">全部审核状态</option><option value="pending">待审核</option><option value="approved">已通过</option><option value="rejected">已驳回</option></select><button type="button" class="button secondary" disabled="@recordsLoading" @onclick="ReloadRecordsAsync"><Icon Name="refresh" Size="15" />筛选</button></div></header>
-                @if (recordsLoading && records is null) { <LoadingState Text="正在载入分类明细" /> }
-                else if (!string.IsNullOrWhiteSpace(recordsError)) { <ErrorState Message="@recordsError" OnRetry="ReloadRecordsAsync" /> }
-                else if (records is null || records.Items.Count == 0) { <EmptyState Title="暂无分类明细" Description="当前筛选范围没有达到隐私样本阈值的结构化分类记录。" /> }
-                else
-                {
-                    <div class="detail-table-wrap"><table><thead><tr><th>时间 / 人员</th><th>项目 / 仓库 / 提交类型</th><th>工作相关性</th><th>工作类别</th><th>Token</th><th>置信度</th><th>分类来源 / 版本</th><th>审核状态</th><th>操作</th></tr></thead><tbody>@foreach (var row in records.Items) { <tr><td><strong>@LocalTime(row.CreatedAt)</strong><small>@row.Email</small></td><td><span>@Dash(row.Metadata?.ProjectRef)</span><small>@Dash(row.Metadata?.RepositoryRef) · @SubmissionTypeLabel(row.Metadata?.SubmissionType)</small></td><td>@WorkDistributionLabels.WorkRelated(row.Classification?.WorkRelated)</td><td><span class="category-pill"><i style="background:@CategoryColor(row.Classification?.Category)"></i>@WorkDistributionLabels.Category(row.Classification?.Category)</span></td><td>@Number(row.TotalTokens)</td><td>@ConfidenceLabel(row.Classification?.Confidence)</td><td><span>@ClassificationSourceLabel(row.Classification?.ClassificationSource)</span><small>@Dash(row.Classification?.ClassifierVersion)</small></td><td><span class="row-status @ReviewTone(row.ReviewStatus)">@ReviewLabel(row.ReviewStatus)</span></td><td><button type="button" class="text-button" disabled="@(row.ReviewStatus == "pending")" title="@(row.ReviewStatus == "pending" ? "已有待审核纠正" : "提交分类纠正")" @onclick="() => OpenCorrection(row)">纠正分类</button></td></tr> }</tbody></table></div>
-                    <div class="table-pager"><span>共 @Number(records.Total) 条</span><div><button type="button" class="button secondary small" disabled="@(recordPage <= 1 || recordsLoading)" @onclick="PreviousRecordsAsync"><Icon Name="chevron-left" Size="14" />上一页</button><span>第 @recordPage 页</span><button type="button" class="button secondary small" disabled="@(recordPage * records.PageSize >= records.Total || recordsLoading)" @onclick="NextRecordsAsync">下一页<Icon Name="chevron-right" Size="14" /></button></div></div>
-                }
-            </section>
-        }
-        else
-        {
-            <section class="appeal-section">
-                <header><div><h2>申诉审核</h2><p>审核管理员或用户提交的结构化分类纠正，不读取原始请求正文。</p></div><div class="inline-filters"><select value="@reviewStatus" @onchange="ReviewStatusChanged"><option value="">全部状态</option><option value="pending">待审核</option><option value="approved">已通过</option><option value="rejected">已驳回</option></select><button type="button" class="button secondary" disabled="@reviewsLoading" @onclick="ReloadReviewsAsync"><Icon Name="refresh" Size="15" />刷新</button></div></header>
-                @if (reviewsLoading && reviews is null) { <LoadingState Text="正在载入申诉审核" /> }
-                else if (!string.IsNullOrWhiteSpace(reviewsError)) { <ErrorState Message="@reviewsError" OnRetry="ReloadReviewsAsync" /> }
-                else if (reviews is null || reviews.Items.Count == 0) { <EmptyState Title="暂无可审核申诉" Description="当前筛选状态下没有分类纠正申请。" /> }
-                else
-                {
-                    <div class="detail-table-wrap"><table><thead><tr><th>提交时间 / 人员</th><th>原分类</th><th>建议分类</th><th>原因</th><th>状态</th><th>处理结果</th><th>操作</th></tr></thead><tbody>@foreach (var item in reviews.Items) { <tr><td><strong>@LocalTime(item.CreatedAt)</strong><small>@item.Email · #@item.UsageLogId</small></td><td>@WorkDistributionLabels.WorkRelated(item.PreviousWorkRelated) / @WorkDistributionLabels.Category(item.PreviousCategory)</td><td>@WorkDistributionLabels.WorkRelated(item.ProposedWorkRelated) / @WorkDistributionLabels.Category(item.ProposedCategory)</td><td>@ReasonLabel(item.ReasonCode)</td><td><span class="row-status @ReviewTone(item.Status)">@ReviewLabel(item.Status)</span></td><td>@ResolutionLabel(item.ResolutionNote)</td><td>@if (item.Status == "pending") { <div class="review-actions"><button type="button" class="text-button success" @onclick="() => ApproveReview(item)">通过</button><button type="button" class="text-button danger" @onclick="() => RejectReview(item)">驳回</button></div> } else { <span class="muted-text">已处理</span> }</td></tr> }</tbody></table></div>
-                    <div class="table-pager"><span>共 @Number(reviews.Total) 条</span><div><button type="button" class="button secondary small" disabled="@(reviewPage <= 1 || reviewsLoading)" @onclick="PreviousReviewsAsync"><Icon Name="chevron-left" Size="14" />上一页</button><span>第 @reviewPage 页</span><button type="button" class="button secondary small" disabled="@(reviewPage * reviews.PageSize >= reviews.Total || reviewsLoading)" @onclick="NextReviewsAsync">下一页<Icon Name="chevron-right" Size="14" /></button></div></div>
-                }
-            </section>
-        }
+        <section class="work-panel">
+            <header><div><h2>部门分布</h2><p>按部门汇总的工作内容占比</p></div></header>
+            @if (summary.Departments.Count == 0) { <EmptyState Title="暂无部门数据" Description="当前筛选范围没有可统计样本。" /> }
+            else { <div class="chart-list">@foreach (var item in summary.Departments) { <article><div class="chart-label"><strong>@Label(item.Department)</strong><small>@SummaryMeta(item.Requests, item.AverageConfidence)</small></div><div class="stacked-chart">@foreach (var segment in BuildSegments(item.Categories)) { <span style="@SegmentStyle(segment)" title="@SegmentTitle(segment)"></span> }</div></article> }</div> }
+        </section>
     }
 </div>
 
-<AppModal Open="correctionOpen" Title="提交分类纠正" MaxWidth="640px" OnClose="CloseCorrection">
-    <ChildContent>@if (correctionTarget is not null) { <div class="review-form"><div class="target-summary"><span><small>AI 请求</small><strong>#@correctionTarget.UsageLogId</strong></span><span><small>人员</small><strong>@correctionTarget.Email</strong></span><span><small>当前分类</small><strong>@WorkDistributionLabels.WorkRelated(correctionTarget.Classification?.WorkRelated) / @WorkDistributionLabels.Category(correctionTarget.Classification?.Category)</strong></span></div><label><span>工作相关性</span><select value="@correctionWorkRelated" @onchange="CorrectionRelationChanged"><option value="work">工作相关</option><option value="non_work">非工作</option><option value="uncertain">不确定</option></select></label><label><span>建议类别</span><select value="@correctionCategory" disabled="@(correctionWorkRelated != "work")" @onchange="CorrectionCategoryChanged">@foreach (var option in CorrectionCategoryOptions) { <option value="@option.Key">@option.Label</option> }</select></label><label><span>纠正原因</span><select @bind="correctionReason"><option value="incorrect_category">类别不正确</option><option value="incorrect_work_relation">工作相关性不正确</option><option value="missing_classification">缺少分类</option><option value="other">其他</option></select></label>@if (!string.IsNullOrWhiteSpace(correctionError)) { <div class="inline-alert danger" role="alert">@correctionError</div> }</div> }</ChildContent>
-    <Footer><button type="button" class="button secondary" disabled="@savingCorrection" @onclick="CloseCorrection">取消</button><button type="button" class="button primary" disabled="@(savingCorrection || !IsCorrectionPairValid)" @onclick="SubmitCorrectionAsync"><Icon Name="check" Size="15" />提交审核</button></Footer>
-</AppModal>
-
-<AppModal Open="resolutionOpen" Title="处理分类申诉" MaxWidth="580px" OnClose="CloseResolution">
-    <ChildContent>@if (resolutionTarget is not null) { <div class="review-form"><div class="target-summary"><span><small>处理决定</small><strong>@(resolutionDecision == "approved" ? "通过纠正" : "驳回纠正")</strong></span><span><small>建议分类</small><strong>@WorkDistributionLabels.WorkRelated(resolutionTarget.ProposedWorkRelated) / @WorkDistributionLabels.Category(resolutionTarget.ProposedCategory)</strong></span></div><label><span>处理依据</span><select @bind="resolutionNote">@if (resolutionDecision == "approved") { <option value="confirmed_correction">确认纠正</option> } else { <option value="insufficient_evidence">证据不足</option><option value="duplicate">重复申请</option><option value="invalid_request">无效申请</option> }<option value="other">其他</option></select></label>@if (!string.IsNullOrWhiteSpace(resolutionError)) { <div class="inline-alert danger" role="alert">@resolutionError</div> }</div> }</ChildContent>
-    <Footer><button type="button" class="button secondary" disabled="@savingResolution" @onclick="CloseResolution">取消</button><button type="button" class="button primary" disabled="@savingResolution" @onclick="SubmitResolutionAsync"><Icon Name="check" Size="15" />确认处理</button></Footer>
-</AppModal>
-
 @code {
-    private static readonly (string Key, string Label)[] WorkCategoryOptions = [("coding", "编码"), ("documentation", "文档"), ("data_analysis", "数据分析"), ("operations", "运维"), ("communication", "沟通协作"), ("learning", "学习研究"), ("other", "其他工作")];
-    private static readonly (string Key, string Label)[] CategoryOptions = [.. WorkCategoryOptions, ("non_work", "非工作"), ("unclassified", "未分类")];
-    private static readonly (string Key, string Label)[] NonWorkCategoryOptions = [("non_work", "非工作")];
-    private static readonly (string Key, string Label)[] UncertainCategoryOptions = [("unclassified", "未分类")];
     private WorkDistributionSummaryDto? summary;
-    private WorkDistributionPagedDto<WorkDistributionRecordDto>? records;
-    private WorkDistributionPagedDto<WorkDistributionReviewDto>? reviews;
-    private readonly List<WorkDistributionUserDto> people = [];
-    private readonly HashSet<string> departments = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> roles = new(StringComparer.OrdinalIgnoreCase);
-    private DateOnly startDate = DateOnly.FromDateTime(DateTime.Today.AddDays(-29));
-    private DateOnly endDate = DateOnly.FromDateTime(DateTime.Today);
-    private long? selectedUserId;
+    private bool loading;
+    private string? error;
+    private string startDate = DateTime.Today.AddDays(-29).ToString("yyyy-MM-dd");
+    private string endDate = DateTime.Today.ToString("yyyy-MM-dd");
     private string department = string.Empty;
     private string role = string.Empty;
     private string metric = "requests";
-    private string activeTab = "overview";
-    private string recordCategory = string.Empty;
-    private string recordWorkRelated = string.Empty;
-    private string recordReviewStatus = string.Empty;
-    private string reviewStatus = "pending";
-    private int recordPage = 1;
-    private int reviewPage = 1;
-    private bool loading;
-    private bool recordsLoading;
-    private bool reviewsLoading;
-    private string? summaryError;
-    private string? recordsError;
-    private string? reviewsError;
-    private string? validationError;
+    private long? userId;
+    private readonly List<WorkDistributionUserDto> people = [];
+    private readonly HashSet<string> departments = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> roles = new(StringComparer.OrdinalIgnoreCase);
 
-    private bool correctionOpen;
-    private WorkDistributionRecordDto? correctionTarget;
-    private string correctionWorkRelated = "work";
-    private string correctionCategory = "coding";
-    private string correctionReason = "incorrect_category";
-    private string? correctionError;
-    private bool savingCorrection;
+    private string SelectedUser => userId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    private double WorkShare => summary?.WorkRelated.FirstOrDefault(x => x.WorkRelated == "work")?.Percent ?? 0;
+    private IReadOnlyList<ChartSegment> RelationSegments => summary?.WorkRelated.Select(x => new ChartSegment(RelationLabel(x.WorkRelated), x.Percent, RelationColor(x.WorkRelated))).ToList() ?? [];
+    private static readonly ChartSegment[] Legend = [new("编码", 0, "#2563eb"), new("文档", 0, "#16a34a"), new("分析/运维", 0, "#7c3aed"), new("其他工作", 0, "#0891b2"), new("不确定", 0, "#94a3b8"), new("非工作", 0, "#dc2626")];
 
-    private bool resolutionOpen;
-    private WorkDistributionReviewDto? resolutionTarget;
-    private string resolutionDecision = "approved";
-    private string resolutionNote = "confirmed_correction";
-    private string? resolutionError;
-    private bool savingResolution;
+    protected override async Task OnInitializedAsync() => await LoadAsync();
 
-    private string StartDateValue => startDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-    private string EndDateValue => endDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-    private string SelectedUserValue => selectedUserId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
-    private string MetricLabel => metric == "tokens" ? "工作量（Token）" : "提交次数（AI 请求）";
-    private string DateRangeLabel => $"{StartDateValue} 至 {EndDateValue}";
-    private string CoverageStatus => summary is null || summary.Coverage.TotalRequests == 0 ? "暂无样本" : summary.Coverage.ClassifiedPercent >= 80 ? "覆盖良好" : "覆盖偏低";
-    private string CoverageExplanation => summary is null || summary.Coverage.TotalRequests == 0 ? "当前筛选范围没有 AI 请求样本。" : $"{Number(summary.Coverage.ClassifiedRequests)} / {Number(summary.Coverage.TotalRequests)} 条 AI 请求已有分类。";
-    private string DataStatusLabel => summary?.CollectionStatus == "no_data" ? "暂无数据" : summary?.Coverage.ClassifiedRequests > 0 ? "真实分类" : "待分类";
-    private string DataStatusTone => summary?.Coverage.ClassifiedRequests > 0 ? "success" : "warning";
-    private IReadOnlyList<CategorySegment> RelationSegments => BuildRelationSegments(summary?.WorkRelated ?? []);
-    private IReadOnlyList<CategorySegment> CategorySegments => BuildCategorySegments(summary?.Categories ?? []);
-    private string RelationBarAria => BarAria("工作相关性", RelationSegments);
-    private string CategoryBarAria => BarAria("工作类别", CategorySegments);
-    private IReadOnlyList<(string Key, string Label)> CorrectionCategoryOptions => correctionWorkRelated switch { "non_work" => NonWorkCategoryOptions, "uncertain" => UncertainCategoryOptions, _ => WorkCategoryOptions };
-    private bool IsCorrectionPairValid => IsValidCorrectionPair(correctionWorkRelated, correctionCategory);
-    private IReadOnlyList<PersonChartRow> DepartmentChartRows => (summary?.Departments ?? []).Select(item => { var name = DepartmentLabel(item.Department); var segments = BuildCategorySegments(item.Categories); return new PersonChartRow(name, $"{Number(item.Requests)} 个样本 · 工作相关 {Percent(WorkRelatedShare(segments))}", item.Value, ConfidenceLabel(item.AverageConfidence), segments, BarAria($"{name}部门", segments)); }).ToList();
-    private IReadOnlyList<PersonChartRow> UserChartRows => (summary?.Users ?? []).Select(user => { var segments = BuildCategorySegments(user.Categories); return new PersonChartRow(PersonName(user), $"{DepartmentLabel(user.Department)} · {RoleLabel(user.Role)} · {Number(user.Requests)} 个样本 · 工作相关 {Percent(WorkRelatedShare(segments))}", user.Value, ConfidenceLabel(user.AverageConfidence), segments, BarAria(PersonName(user), segments)); }).ToList();
-
-    protected override Task OnInitializedAsync() => LoadAllAsync();
-
-    private async Task LoadAllAsync()
+    private async Task LoadAsync()
     {
         if (loading) return;
-        loading = true;
-        try { await LoadSummaryCoreAsync(); await Task.WhenAll(LoadRecordsAsync(), LoadReviewsAsync()); }
+        loading = true; error = null;
+        try
+        {
+            summary = await Api.GetAdminWorkDistributionSummaryAsync(new() { StartDate = startDate, EndDate = endDate, UserId = userId, Department = department, Role = role, Metric = metric });
+            foreach (var item in summary.Users) if (people.All(x => x.UserId != item.UserId)) people.Add(item);
+            foreach (var item in summary.Departments) if (!string.IsNullOrWhiteSpace(item.Department)) departments.Add(item.Department);
+            foreach (var item in summary.Roles) if (!string.IsNullOrWhiteSpace(item.Role)) roles.Add(item.Role);
+        }
+        catch (ApiException ex) { error = ex.Message; }
         finally { loading = false; }
     }
 
-    private async Task LoadSummaryAsync() { if (loading) return; loading = true; try { await LoadSummaryCoreAsync(); } finally { loading = false; } }
-    private async Task LoadSummaryCoreAsync()
+    private async Task SetMetricAsync(string value) { metric = value; await LoadAsync(); }
+    private void UserChanged(ChangeEventArgs e) { userId = long.TryParse(e.Value?.ToString(), out var value) ? value : null; }
+    private static IReadOnlyList<ChartSegment> BuildSegments(IEnumerable<WorkDistributionCategoryDto> source)
     {
-        summaryError = null;
-        try
-        {
-            summary = await Api.GetAdminWorkDistributionSummaryAsync(new WorkDistributionSummaryQueryDto { StartDate = StartDateValue, EndDate = EndDateValue, Timezone = "Asia/Shanghai", UserId = selectedUserId, Department = department, Role = role, Metric = metric, MinSampleSize = 5, MinCohortSize = 5, UserLimit = 100 });
-            RememberFilterOptions(summary);
-        }
-        catch (ApiException ex) { summaryError = ex.Message; }
+        var values = source.GroupBy(x => Group(x.Category)).ToDictionary(x => x.Key, x => x.Sum(y => y.Value));
+        var total = values.Values.Sum();
+        if (total <= 0) return [];
+        return Legend.Select(x => new ChartSegment(x.Label, values.GetValueOrDefault(x.Label) * 100d / total, x.Color)).Where(x => x.Percent > 0).ToList();
     }
-
-    private async Task LoadRecordsAsync()
-    {
-        if (recordsLoading) return;
-        recordsLoading = true; recordsError = null;
-        try { records = await Api.GetAdminWorkDistributionRecordsAsync(new WorkDistributionRecordQueryDto { StartDate = StartDateValue, EndDate = EndDateValue, Timezone = "Asia/Shanghai", UserId = selectedUserId, Department = department, Role = role, Category = recordCategory, WorkRelated = recordWorkRelated, ReviewStatus = recordReviewStatus, MinSampleSize = 5, MinCohortSize = 5, Page = recordPage, PageSize = 50 }); }
-        catch (ApiException ex) { recordsError = ex.Message; }
-        finally { recordsLoading = false; }
-    }
-
-    private async Task LoadReviewsAsync()
-    {
-        if (reviewsLoading) return;
-        reviewsLoading = true; reviewsError = null;
-        try { reviews = await Api.GetAdminWorkDistributionReviewsAsync(new WorkDistributionReviewQueryDto { Status = reviewStatus, UserId = selectedUserId, Page = reviewPage, PageSize = 50 }); }
-        catch (ApiException ex) { reviewsError = ex.Message; }
-        finally { reviewsLoading = false; }
-    }
-
-    private async Task ApplyFiltersAsync() { validationError = startDate > endDate ? "开始日期不能晚于结束日期。" : null; if (validationError is null) { recordPage = reviewPage = 1; await LoadAllAsync(); } }
-    private async Task ResetFiltersAsync() { startDate = DateOnly.FromDateTime(DateTime.Today.AddDays(-29)); endDate = DateOnly.FromDateTime(DateTime.Today); selectedUserId = null; department = role = string.Empty; metric = "requests"; recordCategory = recordWorkRelated = recordReviewStatus = string.Empty; reviewStatus = "pending"; recordPage = reviewPage = 1; validationError = null; await LoadAllAsync(); }
-    private Task UseRequestMetricAsync() => ChangeMetricAsync("requests");
-    private Task UseTokenMetricAsync() => ChangeMetricAsync("tokens");
-    private async Task ChangeMetricAsync(string value) { if (metric == value || loading) return; metric = value; await LoadSummaryAsync(); }
-    private void ShowOverview() => activeTab = "overview";
-    private async Task ShowDetailsAsync() { activeTab = "details"; if (records is null) await LoadRecordsAsync(); }
-    private async Task ShowAppealsAsync() { activeTab = "appeals"; if (reviews is null) await LoadReviewsAsync(); }
-    private async Task ReloadRecordsAsync() { recordPage = 1; await LoadRecordsAsync(); }
-    private async Task ReloadReviewsAsync() { reviewPage = 1; await LoadReviewsAsync(); }
-    private async Task PreviousRecordsAsync() { if (recordPage <= 1) return; recordPage--; await LoadRecordsAsync(); }
-    private async Task NextRecordsAsync() { recordPage++; await LoadRecordsAsync(); }
-    private async Task PreviousReviewsAsync() { if (reviewPage <= 1) return; reviewPage--; await LoadReviewsAsync(); }
-    private async Task NextReviewsAsync() { reviewPage++; await LoadReviewsAsync(); }
-
-    private void OpenCorrection(WorkDistributionRecordDto row) { correctionTarget = row; SetCorrectionPair(row.Classification?.WorkRelated, row.Classification?.Category); correctionReason = row.Classification is null ? "missing_classification" : "incorrect_category"; correctionError = null; correctionOpen = true; }
-    private void CloseCorrection() { if (!savingCorrection) { correctionOpen = false; correctionTarget = null; } }
-    private async Task SubmitCorrectionAsync()
-    {
-        if (correctionTarget is null || savingCorrection) return;
-        SetCorrectionPair(correctionWorkRelated, correctionCategory);
-        if (!IsCorrectionPairValid) { correctionError = "工作相关性与建议类别不一致。"; return; }
-        savingCorrection = true; correctionError = null;
-        try { await Api.CreateAdminWorkDistributionCorrectionAsync(correctionTarget.UsageLogId, correctionWorkRelated, correctionCategory, correctionReason); Toasts.Success("分类纠正已提交审核"); correctionOpen = false; correctionTarget = null; await Task.WhenAll(LoadRecordsAsync(), LoadReviewsAsync()); }
-        catch (ApiException ex) { correctionError = ex.Message; }
-        finally { savingCorrection = false; }
-    }
-
-    private void ApproveReview(WorkDistributionReviewDto item) => OpenResolution(item, "approved", "confirmed_correction");
-    private void RejectReview(WorkDistributionReviewDto item) => OpenResolution(item, "rejected", "insufficient_evidence");
-    private void OpenResolution(WorkDistributionReviewDto item, string decision, string note) { resolutionTarget = item; resolutionDecision = decision; resolutionNote = note; resolutionError = null; resolutionOpen = true; }
-    private void CloseResolution() { if (!savingResolution) { resolutionOpen = false; resolutionTarget = null; } }
-    private async Task SubmitResolutionAsync()
-    {
-        if (resolutionTarget is null || savingResolution) return;
-        savingResolution = true; resolutionError = null;
-        try { await Api.ResolveAdminWorkDistributionReviewAsync(resolutionTarget.Id, resolutionDecision, resolutionNote); Toasts.Success(resolutionDecision == "approved" ? "分类纠正已通过" : "分类纠正已驳回"); resolutionOpen = false; resolutionTarget = null; await Task.WhenAll(LoadSummaryCoreAsync(), LoadRecordsAsync(), LoadReviewsAsync()); }
-        catch (ApiException ex) { resolutionError = ex.Message; }
-        finally { savingResolution = false; }
-    }
-
-    private void RememberFilterOptions(WorkDistributionSummaryDto value) { foreach (var user in value.Users) if (people.All(item => item.UserId != user.UserId)) people.Add(user); foreach (var item in value.Departments) if (IsFilterableDepartment(item.Department)) departments.Add(item.Department); roles.Clear(); foreach (var item in value.Roles) if (IsFilterableRole(item.Role)) roles.Add(item.Role.Trim()); }
-    private static IReadOnlyList<CategorySegment> BuildRelationSegments(IEnumerable<WorkDistributionRelationDto> source) { var rows = source.Where(x => x.Value > 0).OrderByDescending(x => x.Value).ToList(); var total = rows.Sum(x => x.Value); return total <= 0 ? [] : rows.Select(x => new CategorySegment(x.WorkRelated, WorkDistributionLabels.WorkRelated(x.WorkRelated), x.Value, x.Value * 100d / total, RelationColor(x.WorkRelated))).ToList(); }
-    private static IReadOnlyList<CategorySegment> BuildCategorySegments(IEnumerable<WorkDistributionCategoryDto> source) { var rows = source.Where(x => x.Value > 0).GroupBy(x => x.Category, StringComparer.OrdinalIgnoreCase).Select(group => new { Key = group.Key, Value = group.Sum(x => x.Value) }).OrderByDescending(x => x.Value).ToList(); var total = rows.Sum(x => x.Value); return total <= 0 ? [] : rows.Select(x => new CategorySegment(x.Key, WorkDistributionLabels.Category(x.Key), x.Value, x.Value * 100d / total, CategoryColor(x.Key))).ToList(); }
-    private static double WorkRelatedShare(IEnumerable<CategorySegment> segments) => segments.Where(x => x.Key is not ("non_work" or "unclassified")).Sum(x => x.Share);
-    private static string RelationColor(string? key) => key?.Trim().ToLowerInvariant() switch { "work" => "#1677ff", "non_work" => "#dc2626", _ => "#94a3b8" };
-    private static string CategoryColor(string? key) => key?.Trim().ToLowerInvariant() switch { "coding" => "#1677ff", "documentation" => "#16a34a", "data_analysis" => "#7c3aed", "operations" => "#ea580c", "communication" => "#0891b2", "learning" => "#ca8a04", "other" => "#db2777", "non_work" => "#dc2626", _ => "#94a3b8" };
-    private string SegmentStyle(CategorySegment segment) => $"width:{segment.Share.ToString("0.####", CultureInfo.InvariantCulture)}%;background:{segment.Color}";
-    private string SegmentTitle(CategorySegment segment) => $"{segment.Label}：{MetricValueLabel(segment.Value)}（{Percent(segment.Share)}）";
-    private string BarAria(string name, IEnumerable<CategorySegment> segments) => $"{name}，{string.Join("，", segments.Select(SegmentTitle))}";
-    private string MetricValueLabel(long value) => metric == "tokens" ? $"{Number(value)} Token" : $"{Number(value)} 次 AI 请求";
+    private static string Group(string value) => value switch { "coding" => "编码", "documentation" => "文档", "data_analysis" or "operations" => "分析/运维", "unclassified" => "不确定", "non_work" => "非工作", _ => "其他工作" };
+    private static string RelationLabel(string value) => value switch { "work" => "工作相关", "non_work" => "非工作", _ => "不确定" };
+    private static string RelationColor(string value) => value switch { "work" => "#2563eb", "non_work" => "#dc2626", _ => "#94a3b8" };
+    private static string Label(string? value) => string.IsNullOrWhiteSpace(value) || value == "unknown" ? "未设置" : value;
     private static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
-    private static string Percent(double value) => $"{Math.Clamp(value, 0, 100).ToString("0.0", CultureInfo.InvariantCulture)}%";
-    private static string ConfidenceLabel(double? value) => value.HasValue ? Percent(value.Value * 100) : "暂无";
-    private static string PersonName(WorkDistributionUserDto user) => string.IsNullOrWhiteSpace(user.Email) ? $"用户 {user.UserId}" : user.Email;
-    private static string DepartmentLabel(string? value) => value?.Trim().ToLowerInvariant() switch { null or "" or "unknown" => "未提供部门", "other_departments" => "其他小样本部门（匿名汇总）", _ => value!.Trim() };
-    private static bool IsFilterableDepartment(string? value) => !string.IsNullOrWhiteSpace(value) && !string.Equals(value.Trim(), "other_departments", StringComparison.OrdinalIgnoreCase);
-    private static bool IsFilterableRole(string? value) => !string.IsNullOrWhiteSpace(value) && !string.Equals(value.Trim(), "unknown", StringComparison.OrdinalIgnoreCase);
-    private static string RoleLabel(string? value) => value?.Trim().ToLowerInvariant() switch { "admin" => "管理员", "user" => "普通用户", null or "" or "unknown" => "未提供岗位角色", _ => value!.Trim() };
-    private static string Dash(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value;
-    private static string LocalTime(DateTimeOffset value) => value.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-    private static string ReviewLabel(string? value) => value?.Trim().ToLowerInvariant() switch { "pending" => "待审核", "approved" => "已通过", "rejected" => "已驳回", _ => "未提交" };
-    private static string ReviewTone(string? value) => value?.Trim().ToLowerInvariant() switch { "pending" => "warning", "approved" => "success", "rejected" => "danger", _ => "neutral" };
-    private static string ReasonLabel(string? value) => value switch { "incorrect_category" => "类别不正确", "incorrect_work_relation" => "工作相关性不正确", "missing_classification" => "缺少分类", "other" => "其他", _ => "-" };
-    private static string ResolutionLabel(string? value) => value switch { "confirmed_correction" => "确认纠正", "insufficient_evidence" => "证据不足", "duplicate" => "重复申请", "invalid_request" => "无效申请", "other" => "其他", _ => "-" };
-    private static string ClassificationSourceLabel(string? value) => value?.Trim().ToLowerInvariant() switch { "explicit_metadata" => "受管元数据", "local_rule" => "本地规则", "manual_review" => "人工复核", "import" => "结构化导入", "unclassified" or null or "" => "未分类", _ => value!.Trim() };
-    private static string SubmissionTypeLabel(string? value) => value?.Trim().ToLowerInvariant() switch { "code" or "coding" => "编码", "commit" => "代码提交", "pull_request" => "合并请求", "merge_request" => "合并请求", "document" or "documentation" or "docs" => "文档", "analysis" or "data_analysis" => "分析", "operations" => "运维", "deployment" => "部署", "incident" => "故障处理", "communication" => "沟通", "meeting" => "会议", "learning" or "training" => "学习", "personal" or "non_work" => "非工作", "other" => "其他", null or "" => "未提供提交类型", _ => value!.Trim() };
+    private static string Percent(double value) => $"{value:0.0}%";
+    private static string Confidence(double? value) => value.HasValue ? $"{value.Value * 100:0.0}%" : "--";
+    private static string SummaryMeta(long samples, double? confidence) => $"{Number(samples)} 个样本 · 置信度 {Confidence(confidence)}";
+    private static string SegmentStyle(ChartSegment item) => $"width:{item.Percent.ToString("0.####", CultureInfo.InvariantCulture)}%;background:{item.Color}";
+    private static string SegmentTitle(ChartSegment item) => $"{item.Label} {item.Percent:0.0}%";
 
-    private void UserChanged(ChangeEventArgs args) => selectedUserId = long.TryParse(args.Value?.ToString(), out var value) && value > 0 ? value : null;
-    private void DepartmentChanged(ChangeEventArgs args) => department = args.Value?.ToString()?.Trim() ?? string.Empty;
-    private void RoleChanged(ChangeEventArgs args) => role = args.Value?.ToString()?.Trim() ?? string.Empty;
-    private void StartDateChanged(ChangeEventArgs args) { if (DateOnly.TryParse(args.Value?.ToString(), out var value)) startDate = value; }
-    private void EndDateChanged(ChangeEventArgs args) { if (DateOnly.TryParse(args.Value?.ToString(), out var value)) endDate = value; }
-    private void RecordRelationChanged(ChangeEventArgs args) => recordWorkRelated = args.Value?.ToString() ?? string.Empty;
-    private void RecordCategoryChanged(ChangeEventArgs args) => recordCategory = args.Value?.ToString() ?? string.Empty;
-    private void RecordReviewChanged(ChangeEventArgs args) => recordReviewStatus = args.Value?.ToString() ?? string.Empty;
-    private void ReviewStatusChanged(ChangeEventArgs args) => reviewStatus = args.Value?.ToString() ?? string.Empty;
-    private void CorrectionRelationChanged(ChangeEventArgs args) => SetCorrectionPair(args.Value?.ToString(), correctionCategory);
-    private void CorrectionCategoryChanged(ChangeEventArgs args)
-    {
-        var value = args.Value?.ToString()?.Trim().ToLowerInvariant() ?? "coding";
-        SetCorrectionPair(value switch { "non_work" => "non_work", "unclassified" => "uncertain", _ => "work" }, value);
-    }
-
-    private void SetCorrectionPair(string? workRelated, string? category)
-    {
-        correctionWorkRelated = workRelated?.Trim().ToLowerInvariant() switch { "non_work" => "non_work", "uncertain" => "uncertain", _ => "work" };
-        var normalizedCategory = category?.Trim().ToLowerInvariant() ?? string.Empty;
-        correctionCategory = correctionWorkRelated switch
-        {
-            "non_work" => "non_work",
-            "uncertain" => "unclassified",
-            _ => WorkCategoryOptions.Any(item => item.Key == normalizedCategory) ? normalizedCategory : "coding"
-        };
-    }
-
-    private static bool IsValidCorrectionPair(string workRelated, string category) => workRelated switch
-    {
-        "non_work" => category == "non_work",
-        "uncertain" => category == "unclassified",
-        "work" => WorkCategoryOptions.Any(item => item.Key == category),
-        _ => false
-    };
-
-    private sealed record CategorySegment(string Key, string Label, long Value, double Share, string Color);
-    private sealed record PersonChartRow(string Name, string Meta, long Total, string Confidence, IReadOnlyList<CategorySegment> Segments, string AriaLabel);
+    private sealed record ChartSegment(string Label, double Percent, string Color);
 }

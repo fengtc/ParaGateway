@@ -493,15 +493,6 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
             $"{ApiPrefix}/admin/dashboard/user-breakdown?{string.Join("&", query)}");
     }
 
-    public Task<PagedEnvelope<UserWorkClassificationDto>> GetMyWorkClassificationsAsync(int page = 1, int pageSize = 20) =>
-        SendAsync<PagedEnvelope<UserWorkClassificationDto>>(HttpMethod.Get,
-            $"{ApiPrefix}/usage/work-classifications?page={Math.Max(1, page)}&page_size={Math.Clamp(pageSize, 1, 200)}");
-
-    public Task<UserWorkClassificationAppealDto> CreateMyWorkClassificationAppealAsync(
-        long usageLogId, UserWorkClassificationAppealRequestDto request) =>
-        SendAsync<UserWorkClassificationAppealDto>(HttpMethod.Post,
-            $"{ApiPrefix}/usage/work-classifications/{usageLogId}/appeals", request);
-
     public Task<WorkDistributionSummaryDto> GetAdminWorkDistributionSummaryAsync(WorkDistributionSummaryQueryDto filter)
     {
         var query = new List<string>
@@ -509,8 +500,6 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
             $"start_date={Uri.EscapeDataString(filter.StartDate.Trim())}",
             $"end_date={Uri.EscapeDataString(filter.EndDate.Trim())}",
             $"metric={(string.Equals(filter.Metric, "tokens", StringComparison.OrdinalIgnoreCase) ? "tokens" : "requests")}",
-            $"min_sample_size={Math.Clamp(filter.MinSampleSize, 5, 1000)}",
-            $"min_cohort_size={Math.Clamp(filter.MinCohortSize, 5, 1000)}",
             $"user_limit={Math.Clamp(filter.UserLimit, 1, 500)}"
         };
         if (!string.IsNullOrWhiteSpace(filter.Timezone)) query.Add($"timezone={Uri.EscapeDataString(filter.Timezone.Trim())}");
@@ -520,60 +509,6 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
 
         return SendAsync<WorkDistributionSummaryDto>(HttpMethod.Get,
             $"{ApiPrefix}/admin/work-distribution/summary?{string.Join("&", query)}");
-    }
-
-    public Task<WorkDistributionPagedDto<WorkDistributionRecordDto>> GetAdminWorkDistributionRecordsAsync(WorkDistributionRecordQueryDto filter)
-    {
-        var query = BuildWorkDistributionScopeQuery(filter.StartDate, filter.EndDate, filter.Timezone,
-            filter.UserId, filter.Department, filter.Role);
-        query.Add($"page={Math.Max(1, filter.Page)}");
-        query.Add($"page_size={Math.Clamp(filter.PageSize, 1, 200)}");
-        query.Add($"min_sample_size={Math.Clamp(filter.MinSampleSize, 5, 1000)}");
-        query.Add($"min_cohort_size={Math.Clamp(filter.MinCohortSize, 5, 1000)}");
-        if (!string.IsNullOrWhiteSpace(filter.Category)) query.Add($"category={Uri.EscapeDataString(filter.Category.Trim())}");
-        if (!string.IsNullOrWhiteSpace(filter.WorkRelated)) query.Add($"work_related={Uri.EscapeDataString(filter.WorkRelated.Trim())}");
-        if (!string.IsNullOrWhiteSpace(filter.ReviewStatus)) query.Add($"review_status={Uri.EscapeDataString(filter.ReviewStatus.Trim())}");
-        return SendAsync<WorkDistributionPagedDto<WorkDistributionRecordDto>>(HttpMethod.Get,
-            $"{ApiPrefix}/admin/work-distribution/records?{string.Join("&", query)}");
-    }
-
-    public Task<WorkDistributionReviewDto> CreateAdminWorkDistributionCorrectionAsync(
-        long usageLogId, string workRelated, string category, string reasonCode) =>
-        SendAsync<WorkDistributionReviewDto>(HttpMethod.Post,
-            $"{ApiPrefix}/admin/work-distribution/records/{usageLogId}/correction",
-            new { work_related = workRelated, category, reason_code = reasonCode });
-
-    public Task<WorkDistributionPagedDto<WorkDistributionReviewDto>> GetAdminWorkDistributionReviewsAsync(WorkDistributionReviewQueryDto filter)
-    {
-        var query = new List<string>
-        {
-            $"page={Math.Max(1, filter.Page)}",
-            $"page_size={Math.Clamp(filter.PageSize, 1, 200)}"
-        };
-        if (!string.IsNullOrWhiteSpace(filter.Status)) query.Add($"status={Uri.EscapeDataString(filter.Status.Trim())}");
-        if (filter.UserId is > 0) query.Add($"user_id={filter.UserId.Value}");
-        return SendAsync<WorkDistributionPagedDto<WorkDistributionReviewDto>>(HttpMethod.Get,
-            $"{ApiPrefix}/admin/work-distribution/reviews?{string.Join("&", query)}");
-    }
-
-    public Task<WorkDistributionReviewDto> ResolveAdminWorkDistributionReviewAsync(long reviewId, string decision, string resolutionNote) =>
-        SendAsync<WorkDistributionReviewDto>(HttpMethod.Post,
-            $"{ApiPrefix}/admin/work-distribution/reviews/{reviewId}/resolve",
-            new { decision, resolution_note = resolutionNote });
-
-    private static List<string> BuildWorkDistributionScopeQuery(
-        string startDate, string endDate, string timezone, long? userId, string department, string role)
-    {
-        var query = new List<string>
-        {
-            $"start_date={Uri.EscapeDataString(startDate.Trim())}",
-            $"end_date={Uri.EscapeDataString(endDate.Trim())}"
-        };
-        if (!string.IsNullOrWhiteSpace(timezone)) query.Add($"timezone={Uri.EscapeDataString(timezone.Trim())}");
-        if (userId is > 0) query.Add($"user_id={userId.Value}");
-        if (!string.IsNullOrWhiteSpace(department)) query.Add($"department={Uri.EscapeDataString(department.Trim())}");
-        if (!string.IsNullOrWhiteSpace(role)) query.Add($"role={Uri.EscapeDataString(role.Trim())}");
-        return query;
     }
 
     public async Task<List<UserDto>> GetUsersAsync()

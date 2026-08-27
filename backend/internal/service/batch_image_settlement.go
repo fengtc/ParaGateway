@@ -280,10 +280,6 @@ func (s *BatchImageSettlementService) recordUsageLog(ctx context.Context, job *B
 		SessionID:             job.SessionID,
 		CreatedAt:             createdAt,
 	}
-	if job.WorkAttribution != nil {
-		attribution := NormalizeUsageWorkAttribution(*job.WorkAttribution)
-		usageLog.WorkAttribution = &attribution
-	}
 	writeUsageLogBestEffort(ctx, s.UsageLogRepo, usageLog, "service.batch_image_settlement")
 }
 

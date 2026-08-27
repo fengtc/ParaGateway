@@ -280,8 +280,7 @@ func TestFinalizeLiveCallIsIdempotentAndWritesZeroUsage(t *testing.T) {
 		Controller:      LiveControllerPending,
 		InboundEndpoint: "/v1/live",
 		WorkAttribution: &UsageWorkAttribution{
-			ProjectRef: "paragateway", RepositoryRef: "fengtc/ParaGateway",
-			SubmissionType: "coding", WorkRelated: WorkRelatedWork,
+			WorkRelated: WorkRelatedWork,
 			Category: WorkCategoryCoding, Confidence: 0.82,
 			ClassificationSource: "local_rule", ClassifierVersion: "rules-v1",
 		},
@@ -316,7 +315,6 @@ func TestFinalizeLiveCallIsIdempotentAndWritesZeroUsage(t *testing.T) {
 	require.Zero(t, log.ActualCost)
 	require.NotNil(t, log.WorkAttribution)
 	require.Equal(t, WorkCategoryCoding, log.WorkAttribution.Category)
-	require.Equal(t, "paragateway", log.WorkAttribution.ProjectRef)
 }
 
 func TestGetLiveCallForIdentityRejectsMismatchedCaller(t *testing.T) {

@@ -27,7 +27,6 @@ const (
 	WorkRelationNonWork   WorkRelation = "non_work"
 	WorkRelationUncertain WorkRelation = "uncertain"
 
-	SourceExplicitMetadata = "explicit_metadata"
 	SourceLocalRule        = "local_rule"
 	SourceUnclassified     = "unclassified"
 
@@ -49,12 +48,7 @@ var validCategories = map[Category]struct{}{
 // Input is intentionally excluded from JSON and safe logging. TransientText must
 // only exist for the duration of Classify and must never be stored by callers.
 type Input struct {
-	Project             string        `json:"-"`
-	Repository          string        `json:"-"`
-	SubmissionType      string        `json:"-"`
-	ExplicitWorkRelated *WorkRelation `json:"-"`
-	ExplicitCategory    string        `json:"-"`
-	TransientText       string        `json:"-"`
+	TransientText string `json:"-"`
 }
 
 func (Input) String() string   { return "<workclassifier.Input redacted>" }
@@ -71,49 +65,11 @@ type Result struct {
 	ClassifierVersion    string       `json:"classifier_version"`
 }
 
-// Classify applies explicit metadata first, then local metadata rules, then
-// transient-text rules. Ambiguous or weak matches remain unclassified.
+// Classify applies local transient-text rules. Ambiguous matches remain unclassified.
 func Classify(input Input) Result {
-	explicitRelation, hasExplicitRelation := normalizedExplicitRelation(input.ExplicitWorkRelated)
-	explicitCategory, hasExplicitCategory := NormalizeCategory(input.ExplicitCategory)
-	if hasExplicitCategory {
-		if explicitCategory == CategoryUnclassified {
-			if hasExplicitRelation {
-				return newResult(explicitRelation, CategoryUnclassified, 0.60, SourceExplicitMetadata)
-			}
-			return newResult(WorkRelationUncertain, CategoryUnclassified, 0.50, SourceExplicitMetadata)
-		}
-		impliedRelation := relationForCategory(explicitCategory)
-		if hasExplicitRelation && explicitRelation != WorkRelationUncertain && explicitRelation != impliedRelation {
-			return newResult(WorkRelationUncertain, CategoryUnclassified, 0.50, SourceExplicitMetadata)
-		}
-		return newResult(impliedRelation, explicitCategory, 0.78, SourceExplicitMetadata)
-	}
-
-	if hasExplicitRelation && explicitRelation == WorkRelationNonWork {
-		return newResult(WorkRelationNonWork, CategoryNonWork, 0.78, SourceExplicitMetadata)
-	}
-
-	category, confidence, ok := classifyMetadata(input)
+	category, confidence, ok := classifyText(input.TransientText)
 	if ok {
-		inferredRelation := relationForCategory(category)
-		if hasExplicitRelation && explicitRelation != WorkRelationUncertain && explicitRelation != inferredRelation {
-			return newResult(WorkRelationUncertain, CategoryUnclassified, 0.50, SourceExplicitMetadata)
-		}
-		return newResult(inferredRelation, category, confidence, SourceLocalRule)
-	}
-
-	category, confidence, ok = classifyText(input.TransientText)
-	if ok {
-		inferredRelation := relationForCategory(category)
-		if hasExplicitRelation && explicitRelation != WorkRelationUncertain && explicitRelation != inferredRelation {
-			return newResult(WorkRelationUncertain, CategoryUnclassified, 0.50, SourceExplicitMetadata)
-		}
-		return newResult(inferredRelation, category, confidence, SourceLocalRule)
-	}
-
-	if hasExplicitRelation {
-		return newResult(explicitRelation, CategoryUnclassified, 0.60, SourceExplicitMetadata)
+		return newResult(relationForCategory(category), category, confidence, SourceLocalRule)
 	}
 	return newResult(WorkRelationUncertain, CategoryUnclassified, 0.30, SourceUnclassified)
 }
@@ -147,13 +103,6 @@ func relationForCategory(category Category) WorkRelation {
 		return WorkRelationUncertain
 	}
 	return WorkRelationWork
-}
-
-func normalizedExplicitRelation(value *WorkRelation) (WorkRelation, bool) {
-	if value == nil {
-		return "", false
-	}
-	return NormalizeWorkRelation(string(*value))
 }
 
 func IsValidCategory(category Category) bool {
