@@ -44,7 +44,7 @@ var (
 	credentialLabelPattern = regexp.MustCompile(
 		`(?i)(?:api[_-]?key|apikey|secret|token|authorization|private[_-]?key|password|passwd|client[_-]?secret)\s*[:=]`,
 	)
-	opaqueTokenPattern = regexp.MustCompile(`[A-Za-z0-9]{32,}`)
+	opaqueTokenPattern  = regexp.MustCompile(`[A-Za-z0-9]{32,}`)
 	promptPrefixPattern = regexp.MustCompile(
 		`(?i)^(?:please|help|write|create|explain|review|fix|translate|summarize|generate|tell|show|how|why|what|can|could|would|package|import|func|function|class|select|insert|update|delete)\b`,
 	)

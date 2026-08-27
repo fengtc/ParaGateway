@@ -163,19 +163,19 @@ var auditActionOverrides = map[string]string{
 // persisted. The map value is the safe audit marker; an empty value keeps the
 // stored RequestBody empty while action, actor, params and status are retained.
 var auditBodyOmittedRoutes = map[string]string{
-	"POST /api/v1/auth/passkey/login/finish":                                      "<credential-bearing body omitted>",
-	"POST /api/v1/user/passkeys/register/finish":                                  "<credential-bearing body omitted>",
-	"POST /api/v1/admin/accounts/import/codex-session":                            "<credential-bearing body omitted>",
-	"PUT /api/v1/admin/accounts/:id/ollama-cloud-usage/session":                   "<credential-bearing body omitted>",
-	"PUT /api/v1/admin/prompt-audit/config":                                       "<credential-bearing body omitted>",
-	"POST /api/v1/admin/prompt-audit/endpoints/probe":                             "<credential-bearing body omitted>",
-	"DELETE /api/v1/admin/prompt-audit/events/:id":                                "<credential-bearing body omitted>",
-	"POST /api/v1/admin/prompt-audit/events/batch-delete":                         "<credential-bearing body omitted>",
-	"POST /api/v1/admin/prompt-audit/events/delete-preview":                       "<credential-bearing body omitted>",
-	"POST /api/v1/admin/prompt-audit/events/delete-by-filter":                     "<credential-bearing body omitted>",
-	"POST /api/v1/usage/work-classifications/:usage_log_id/appeals":               "",
-	"POST /api/v1/admin/work-distribution/records/:usage_log_id/correction":        "",
-	"POST /api/v1/admin/work-distribution/reviews/:review_id/resolve":              "",
+	"POST /api/v1/auth/passkey/login/finish":                                "<credential-bearing body omitted>",
+	"POST /api/v1/user/passkeys/register/finish":                            "<credential-bearing body omitted>",
+	"POST /api/v1/admin/accounts/import/codex-session":                      "<credential-bearing body omitted>",
+	"PUT /api/v1/admin/accounts/:id/ollama-cloud-usage/session":             "<credential-bearing body omitted>",
+	"PUT /api/v1/admin/prompt-audit/config":                                 "<credential-bearing body omitted>",
+	"POST /api/v1/admin/prompt-audit/endpoints/probe":                       "<credential-bearing body omitted>",
+	"DELETE /api/v1/admin/prompt-audit/events/:id":                          "<credential-bearing body omitted>",
+	"POST /api/v1/admin/prompt-audit/events/batch-delete":                   "<credential-bearing body omitted>",
+	"POST /api/v1/admin/prompt-audit/events/delete-preview":                 "<credential-bearing body omitted>",
+	"POST /api/v1/admin/prompt-audit/events/delete-by-filter":               "<credential-bearing body omitted>",
+	"POST /api/v1/usage/work-classifications/:usage_log_id/appeals":         "",
+	"POST /api/v1/admin/work-distribution/records/:usage_log_id/correction": "",
+	"POST /api/v1/admin/work-distribution/reviews/:review_id/resolve":       "",
 }
 
 // NewAuditLogMiddleware 创建审计中间件。

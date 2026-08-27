@@ -75,7 +75,9 @@ func TestBatchImageWorkAttributionSafetyCheck(t *testing.T) {
 		Model: "gemini-2.5-flash-image", ItemCount: 1,
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM batch_image_jobs WHERE batch_id = $1", batchID) })
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM batch_image_jobs WHERE batch_id = $1", batchID)
+	})
 
 	base := func() map[string]any {
 		return map[string]any{
