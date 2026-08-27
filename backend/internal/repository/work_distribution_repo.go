@@ -22,9 +22,18 @@ const workRoleSQL = `COALESCE(NULLIF(BTRIM(job_role_value.value), ''), NULLIF(BT
 func buildWorkScopeWhere(filter service.WorkDistributionFilter) (string, []any) {
 	args := []any{filter.StartTime.UTC(), filter.EndTime.UTC()}
 	clauses := []string{"ul.created_at >= $1", "ul.created_at < $2"}
-	if filter.UserID > 0 { args = append(args, filter.UserID); clauses = append(clauses, fmt.Sprintf("ul.user_id = $%d", len(args))) }
-	if value := strings.TrimSpace(filter.Department); value != "" { args = append(args, value); clauses = append(clauses, fmt.Sprintf("LOWER(%s) = LOWER($%d)", workDepartmentSQL, len(args))) }
-	if value := strings.TrimSpace(filter.Role); value != "" { args = append(args, value); clauses = append(clauses, fmt.Sprintf("LOWER(%s) = LOWER($%d)", workRoleSQL, len(args))) }
+	if filter.UserID > 0 {
+		args = append(args, filter.UserID)
+		clauses = append(clauses, fmt.Sprintf("ul.user_id = $%d", len(args)))
+	}
+	if value := strings.TrimSpace(filter.Department); value != "" {
+		args = append(args, value)
+		clauses = append(clauses, fmt.Sprintf("LOWER(%s) = LOWER($%d)", workDepartmentSQL, len(args)))
+	}
+	if value := strings.TrimSpace(filter.Role); value != "" {
+		args = append(args, value)
+		clauses = append(clauses, fmt.Sprintf("LOWER(%s) = LOWER($%d)", workRoleSQL, len(args)))
+	}
 	return "WHERE " + strings.Join(clauses, " AND "), args
 }
 
@@ -45,14 +54,20 @@ LEFT JOIN usage_work_classifications wc ON wc.usage_log_id = ul.id
 ` + where + `
 GROUP BY ul.user_id, u.email, ` + workDepartmentSQL + `, ` + workRoleSQL + `, wc.work_related, wc.category`
 	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil { return nil, fmt.Errorf("query work distribution aggregates: %w", err) }
-	defer func(){ _ = rows.Close() }()
+	if err != nil {
+		return nil, fmt.Errorf("query work distribution aggregates: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
 	items := make([]service.WorkDistributionAggregate, 0)
 	for rows.Next() {
 		var item service.WorkDistributionAggregate
-		if err := rows.Scan(&item.UserID, &item.Email, &item.Department, &item.Role, &item.WorkRelated, &item.Category, &item.Requests, &item.TotalTokens, &item.ConfidenceSum, &item.ConfidenceSampleCount); err != nil { return nil, fmt.Errorf("scan work distribution aggregate: %w", err) }
+		if err := rows.Scan(&item.UserID, &item.Email, &item.Department, &item.Role, &item.WorkRelated, &item.Category, &item.Requests, &item.TotalTokens, &item.ConfidenceSum, &item.ConfidenceSampleCount); err != nil {
+			return nil, fmt.Errorf("scan work distribution aggregate: %w", err)
+		}
 		items = append(items, item)
 	}
-	if err := rows.Err(); err != nil { return nil, fmt.Errorf("iterate work distribution aggregates: %w", err) }
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate work distribution aggregates: %w", err)
+	}
 	return items, nil
 }

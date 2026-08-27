@@ -27,8 +27,8 @@ const (
 	WorkRelationNonWork   WorkRelation = "non_work"
 	WorkRelationUncertain WorkRelation = "uncertain"
 
-	SourceLocalRule        = "local_rule"
-	SourceUnclassified     = "unclassified"
+	SourceLocalRule    = "local_rule"
+	SourceUnclassified = "unclassified"
 
 	ClassifierVersion = "work-content-rules-v1"
 )

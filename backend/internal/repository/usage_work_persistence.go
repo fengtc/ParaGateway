@@ -11,15 +11,15 @@ import (
 )
 
 type usageWorkPrepared struct {
-	usageLogID int64
-	requestID string
-	apiKeyID int64
-	workRelated string
-	category string
-	weight int64
-	confidence float64
+	usageLogID           int64
+	requestID            string
+	apiKeyID             int64
+	workRelated          string
+	category             string
+	weight               int64
+	confidence           float64
 	classificationSource string
-	classifierVersion string
+	classifierVersion    string
 }
 
 func prepareUsageWork(log *service.UsageLog) usageWorkPrepared {
@@ -27,8 +27,12 @@ func prepareUsageWork(log *service.UsageLog) usageWorkPrepared {
 		workRelated: service.WorkRelatedUncertain, category: service.WorkCategoryUnclassified,
 		weight: int64(log.TotalTokens()), confidence: 0.30,
 		classificationSource: "unclassified", classifierVersion: "work-content-rules-v1"}
-	if row.weight < 1 { row.weight = 1 }
-	if log.WorkAttribution == nil { return row }
+	if row.weight < 1 {
+		row.weight = 1
+	}
+	if log.WorkAttribution == nil {
+		return row
+	}
 	value := service.NormalizeUsageWorkAttribution(*log.WorkAttribution)
 	row.workRelated, row.category = value.WorkRelated, value.Category
 	row.classificationSource, row.classifierVersion = value.ClassificationSource, value.ClassifierVersion
@@ -37,17 +41,32 @@ func prepareUsageWork(log *service.UsageLog) usageWorkPrepared {
 }
 
 func (r *usageLogRepository) persistUsageWorkByID(ctx context.Context, sqlq sqlExecutor, log *service.UsageLog, useSavepoint bool, _ bool) {
-	if log == nil || log.ID <= 0 { return }
-	row := prepareUsageWork(log); row.usageLogID = log.ID
-	if useSavepoint { if _, err := sqlq.ExecContext(ctx, "SAVEPOINT usage_work_classification"); err != nil { return } }
+	if log == nil || log.ID <= 0 {
+		return
+	}
+	row := prepareUsageWork(log)
+	row.usageLogID = log.ID
+	if useSavepoint {
+		if _, err := sqlq.ExecContext(ctx, "SAVEPOINT usage_work_classification"); err != nil {
+			return
+		}
+	}
 	err := persistUsageWorkRows(ctx, sqlq, []usageWorkPrepared{row})
-	if err != nil && useSavepoint { _, _ = sqlq.ExecContext(ctx, "ROLLBACK TO SAVEPOINT usage_work_classification") }
-	if useSavepoint { _, _ = sqlq.ExecContext(ctx, "RELEASE SAVEPOINT usage_work_classification") }
-	if err != nil { logger.LegacyPrintf("repository.usage_log", "persist work classification failed: %v", err) }
+	if err != nil && useSavepoint {
+		_, _ = sqlq.ExecContext(ctx, "ROLLBACK TO SAVEPOINT usage_work_classification")
+	}
+	if useSavepoint {
+		_, _ = sqlq.ExecContext(ctx, "RELEASE SAVEPOINT usage_work_classification")
+	}
+	if err != nil {
+		logger.LegacyPrintf("repository.usage_log", "persist work classification failed: %v", err)
+	}
 }
 
 func persistUsageWorkRows(ctx context.Context, sqlq sqlExecutor, rows []usageWorkPrepared) error {
-	if sqlq == nil || len(rows) == 0 { return nil }
+	if sqlq == nil || len(rows) == 0 {
+		return nil
+	}
 	query, args := buildUsageWorkUpsertQuery(rows)
 	_, err := sqlq.ExecContext(ctx, query, args...)
 	return err
@@ -60,13 +79,21 @@ func buildUsageWorkUpsertQuery(rows []usageWorkPrepared) (string, []any) {
 	casts := []string{"bigint", "text", "bigint", "text", "text", "bigint", "numeric", "text", "text"}
 	position := 1
 	for rowIndex, row := range rows {
-		if rowIndex > 0 { query.WriteByte(',') }
+		if rowIndex > 0 {
+			query.WriteByte(',')
+		}
 		query.WriteByte('(')
 		values := []any{row.usageLogID, row.requestID, row.apiKeyID, row.workRelated, row.category, row.weight, row.confidence, row.classificationSource, row.classifierVersion}
 		for index, value := range values {
-			if index > 0 { query.WriteByte(',') }
-			query.WriteString("$"); query.WriteString(strconv.Itoa(position)); query.WriteString("::"); query.WriteString(casts[index])
-			args = append(args, value); position++
+			if index > 0 {
+				query.WriteByte(',')
+			}
+			query.WriteString("$")
+			query.WriteString(strconv.Itoa(position))
+			query.WriteString("::")
+			query.WriteString(casts[index])
+			args = append(args, value)
+			position++
 		}
 		query.WriteByte(')')
 	}
@@ -86,9 +113,14 @@ ON CONFLICT (usage_log_id) DO NOTHING`)
 func usageWorkRowsForBatch(keys []string, requestsByKey map[string][]usageLogCreateRequest, stateMap map[string]usageLogBatchState, _ map[string]bool) []usageWorkPrepared {
 	rows := make([]usageWorkPrepared, 0, len(keys))
 	for _, key := range keys {
-		state, ok := stateMap[key]; requests := requestsByKey[key]
-		if !ok || state.ID <= 0 || len(requests) == 0 || requests[0].log == nil { continue }
-		row := prepareUsageWork(requests[0].log); row.usageLogID = state.ID; rows = append(rows, row)
+		state, ok := stateMap[key]
+		requests := requestsByKey[key]
+		if !ok || state.ID <= 0 || len(requests) == 0 || requests[0].log == nil {
+			continue
+		}
+		row := prepareUsageWork(requests[0].log)
+		row.usageLogID = state.ID
+		rows = append(rows, row)
 	}
 	return rows
 }
