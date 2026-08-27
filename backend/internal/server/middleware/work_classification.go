@@ -16,7 +16,10 @@ import (
 )
 
 const (
-	maxWorkClassificationBodyBytes = 64 * 1024
+	// Codex/Responses requests can legitimately contain a large conversation
+	// history. Keep the classification read bounded, but do not reject normal
+	// context windows before the user message can be decoded.
+	maxWorkClassificationBodyBytes = 4 * 1024 * 1024
 	maxWorkClassificationTextBytes = 16 * 1024
 )
 

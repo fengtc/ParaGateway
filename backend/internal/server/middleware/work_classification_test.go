@@ -143,6 +143,19 @@ func TestReadTransientWorkTextForwardsBodyClose(t *testing.T) {
 	require.True(t, body.closed)
 }
 
+func TestReadTransientWorkTextHandlesLargeConversationHistory(t *testing.T) {
+	filler := strings.Repeat("assistant context ", 8*1024)
+	body := `{"messages":[{"role":"assistant","content":"` + filler + `"},{"role":"user","content":"请修复编译错误并补充单元测试"}]}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+
+	require.Greater(t, len(body), 64*1024)
+	require.Contains(t, readTransientWorkText(request), "请修复编译错误并补充单元测试")
+	preserved, err := io.ReadAll(request.Body)
+	require.NoError(t, err)
+	require.Equal(t, body, string(preserved))
+}
+
 func TestWorkClassificationSkipsPanelRoutes(t *testing.T) {
 	router := gin.New()
 	router.Use(WorkClassification())
