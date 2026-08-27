@@ -15,9 +15,10 @@ const (
 	HeaderRepository     = "X-Para-Repository"
 	HeaderSubmissionType = "X-Para-Submission-Type"
 
-	MaxMetadataRunes      = 160
-	maxProjectRunes       = 100
-	maxTransientTextRunes = 16 * 1024
+	MaxMetadataRunes          = 160
+	maxProjectRunes           = 100
+	maxClassifierVersionRunes = 64
+	maxTransientTextRunes     = 16 * 1024
 )
 
 var (
@@ -29,12 +30,21 @@ var (
 		regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`),
 		regexp.MustCompile(`\beyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b`),
 	}
+	metadataCredentialPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)(?:bearer|basic)\s+[a-z0-9._~+/=-]{12,}`),
+		regexp.MustCompile(`(?i)(?:sk|rk|pk)-[a-z0-9_-]{16,}`),
+		regexp.MustCompile(`(?i)gh[pousr]_[a-z0-9]{20,}`),
+		regexp.MustCompile(`(?i)github_pat_[a-z0-9_]{20,}`),
+		regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
+		regexp.MustCompile(`eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}`),
+		regexp.MustCompile(`AIza[0-9A-Za-z_-]{30,}`),
+		regexp.MustCompile(`(?i)xox[baprs]-[a-z0-9-]{16,}`),
+	}
 	urlUserInfoPattern     = regexp.MustCompile(`(?i)(?:https?|ssh|git)://[^/@\s]+:[^/@\s]+@`)
 	credentialLabelPattern = regexp.MustCompile(
 		`(?i)(?:api[_-]?key|apikey|secret|token|authorization|private[_-]?key|password|passwd|client[_-]?secret)\s*[:=]`,
 	)
-	googleAPIKeyPattern = regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{30,}\b`)
-	slackTokenPattern   = regexp.MustCompile(`(?i)\bxox[baprs]-[a-z0-9-]{16,}\b`)
+	opaqueTokenPattern = regexp.MustCompile(`[A-Za-z0-9]{32,}`)
 	promptPrefixPattern = regexp.MustCompile(
 		`(?i)^(?:please|help|write|create|explain|review|fix|translate|summarize|generate|tell|show|how|why|what|can|could|would|package|import|func|function|class|select|insert|update|delete)\b`,
 	)
@@ -81,6 +91,12 @@ func CleanRepositoryRef(raw string) string {
 	return cleaned
 }
 
+// CleanClassifierVersion accepts only a short structured rule/model version.
+// Oversized or unsafe values are discarded in full instead of truncated.
+func CleanClassifierVersion(raw string) string {
+	return cleanStructuredIdentifier(raw, maxClassifierVersionRunes, false)
+}
+
 func cleanStructuredIdentifier(raw string, maxRunes int, allowSlash bool) string {
 	if raw == "" || !utf8.ValidString(raw) || containsUnsafeMetadata(raw) {
 		return ""
@@ -98,24 +114,29 @@ func cleanStructuredIdentifier(raw string, maxRunes int, allowSlash bool) string
 	if looksLikeFreeText(cleaned) {
 		return ""
 	}
+	hasIdentifierCharacter := false
 	for _, r := range cleaned {
 		switch {
-		case unicode.IsLetter(r), unicode.IsDigit(r), unicode.IsMark(r):
+		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z', r >= '0' && r <= '9', r >= '一' && r <= '龥':
+			hasIdentifierCharacter = true
 		case r == '-' || r == '_' || r == '.':
 		case allowSlash && r == '/':
 		default:
 			return ""
 		}
 	}
+	if !hasIdentifierCharacter {
+		return ""
+	}
 	return cleaned
 }
 
 func containsUnsafeMetadata(raw string) bool {
 	if urlUserInfoPattern.MatchString(raw) || credentialLabelPattern.MatchString(raw) ||
-		googleAPIKeyPattern.MatchString(raw) || slackTokenPattern.MatchString(raw) {
+		opaqueTokenPattern.MatchString(raw) {
 		return true
 	}
-	for _, pattern := range standaloneCredentialPatterns {
+	for _, pattern := range metadataCredentialPatterns {
 		if pattern.MatchString(raw) {
 			return true
 		}

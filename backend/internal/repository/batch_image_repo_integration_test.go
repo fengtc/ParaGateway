@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,6 +64,54 @@ func TestBatchImageRepository_CreateJobAndDuplicates(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, service.ErrBatchImageJobExists))
+}
+
+func TestBatchImageWorkAttributionSafetyCheck(t *testing.T) {
+	ctx := context.Background()
+	repo := newBatchImageRepositoryWithSQL(integrationDB)
+	batchID := batchImageTestID(t, "attribution-check")
+	_, err := repo.CreateBatchImageJob(ctx, service.CreateBatchImageJobParams{
+		BatchID: batchID, UserID: 1001, Provider: service.BatchImageProviderGeminiAPI,
+		Model: "gemini-2.5-flash-image", ItemCount: 1,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM batch_image_jobs WHERE batch_id = $1", batchID) })
+
+	base := func() map[string]any {
+		return map[string]any{
+			"work_related": "work", "category": "coding", "confidence": 0.8,
+			"classification_source": "local_rule", "classifier_version": "rules-v1",
+		}
+	}
+	unsafe := []func(map[string]any){
+		func(v map[string]any) { v["project_ref"] = strings.Repeat("a", 32) },
+		func(v map[string]any) { v["repository_ref"] = "team/" + strings.Repeat("b", 32) },
+		func(v map[string]any) { v["project_ref"] = nil },
+		func(v map[string]any) { v["project_ref"] = 42 },
+		func(v map[string]any) { v["project_ref"] = map[string]any{"prompt": "private"} },
+		func(v map[string]any) { v["classifier_version"] = "team_" + "gh" + "p_" + strings.Repeat("c", 20) },
+		func(v map[string]any) { v["confidence"] = 2 },
+	}
+	for _, mutate := range unsafe {
+		payload := base()
+		mutate(payload)
+		encoded, marshalErr := json.Marshal(payload)
+		require.NoError(t, marshalErr)
+		_, err = integrationDB.ExecContext(ctx, `UPDATE batch_image_jobs SET work_attribution = $2::jsonb WHERE batch_id = $1`, batchID, string(encoded))
+		require.Error(t, err)
+		var pqErr *pq.Error
+		require.ErrorAs(t, err, &pqErr)
+		require.Equal(t, pq.ErrorCode("23514"), pqErr.Code)
+		require.Equal(t, "batch_image_jobs_work_reference_safety_check", pqErr.Constraint)
+	}
+
+	valid := base()
+	valid["project_ref"] = "客户智能分析平台"
+	valid["repository_ref"] = "fengtc/ParaGateway"
+	encoded, err := json.Marshal(valid)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE batch_image_jobs SET work_attribution = $2::jsonb WHERE batch_id = $1`, batchID, string(encoded))
+	require.NoError(t, err)
 }
 
 func TestBatchImageRepository_InvalidProvider(t *testing.T) {

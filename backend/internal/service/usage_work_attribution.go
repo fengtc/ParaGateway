@@ -42,7 +42,7 @@ func NormalizeUsageWorkAttribution(attribution UsageWorkAttribution) UsageWorkAt
 	attribution.WorkRelated = strings.ToLower(strings.TrimSpace(attribution.WorkRelated))
 	attribution.Category = strings.ToLower(strings.TrimSpace(attribution.Category))
 	attribution.ClassificationSource = strings.ToLower(strings.TrimSpace(attribution.ClassificationSource))
-	attribution.ClassifierVersion = truncateUsageWorkField(strings.TrimSpace(attribution.ClassifierVersion), 64)
+	attribution.ClassifierVersion = workclassifier.CleanClassifierVersion(attribution.ClassifierVersion)
 	attribution.Confidence = math.Max(0, math.Min(1, attribution.Confidence))
 
 	switch attribution.ClassificationSource {
@@ -66,17 +66,6 @@ func NormalizeUsageWorkAttribution(attribution UsageWorkAttribution) UsageWorkAt
 		attribution.Category = WorkCategoryUnclassified
 	}
 	return attribution
-}
-
-func truncateUsageWorkField(value string, maxRunes int) string {
-	if maxRunes <= 0 {
-		return ""
-	}
-	runes := []rune(value)
-	if len(runes) <= maxRunes {
-		return value
-	}
-	return string(runes[:maxRunes])
 }
 
 func UsageWorkAttributionFromContext(ctx context.Context) (UsageWorkAttribution, bool) {

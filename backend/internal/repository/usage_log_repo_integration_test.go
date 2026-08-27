@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
@@ -313,6 +314,60 @@ INSERT INTO usage_work_metadata (
 SELECT department, role FROM usage_work_metadata WHERE usage_log_id = $1`, log.ID).Scan(&department, &role))
 	require.Equal(t, "研发平台部", department)
 	require.Equal(t, "高级研发工程师", role)
+}
+
+func TestUsageWorkMetadataProjectRepositoryChecks(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	user := mustCreateUser(t, client, &service.User{Email: "usage-reference-check-" + uuid.NewString() + "@example.com"})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: usageWorkTestCanary("s", "k-usage-reference-check-") + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-reference-check-" + uuid.NewString()})
+	log := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: uuid.NewString(), Model: "claude-3", InputTokens: 5, OutputTokens: 5,
+		TotalCost: 0.1, ActualCost: 0.1, CreatedAt: time.Now().UTC(),
+	}
+	inserted, err := repo.createSingle(ctx, integrationDB, log)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM usage_work_metadata WHERE usage_log_id = $1", log.ID)
+	require.NoError(t, err)
+
+	opaque := strings.Repeat("r", 32)
+	unsafe := []struct {
+		project, repository, constraint string
+	}{
+		{project: opaque, repository: "team/repository", constraint: "usage_work_metadata_project_ref_check"},
+		{project: "safe-project", repository: "team/" + opaque, constraint: "usage_work_metadata_repository_ref_check"},
+		{project: "team_" + usageWorkTestCanary("gh", "p_", strings.Repeat("p", 20)), repository: "team/repository", constraint: "usage_work_metadata_project_ref_check"},
+	}
+	for _, tc := range unsafe {
+		_, err = integrationDB.ExecContext(ctx, `
+INSERT INTO usage_work_metadata (usage_log_id, project_ref, repository_ref, source, created_at, updated_at)
+VALUES ($1, $2, $3, 'manual', NOW(), NOW())`, log.ID, tc.project, tc.repository)
+		require.Error(t, err)
+		var pqErr *pq.Error
+		require.ErrorAs(t, err, &pqErr)
+		require.Equal(t, pq.ErrorCode("23514"), pqErr.Code)
+		require.Equal(t, tc.constraint, pqErr.Constraint)
+	}
+
+	short := strings.Repeat("s", 31)
+	_, err = integrationDB.ExecContext(ctx, `
+INSERT INTO usage_work_metadata (usage_log_id, project_ref, repository_ref, source, created_at, updated_at)
+VALUES ($1, $2, $3, 'manual', NOW(), NOW())`, log.ID, short, "team/"+short)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, `
+UPDATE usage_work_metadata
+SET project_ref = '客户智能分析平台', repository_ref = 'fengtc/ParaGateway'
+WHERE usage_log_id = $1`, log.ID)
+	require.NoError(t, err)
+	var project, repository string
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+SELECT project_ref, repository_ref FROM usage_work_metadata WHERE usage_log_id = $1`, log.ID).Scan(&project, &repository))
+	require.Equal(t, "客户智能分析平台", project)
+	require.Equal(t, "fengtc/ParaGateway", repository)
 }
 
 func TestUsageLogRepositoryCreateSingle_ConflictSelfHealsMissingWorkWithoutResnapshot(t *testing.T) {

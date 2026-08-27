@@ -21,7 +21,7 @@ const (
 )
 
 var workTopLevelTextKeys = map[string]struct{}{
-	"input": {}, "message": {}, "messages": {}, "prompt": {}, "query": {},
+	"contents": {}, "input": {}, "message": {}, "messages": {}, "prompt": {}, "query": {},
 }
 
 var workNestedTextKeys = map[string]struct{}{

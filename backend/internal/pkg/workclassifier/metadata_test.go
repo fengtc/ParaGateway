@@ -69,6 +69,18 @@ func TestCleanMetadataFieldRejectsSecretsCodeJSONAndFreeText(t *testing.T) {
 			input: "github_" + "pat_" + strings.Repeat("1", 30),
 		},
 		{
+			name:  "opaque token without a known prefix",
+			input: strings.Repeat("a", 32),
+		},
+		{
+			name:  "embedded GitHub token prefix",
+			input: "team_" + "gh" + "p_" + strings.Repeat("g", 20),
+		},
+		{
+			name:  "embedded provider key prefix",
+			input: "team_" + "s" + "k-" + strings.Repeat("h", 16),
+		},
+		{
 			name:  "URL user info",
 			input: "https://admin:password@example.test/repo",
 		},
@@ -117,6 +129,26 @@ func TestCleanMetadataFieldAcceptsCommonIdentifiers(t *testing.T) {
 	require.Equal(t, "研发组/智能分析-service.v2", CleanRepositoryRef("研发组/智能分析-service.v2"))
 	require.Empty(t, CleanMetadataField("Customer Platform"))
 	require.Empty(t, CleanRepositoryRef("org/team/repository"))
+	require.Empty(t, CleanMetadataField("---"))
+}
+
+func TestProjectAndRepositoryRefsRejectOpaqueLongTokensWithoutRejectingShortNames(t *testing.T) {
+	shortIdentifier := strings.Repeat("a", 31)
+	opaqueToken := strings.Repeat("b", 32)
+
+	require.Equal(t, shortIdentifier, CleanProjectRef(shortIdentifier))
+	require.Equal(t, "team/"+shortIdentifier, CleanRepositoryRef("team/"+shortIdentifier))
+	require.Equal(t, "customer.analytics.platform.v2", CleanProjectRef("customer.analytics.platform.v2"))
+	require.Equal(t, "customer-analytics-platform-service", CleanProjectRef("customer-analytics-platform-service"))
+	require.Empty(t, CleanProjectRef(opaqueToken))
+	require.Empty(t, CleanRepositoryRef("team/"+opaqueToken))
+	require.Empty(t, CleanRepositoryRef(opaqueToken+"/service"))
+}
+
+func TestCleanClassifierVersionUsesFailClosedLengthBoundary(t *testing.T) {
+	require.Equal(t, "work-classifier-v1", CleanClassifierVersion("work-classifier-v1"))
+	require.Empty(t, CleanClassifierVersion(strings.Repeat("v-", 32)+"v"))
+	require.Empty(t, CleanClassifierVersion(strings.Repeat("-", 64)+"v"))
 }
 
 func TestCleanMetadataFieldRejectsOversizedValue(t *testing.T) {

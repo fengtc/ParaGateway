@@ -77,6 +77,49 @@ func TestExtractTransientWorkTextIgnoresNonHumanConversationHistory(t *testing.T
 	require.Equal(t, "write technical documentation", text)
 }
 
+func TestExtractTransientWorkTextSupportsGeminiContentsParts(t *testing.T) {
+	text := extractTransientWorkText([]byte(`{
+		"systemInstruction":{"parts":[{"text":"personal entertainment movie recommendation"}]},
+		"contents":[
+			{"role":"model","parts":[{"text":"write technical documentation"}]},
+			{"role":"user","parts":[
+				{"text":"请修复编译错误并补充单元测试"},
+				{"inline_data":{"mime_type":"image/png","data":"private-image-data"}}
+			]},
+			{"parts":[{"text":"重构后端接口"}]}
+		]
+	}`))
+
+	require.Equal(t, "请修复编译错误并补充单元测试 重构后端接口", text)
+	require.NotContains(t, text, "personal entertainment")
+	require.NotContains(t, text, "write technical documentation")
+	require.NotContains(t, text, "private-image-data")
+}
+
+func TestWorkClassificationSupportsGeminiContentsAndPreservesBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := `{"contents":[{"role":"model","parts":[{"text":"write documentation"}]},{"role":"user","parts":[{"text":"请修复编译错误并补充单元测试"}]}]}`
+	router := gin.New()
+	router.Use(WorkClassification())
+	router.POST("/v1beta/models/gemini-2.5-pro:generateContent", func(c *gin.Context) {
+		attribution, ok := service.UsageWorkAttributionFromContext(c.Request.Context())
+		require.True(t, ok)
+		require.Equal(t, service.WorkRelatedWork, attribution.WorkRelated)
+		require.Equal(t, service.WorkCategoryCoding, attribution.Category)
+
+		preserved, err := io.ReadAll(c.Request.Body)
+		require.NoError(t, err)
+		require.Equal(t, body, string(preserved))
+		c.Status(http.StatusNoContent)
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-pro:generateContent", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusNoContent, response.Code)
+}
+
 func TestExtractTransientWorkTextUsesStableMapOrder(t *testing.T) {
 	body := []byte(`{"prompt":{"z":{"text":"second"},"a":{"text":"first"}}}`)
 	for range 20 {

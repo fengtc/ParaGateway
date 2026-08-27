@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,6 +34,26 @@ func TestNormalizeUsageWorkAttributionEnforcesStructuredBoundary(t *testing.T) {
 	})
 	require.Equal(t, WorkRelatedWork, paired.WorkRelated)
 	require.Equal(t, WorkCategoryCoding, paired.Category)
+}
+
+func TestNormalizeUsageWorkAttributionRejectsUnsafeClassifierVersion(t *testing.T) {
+	unsafeVersion := "team_" + "gh" + "p_" + strings.Repeat("v", 20)
+	got := NormalizeUsageWorkAttribution(UsageWorkAttribution{
+		WorkRelated:          WorkRelatedWork,
+		Category:             WorkCategoryCoding,
+		Confidence:           0.8,
+		ClassificationSource: "local_rule",
+		ClassifierVersion:    unsafeVersion,
+	})
+
+	require.Empty(t, got.ClassifierVersion)
+	require.NotContains(t, got.ClassifierVersion, unsafeVersion)
+
+	overlong := NormalizeUsageWorkAttribution(UsageWorkAttribution{
+		WorkRelated: WorkRelatedWork, Category: WorkCategoryCoding, Confidence: 0.8,
+		ClassificationSource: "local_rule", ClassifierVersion: strings.Repeat("v-", 32) + "v",
+	})
+	require.Empty(t, overlong.ClassifierVersion)
 }
 
 func TestUsageWorkAttributionJSONContainsOnlyAllowlistedStructuredFields(t *testing.T) {
