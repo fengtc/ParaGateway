@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 type keywordRule struct {
@@ -80,6 +81,17 @@ func classifyText(text string) (Category, float64, bool) {
 	}
 	confidence := 0.62 + clamp(score-2, 0, 4)*0.05 + clamp(margin-0.75, 0, 2)*0.03
 	return category, clamp(confidence, 0.62, 0.88), true
+}
+
+func normalizeTransientText(value string) string {
+	if value == "" || !utf8.ValidString(value) {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) > 16*1024 {
+		value = string(runes[:16*1024])
+	}
+	return normalizeForMatching(value)
 }
 
 func bestScore(scores map[Category]float64) (Category, float64, float64) {
