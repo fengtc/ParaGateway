@@ -9,8 +9,8 @@
         <label><span>人员</span><select value="@SelectedUser" @onchange="UserChanged"><option value="">全部人员</option>@foreach (var item in people.OrderBy(x => x.Email)) { <option value="@item.UserId">@item.Email</option> }</select></label>
         <label><span>部门</span><select value="@department" @onchange="e => department = e.Value?.ToString() ?? string.Empty"><option value="">全部部门</option>@foreach (var item in departments.Order()) { <option value="@item">@Label(item)</option> }</select></label>
         <label><span>岗位角色</span><select value="@role" @onchange="e => role = e.Value?.ToString() ?? string.Empty"><option value="">全部岗位</option>@foreach (var item in roles.Order()) { <option value="@item">@Label(item)</option> }</select></label>
-        <label><span>开始日期</span><input type="date" value="@startDate" @onchange="e => startDate = e.Value?.ToString() ?? startDate" /></label>
-        <label><span>结束日期</span><input type="date" value="@endDate" @onchange="e => endDate = e.Value?.ToString() ?? endDate" /></label>
+        <label><span>开始时间</span><input type="datetime-local" step="1" value="@startDate" aria-label="开始时间（精确到秒）" @onchange="e => startDate = e.Value?.ToString() ?? startDate" /></label>
+        <label><span>结束时间</span><input type="datetime-local" step="1" value="@endDate" aria-label="结束时间（精确到秒）" @onchange="e => endDate = e.Value?.ToString() ?? endDate" /></label>
         <div class="work-actions"><div class="metric-switch"><button class="@(metric == "requests" ? "active" : null)" @onclick='() => SetMetricAsync("requests")'>提交次数</button><button class="@(metric == "tokens" ? "active" : null)" @onclick='() => SetMetricAsync("tokens")'>工作量</button></div><button class="button primary" disabled="@loading" @onclick="LoadAsync"><Icon Name="filter" Size="16" />应用</button></div>
     </section>
 
@@ -51,8 +51,8 @@
     private WorkDistributionSummaryDto? summary;
     private bool loading;
     private string? error;
-    private string startDate = DateTime.Today.AddDays(-29).ToString("yyyy-MM-dd");
-    private string endDate = DateTime.Today.ToString("yyyy-MM-dd");
+    private string startDate = DateTime.Today.AddDays(-29).ToString("yyyy-MM-dd'T'00:00:00", CultureInfo.InvariantCulture);
+    private string endDate = DateTime.Today.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-dd'T'23:59:59", CultureInfo.InvariantCulture);
     private string department = string.Empty;
     private string role = string.Empty;
     private string metric = "requests";

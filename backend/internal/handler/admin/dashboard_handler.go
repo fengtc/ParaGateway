@@ -31,8 +31,10 @@ func NewDashboardHandler(dashboardService *service.DashboardService, aggregation
 	}
 }
 
-// parseTimeRange parses start_date, end_date query parameters
-// Uses user's timezone if provided, otherwise falls back to server timezone
+// parseTimeRange parses start_date and end_date query parameters. Date-only
+// values retain the historical whole-day semantics; datetime-local values are
+// accepted for precise filtering and the end second is inclusive.
+// Uses user's timezone if provided, otherwise falls back to server timezone.
 func parseTimeRange(c *gin.Context) (time.Time, time.Time) {
 	userTZ := c.Query("timezone") // Get user's timezone from request
 	now := timezone.NowInUserLocation(userTZ)
@@ -42,7 +44,7 @@ func parseTimeRange(c *gin.Context) (time.Time, time.Time) {
 	var startTime, endTime time.Time
 
 	if startDate != "" {
-		if t, err := timezone.ParseInUserLocation("2006-01-02", startDate, userTZ); err == nil {
+		if t, ok := parseDashboardTimeValue(startDate, userTZ, false); ok {
 			startTime = t
 		} else {
 			startTime = timezone.StartOfDayInUserLocation(now.AddDate(0, 0, -7), userTZ)
@@ -52,8 +54,8 @@ func parseTimeRange(c *gin.Context) (time.Time, time.Time) {
 	}
 
 	if endDate != "" {
-		if t, err := timezone.ParseInUserLocation("2006-01-02", endDate, userTZ); err == nil {
-			endTime = t.Add(24 * time.Hour) // Include the end date
+		if t, ok := parseDashboardTimeValue(endDate, userTZ, true); ok {
+			endTime = t
 		} else {
 			endTime = timezone.StartOfDayInUserLocation(now.AddDate(0, 0, 1), userTZ)
 		}
@@ -62,6 +64,37 @@ func parseTimeRange(c *gin.Context) (time.Time, time.Time) {
 	}
 
 	return startTime, endTime
+}
+
+func parseDashboardTimeValue(raw, userTZ string, end bool) (time.Time, bool) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return time.Time{}, false
+	}
+
+	// datetime-local emits the first layout. The remaining layouts keep the
+	// endpoint tolerant of clients that omit seconds or use a space separator.
+	for _, layout := range []string{
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+	} {
+		if parsed, err := timezone.ParseInUserLocation(layout, value, userTZ); err == nil {
+			if end {
+				return parsed.Add(time.Second), true
+			}
+			return parsed, true
+		}
+	}
+
+	if parsed, err := timezone.ParseInUserLocation("2006-01-02", value, userTZ); err == nil {
+		if end {
+			return parsed.Add(24 * time.Hour), true
+		}
+		return parsed, true
+	}
+	return time.Time{}, false
 }
 
 func parseOptionalBoolDashboardFilter(c *gin.Context, name string) (*bool, error) {

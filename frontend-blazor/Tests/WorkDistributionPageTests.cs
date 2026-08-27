@@ -9,7 +9,7 @@ public sealed class WorkDistributionPageTests
     {
         var root = FindRepositoryRoot();
         var page = File.ReadAllText(Path.Combine(root, "frontend-blazor", "Pages", "AdminWorkDistribution.razor"));
-        foreach (var text in new[] { "人员", "部门", "岗位角色", "开始日期", "结束日期", "工作相关占比", "编码", "文档", "分析/运维", "不确定", "样本数", "平均置信度", "stacked-chart" })
+        foreach (var text in new[] { "人员", "部门", "岗位角色", "开始时间", "结束时间", "datetime-local", "step=\"1\"", "工作相关占比", "编码", "文档", "分析/运维", "不确定", "样本数", "平均置信度", "stacked-chart" })
             Assert.Contains(text, page, StringComparison.Ordinal);
         foreach (var excluded in new[] { "申诉", "纠正分类", "分类明细", "MinSampleSize", "MinCohortSize" })
             Assert.DoesNotContain(excluded, page, StringComparison.Ordinal);

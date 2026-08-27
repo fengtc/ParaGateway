@@ -16,17 +16,24 @@ import (
 
 func TestParseTimeRange(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	req := httptest.NewRequest(http.MethodGet, "/?start_date=2024-01-01&end_date=2024-01-02&timezone=UTC", nil)
-	c.Request = req
+	newContext := func(rawURL string) *gin.Context {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodGet, rawURL, nil)
+		return c
+	}
+	c := newContext("/?start_date=2024-01-01&end_date=2024-01-02&timezone=UTC")
 
 	start, end := parseTimeRange(c)
 	require.Equal(t, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), start)
 	require.Equal(t, time.Date(2024, 1, 3, 0, 0, 0, 0, time.UTC), end)
 
-	req = httptest.NewRequest(http.MethodGet, "/?start_date=bad&timezone=UTC", nil)
-	c.Request = req
+	c = newContext("/?start_date=2024-01-01T12:34:56&end_date=2024-01-02T01:02:03&timezone=UTC")
+	start, end = parseTimeRange(c)
+	require.Equal(t, time.Date(2024, 1, 1, 12, 34, 56, 0, time.UTC), start)
+	require.Equal(t, time.Date(2024, 1, 2, 1, 2, 4, 0, time.UTC), end)
+
+	c = newContext("/?start_date=bad&timezone=UTC")
 	start, end = parseTimeRange(c)
 	require.False(t, start.IsZero())
 	require.False(t, end.IsZero())
