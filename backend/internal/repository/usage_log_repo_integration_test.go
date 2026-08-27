@@ -18,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	dbmigrations "github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
@@ -368,6 +369,146 @@ WHERE usage_log_id = $1`, log.ID)
 SELECT project_ref, repository_ref FROM usage_work_metadata WHERE usage_log_id = $1`, log.ID).Scan(&project, &repository))
 	require.Equal(t, "客户智能分析平台", project)
 	require.Equal(t, "fengtc/ParaGateway", repository)
+}
+
+func TestUsageWorkReviewPreviousPairConstraint(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	user := mustCreateUser(t, client, &service.User{Email: "usage-review-pair-" + uuid.NewString() + "@example.com"})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: usageWorkTestCanary("s", "k-usage-review-pair-") + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-review-pair-" + uuid.NewString()})
+	log := &service.UsageLog{
+		UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+		RequestID: uuid.NewString(), Model: "claude-3", InputTokens: 5, OutputTokens: 5,
+		TotalCost: 0.1, ActualCost: 0.1, CreatedAt: time.Now().UTC(),
+	}
+	inserted, err := repo.createSingle(ctx, integrationDB, log)
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	for _, tc := range []struct {
+		name                string
+		previousWorkRelated any
+		previousCategory    any
+	}{
+		{name: "missing work relation", previousWorkRelated: nil, previousCategory: "coding"},
+		{name: "missing category", previousWorkRelated: "work", previousCategory: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := integrationDB.ExecContext(ctx, `
+INSERT INTO usage_work_reviews (
+  usage_log_id, previous_work_related, previous_category,
+  proposed_work_related, proposed_category, reason_code
+) VALUES ($1, $2, $3, 'work', 'coding', 'missing_classification')`,
+				log.ID, tc.previousWorkRelated, tc.previousCategory)
+			require.Error(t, err)
+			var pqErr *pq.Error
+			require.ErrorAs(t, err, &pqErr)
+			require.Equal(t, pq.ErrorCode("23514"), pqErr.Code)
+			require.Equal(t, "usage_work_reviews_previous_pair_presence_check", pqErr.Constraint)
+		})
+	}
+
+	_, err = integrationDB.ExecContext(ctx, `
+INSERT INTO usage_work_reviews (
+  usage_log_id, previous_work_related, previous_category,
+  proposed_work_related, proposed_category, reason_code
+) VALUES ($1, NULL, NULL, 'work', 'coding', 'missing_classification')`, log.ID)
+	require.NoError(t, err)
+	_, err = integrationDB.ExecContext(ctx, "DELETE FROM usage_work_reviews WHERE usage_log_id = $1", log.ID)
+	require.NoError(t, err)
+
+	_, err = integrationDB.ExecContext(ctx, `
+INSERT INTO usage_work_reviews (
+  usage_log_id, previous_work_related, previous_category,
+  proposed_work_related, proposed_category, reason_code
+) VALUES ($1, 'work', 'coding', 'work', 'documentation', 'incorrect_category')`, log.ID)
+	require.NoError(t, err)
+}
+
+func TestWorkReviewPreviousPairMigrationCleansExistingRowsAndIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := newUsageLogRepositoryWithSQL(client, integrationDB)
+	user := mustCreateUser(t, client, &service.User{Email: "usage-review-pair-upgrade-" + uuid.NewString() + "@example.com"})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{UserID: user.ID, Key: usageWorkTestCanary("s", "k-usage-review-pair-upgrade-") + uuid.NewString(), Name: "k"})
+	account := mustCreateAccount(t, client, &service.Account{Name: "acc-usage-review-pair-upgrade-" + uuid.NewString()})
+	createLog := func() int64 {
+		log := &service.UsageLog{
+			UserID: user.ID, APIKeyID: apiKey.ID, AccountID: account.ID,
+			RequestID: uuid.NewString(), Model: "claude-3", InputTokens: 5, OutputTokens: 5,
+			TotalCost: 0.1, ActualCost: 0.1, CreatedAt: time.Now().UTC(),
+		}
+		inserted, err := repo.createSingle(ctx, integrationDB, log)
+		require.NoError(t, err)
+		require.True(t, inserted)
+		return log.ID
+	}
+	testCases := []struct {
+		name                string
+		usageLogID          int64
+		previousWorkRelated any
+		previousCategory    any
+		wantWorkRelated     string
+		wantCategory        string
+	}{
+		{name: "derive work from category", usageLogID: createLog(), previousWorkRelated: nil, previousCategory: "coding", wantWorkRelated: "work", wantCategory: "coding"},
+		{name: "clear ambiguous work category", usageLogID: createLog(), previousWorkRelated: "work", previousCategory: nil, wantWorkRelated: "<null>", wantCategory: "<null>"},
+		{name: "derive non-work relation", usageLogID: createLog(), previousWorkRelated: nil, previousCategory: "non_work", wantWorkRelated: "non_work", wantCategory: "non_work"},
+		{name: "derive uncertain relation", usageLogID: createLog(), previousWorkRelated: nil, previousCategory: "unclassified", wantWorkRelated: "uncertain", wantCategory: "unclassified"},
+		{name: "derive non-work category", usageLogID: createLog(), previousWorkRelated: "non_work", previousCategory: nil, wantWorkRelated: "non_work", wantCategory: "non_work"},
+		{name: "derive uncertain category", usageLogID: createLog(), previousWorkRelated: "uncertain", previousCategory: nil, wantWorkRelated: "uncertain", wantCategory: "unclassified"},
+		{name: "preserve empty previous snapshot", usageLogID: createLog(), previousWorkRelated: nil, previousCategory: nil, wantWorkRelated: "<null>", wantCategory: "<null>"},
+		{name: "preserve work snapshot", usageLogID: createLog(), previousWorkRelated: "work", previousCategory: "coding", wantWorkRelated: "work", wantCategory: "coding"},
+		{name: "preserve non-work snapshot", usageLogID: createLog(), previousWorkRelated: "non_work", previousCategory: "non_work", wantWorkRelated: "non_work", wantCategory: "non_work"},
+		{name: "preserve uncertain snapshot", usageLogID: createLog(), previousWorkRelated: "uncertain", previousCategory: "unclassified", wantWorkRelated: "uncertain", wantCategory: "unclassified"},
+	}
+
+	migrationSQL, err := dbmigrations.FS.ReadFile("238_work_review_previous_pair.sql")
+	require.NoError(t, err)
+	tx := testTx(t)
+	_, err = tx.ExecContext(ctx, `
+ALTER TABLE usage_work_reviews
+DROP CONSTRAINT usage_work_reviews_previous_pair_presence_check`)
+	require.NoError(t, err)
+	for _, tc := range testCases {
+		_, err = tx.ExecContext(ctx, `
+INSERT INTO usage_work_reviews (
+  usage_log_id, previous_work_related, previous_category,
+  proposed_work_related, proposed_category, reason_code
+) VALUES ($1, $2, $3, 'work', 'coding', 'missing_classification')`,
+			tc.usageLogID, tc.previousWorkRelated, tc.previousCategory)
+		require.NoErrorf(t, err, "migration 236 constraints should allow historical review row: %s", tc.name)
+	}
+
+	_, err = tx.ExecContext(ctx, string(migrationSQL))
+	require.NoError(t, err)
+	assertRows := func() {
+		for _, tc := range testCases {
+			var workRelated, category string
+			require.NoError(t, tx.QueryRowContext(ctx, `
+SELECT
+  COALESCE(previous_work_related, '<null>'),
+  COALESCE(previous_category, '<null>')
+FROM usage_work_reviews
+WHERE usage_log_id = $1`, tc.usageLogID).Scan(&workRelated, &category))
+			require.Equalf(t, tc.wantWorkRelated, workRelated, "work relation after migration: %s", tc.name)
+			require.Equalf(t, tc.wantCategory, category, "category after migration: %s", tc.name)
+		}
+	}
+	assertRows()
+	var validated bool
+	require.NoError(t, tx.QueryRowContext(ctx, `
+SELECT convalidated
+FROM pg_constraint
+WHERE conname = 'usage_work_reviews_previous_pair_presence_check'
+  AND conrelid = 'public.usage_work_reviews'::regclass`).Scan(&validated))
+	require.True(t, validated)
+
+	_, err = tx.ExecContext(ctx, string(migrationSQL))
+	require.NoError(t, err)
+	assertRows()
 }
 
 func TestUsageLogRepositoryCreateSingle_ConflictSelfHealsMissingWorkWithoutResnapshot(t *testing.T) {
