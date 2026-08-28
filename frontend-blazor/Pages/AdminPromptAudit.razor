@@ -23,7 +23,7 @@
     else
     {
         <section class="overview-grid" aria-label="提示词审计概览">
-            <article class="overview-card"><span class="overview-icon green"><Icon Name="shield" Size="18" /></span><div><small>运行状态</small><strong>@StatusLabel(runtime.ProcessStatus)</strong><p>@ModeLabel(runtime.EffectiveMode)</p></div><b class="state-pill @RuntimeTone(runtime.ProcessStatus)">配置 v@config.ConfigVersion</b></article>
+            <article class="overview-card"><span class="overview-icon green"><Icon Name="shield" Size="18" /></span><div><small>运行状态</small><strong>@StatusLabel(runtime.ProcessStatus)</strong><p>@ModeLabel(runtime.EffectiveMode)</p></div><b class="state-pill @RuntimeTone(runtime.ProcessStatus)">配置 v@(config.ConfigVersion)</b></article>
             <article class="overview-card"><span class="overview-icon blue"><Icon Name="key" Size="18" /></span><div><small>审计节点</small><strong>@config.Endpoints.Count(x => x.Enabled) / @config.Endpoints.Count</strong><p>@HealthyEndpointSummary</p></div></article>
             <article class="overview-card"><span class="overview-icon purple"><Icon Name="inbox" Size="18" /></span><div><small>审计队列</small><strong>@runtime.Queue.Active.ToString("N0") / @runtime.QueueCapacity.ToString("N0")</strong><p>@runtime.Queue.Queued.ToString("N0") 排队 · @runtime.Queue.Processing.ToString("N0") 处理中</p></div></article>
             <article class="overview-card"><span class="overview-icon amber"><Icon Name="file-text" Size="18" /></span><div><small>审计事件</small><strong>@eventsPage.Total.ToString("N0")</strong><p>当前筛选结果</p></div></article>

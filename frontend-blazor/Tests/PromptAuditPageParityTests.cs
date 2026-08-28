@@ -131,6 +131,8 @@ public sealed class PromptAuditPageParityTests
         Assert.Contains("class=\"prompt-heading\"", page, StringComparison.Ordinal);
         Assert.Contains("class=\"prompt-actions\"", page, StringComparison.Ordinal);
         Assert.Contains("class=\"overview-grid\"", page, StringComparison.Ordinal);
+        Assert.Contains("配置 v@(config.ConfigVersion)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("配置 v@config.ConfigVersion", page, StringComparison.Ordinal);
         Assert.Contains("class=\"prompt-card runtime-section\"", page, StringComparison.Ordinal);
         Assert.Contains("class=\"prompt-card events-section\"", page, StringComparison.Ordinal);
         Assert.Contains(".prompt-heading", css, StringComparison.Ordinal);
