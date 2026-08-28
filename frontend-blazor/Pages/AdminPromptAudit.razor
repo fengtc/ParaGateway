@@ -8,19 +8,31 @@
 
 <div class="prompt-page @(activeTab == "config" ? "with-savebar" : null)">
     <header class="prompt-heading">
-        <div><span>安全审计</span><h1>提示词审计</h1><p>通过 OpenAI 兼容 Qwen3Guard 节点异步复核或同步阻止用户输入；完整提示词仅供管理员复核。</p></div>
-        @if (!loading) { <aside><b>配置版本 v@config.ConfigVersion</b>@if (config.UpdatedAt.HasValue) { <small>@FormatDateTime(config.UpdatedAt)</small> }</aside> }
+        <div><h1>提示词审计</h1><p>通过 OpenAI 兼容 Qwen3Guard 节点异步复核或同步阻止用户输入；完整提示词仅供管理员复核。</p></div>
+        @if (!loading)
+        {
+            <div class="prompt-actions">
+                <button type="button" class="button secondary" disabled="@runtimeLoading" @onclick="LoadRuntimeAsync"><Icon Name="refresh" Size="16" />刷新状态</button>
+                <button type="button" class="button primary" @onclick='() => activeTab = "config"'><Icon Name="settings" Size="16" />审计设置</button>
+            </div>
+        }
     </header>
 
     @if (!string.IsNullOrWhiteSpace(error)) { <div class="inline-alert danger"><Icon Name="alert" Size="17" /><span>@error</span><button type="button" @onclick="LoadAllAsync">重试</button></div> }
     @if (loading) { <LoadingState Text="正在载入提示词审计" /> }
     else
     {
-        <nav class="page-tabs" role="tablist" aria-label="提示词审计"><button type="button" role="tab" aria-selected="@(activeTab == "events")" class="@(activeTab == "events" ? "active" : null)" @onclick='() => activeTab = "events"'>事件</button><button type="button" role="tab" aria-selected="@(activeTab == "config")" class="@(activeTab == "config" ? "active" : null)" @onclick='() => activeTab = "config"'>配置</button></nav>
-        <main class="prompt-card">
+        <section class="overview-grid" aria-label="提示词审计概览">
+            <article class="overview-card"><span class="overview-icon green"><Icon Name="shield" Size="18" /></span><div><small>运行状态</small><strong>@StatusLabel(runtime.ProcessStatus)</strong><p>@ModeLabel(runtime.EffectiveMode)</p></div><b class="state-pill @RuntimeTone(runtime.ProcessStatus)">配置 v@config.ConfigVersion</b></article>
+            <article class="overview-card"><span class="overview-icon blue"><Icon Name="key" Size="18" /></span><div><small>审计节点</small><strong>@config.Endpoints.Count(x => x.Enabled) / @config.Endpoints.Count</strong><p>@HealthyEndpointSummary</p></div></article>
+            <article class="overview-card"><span class="overview-icon purple"><Icon Name="inbox" Size="18" /></span><div><small>审计队列</small><strong>@runtime.Queue.Active.ToString("N0") / @runtime.QueueCapacity.ToString("N0")</strong><p>@runtime.Queue.Queued.ToString("N0") 排队 · @runtime.Queue.Processing.ToString("N0") 处理中</p></div></article>
+            <article class="overview-card"><span class="overview-icon amber"><Icon Name="file-text" Size="18" /></span><div><small>审计事件</small><strong>@eventsPage.Total.ToString("N0")</strong><p>当前筛选结果</p></div></article>
+        </section>
+
+        <nav class="page-tabs" role="tablist" aria-label="提示词审计"><button type="button" role="tab" aria-selected="@(activeTab == "events")" class="@(activeTab == "events" ? "active" : null)" @onclick='() => activeTab = "events"'>审计事件</button><button type="button" role="tab" aria-selected="@(activeTab == "config")" class="@(activeTab == "config" ? "active" : null)" @onclick='() => activeTab = "config"'>审计配置</button></nav>
             @if (activeTab == "config")
             {
-                <section class="runtime-section">
+                <section class="prompt-card runtime-section">
                     <header class="section-header-row"><div><h2>运行概览</h2><p>显示服务端当前生效状态；未保存的草稿不会改变这些数值。</p></div><button type="button" class="button secondary small" disabled="@runtimeLoading" @onclick="LoadRuntimeAsync"><Icon Name="refresh" Size="15" />刷新运行态</button></header>
                     @if (!string.IsNullOrWhiteSpace(runtimeError)) { <div class="inline-alert danger"><span>@runtimeError</span></div> }
                     else
@@ -30,7 +42,7 @@
                     }
                 </section>
 
-                <section class="pool-section">
+                <section class="prompt-card pool-section">
                     <header class="section-header-row"><div><h2>审计池</h2><p>按顺序使用启用的 OpenAI 兼容节点；探测由服务端真实网络环境发起。</p></div><button type="button" class="button primary small" @onclick="OpenNewEndpoint"><Icon Name="plus" Size="15" />新增节点</button></header>
                     @if (config.Endpoints.Count == 0) { <div class="pool-empty">尚未配置审计节点。</div> }
                     else
@@ -39,7 +51,7 @@
                     }
                 </section>
 
-                <section class="policy-section">
+                <section class="prompt-card policy-section">
                     <header><h2>审计策略</h2><p>配置适用分组、九类输入风险、Worker 与队列边界。</p></header>
                     <div class="policy-layout"><section><fieldset><legend>适用范围</legend><div class="radio-row"><label><input type="radio" name="prompt-scope" checked="@config.AllGroups" @onchange="() => SetAllGroups(true)" />全部分组</label><label><input type="radio" name="prompt-scope" checked="@(!config.AllGroups)" @onchange="() => SetAllGroups(false)" />指定分组</label></div></fieldset>@if (!config.AllGroups) { <div class="audit-groups"><input @bind="groupSearch" @bind:event="oninput" placeholder="搜索分组" />@if (FilteredGroups.Count == 0) { <p>没有匹配分组</p> } else { <div>@foreach (var group in FilteredGroups) { <label><span><input type="checkbox" checked="@config.GroupIds.Contains(group.Id)" @onchange="e => ToggleGroup(group.Id, e)" />@group.Name</span><small>@group.Platform · @group.Status</small></label> }</div> }<small>已选择 @config.GroupIds.Count 个分组</small></div> }<fieldset class="scanner-fieldset"><legend>Qwen3Guard 输入风险分类</legend><div class="scanner-grid">@foreach (var scanner in ScannerCatalog) { <label><input type="checkbox" checked="@config.Scanners.Contains(scanner.Id)" @onchange="e => ToggleScanner(scanner.Id, e)" />@scanner.Label</label> }</div></fieldset></section><aside><label><span>Worker 数量</span><input type="number" min="1" max="32" @bind="config.WorkerCount" /></label><label><span>持久队列容量</span><input type="number" min="1" max="100000" @bind="config.QueueCapacity" /></label><div><b>节点策略</b><p>priority · 按配置顺序优先尝试，必要时故障切换。</p></div></aside></div>
                 </section>
@@ -47,16 +59,25 @@
             else
             {
                 @if (config.Enabled && !config.StorePassEvents) { <div class="pass-notice"><span>当前未开启“保存安全事件”：安全请求仍会完成审计，但不会出现在事件列表中；Flag 和 Critical 仍会保存。</span><button type="button" @onclick='() => activeTab = "config"'>前往配置</button></div> }
-                <section class="events-section">
+                <section class="prompt-card events-section">
                     <header class="section-header-row"><div><h2>审计事件</h2><p>按身份、入口、风险、Hash 和时间复核事件，详情中可查看完整提示词。</p></div><div><button type="button" class="button secondary small" disabled="@(selectedEventIds.Count == 0 || deleting)" @onclick="DeleteSelectedAsync">删除选中项（@selectedEventIds.Count）</button><button type="button" class="button danger small" disabled="@deleting" @onclick="OpenFilterDelete">按筛选删除</button></div></header>
-                    <div class="event-filters"><label><span>判定</span><select @bind="filters.Decision"><option value="">全部</option><option value="pass">通过</option><option value="flag">标记</option><option value="critical">严重</option></select></label><label><span>风险等级</span><select @bind="filters.RiskLevel"><option value="">全部</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="critical">严重</option></select></label><FilterInput Label="入口" Value="@filters.Endpoint" Changed="v => filters.Endpoint = v" /><FilterInput Label="分组 ID" Type="number" Value="@filters.GroupId" Changed="v => filters.GroupId = v" /><FilterInput Label="用户 ID" Type="number" Value="@filters.UserId" Changed="v => filters.UserId = v" /><FilterInput Label="API Key ID" Type="number" Value="@filters.ApiKeyId" Changed="v => filters.ApiKeyId = v" /><FilterInput Label="Request ID" Value="@filters.RequestId" Changed="v => filters.RequestId = v" /><FilterInput Label="Prompt SHA-256" Value="@filters.PromptHash" Changed="v => filters.PromptHash = v" /><FilterInput Label="关键词" Value="@filters.Keyword" Changed="v => filters.Keyword = v" /><label><span>开始时间</span><input type="datetime-local" value="@filters.StartAt" @onchange="SetFilterStart" /></label><label><span>结束时间</span><input type="datetime-local" value="@filters.EndAt" @onchange="SetFilterEnd" /></label><div class="filter-actions"><button type="button" class="button primary small" @onclick="ApplyFiltersAsync">搜索</button><button type="button" class="text-action" @onclick="ResetFiltersAsync">重置</button></div></div>
+                    <div class="event-filters"><label><span>判定</span><select @bind="filters.Decision"><option value="">全部</option><option value="pass">通过</option><option value="flag">标记</option><option value="critical">严重</option></select></label><label><span>风险等级</span><select @bind="filters.RiskLevel"><option value="">全部</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option><option value="critical">严重</option></select></label><FilterInput Label="入口" Value="@filters.Endpoint" Changed="v => filters.Endpoint = v" /><FilterInput Label="分组 ID" Type="number" Value="@filters.GroupId" Changed="v => filters.GroupId = v" /><FilterInput Label="用户 ID" Type="number" Value="@filters.UserId" Changed="v => filters.UserId = v" /><FilterInput Label="API Key ID" Type="number" Value="@filters.ApiKeyId" Changed="v => filters.ApiKeyId = v" /><FilterInput Label="Request ID" Value="@filters.RequestId" Changed="v => filters.RequestId = v" /><FilterInput Label="Prompt SHA-256" Value="@filters.PromptHash" Changed="v => filters.PromptHash = v" /><FilterInput Label="关键词" Value="@filters.Keyword" Changed="v => filters.Keyword = v" /><label><span>开始时间</span><input type="datetime-local" value="@filters.StartAt" @onchange="SetFilterStart" /></label><label><span>结束时间</span><input type="datetime-local" value="@filters.EndAt" @onchange="SetFilterEnd" /></label><div class="filter-actions"><button type="button" class="button primary small" @onclick="ApplyFiltersAsync"><Icon Name="search" Size="15" />搜索</button><button type="button" class="button secondary small" @onclick="ResetFiltersAsync"><Icon Name="rotate-ccw" Size="15" />重置</button></div></div>
                     @if (!string.IsNullOrWhiteSpace(eventsError)) { <div class="inline-alert danger"><span>@eventsError</span></div> }
-                    <div class="events-table-wrap"><table class="events-table"><thead><tr><th><input type="checkbox" checked="@AllPageSelected" @onchange="ToggleAllEvents" aria-label="选择当前页全部事件" /></th><th>时间</th><th>用户 / 邮箱 / API Key</th><th>分组</th><th>入口 / 模型</th><th>判定 / 风险</th><th>脱敏预览</th><th>操作</th></tr></thead><tbody>@if (eventsLoading) { <tr><td colspan="8"><LoadingState Text="正在载入审计事件" /></td></tr> } else if (eventsPage.Items.Count == 0) { <tr><td colspan="8"><EmptyState Title="没有符合条件的事件" Description="调整筛选条件后重试。" /></td></tr> } else { @foreach (var item in eventsPage.Items) { <tr><td><input type="checkbox" checked="@selectedEventIds.Contains(item.Id)" @onchange="e => ToggleEvent(item.Id, e)" aria-label="选择事件 @item.Id" /></td><td class="nowrap">@FormatDateTime(item.CreatedAt)</td><td><span class="identity"><small>用户名</small><b>@Dash(item.Snapshot.Username)</b><small>用户邮箱</small><b>@Dash(item.Snapshot.UserEmail)</b><small>API Key</small><b>@Dash(item.Snapshot.ApiKeyName)</b></span></td><td>@Dash(item.Snapshot.GroupName)</td><td><span class="route"><b>@Dash(item.Snapshot.Endpoint)</b><small>@Dash(item.Snapshot.Model) · @Dash(item.Snapshot.Protocol) · @Dash(item.Snapshot.Stage)</small></span></td><td><span class="decision @DecisionTone(item.Decision)">@DecisionLabel(item.Decision) · @RiskLabel(item.RiskLevel)</span><small class="categories">@Categories(item.Categories)</small></td><td><p class="preview" title="@item.Snapshot.RedactedPreview">@Dash(item.Snapshot.RedactedPreview)</p></td><td class="row-actions"><button type="button" @onclick="() => OpenEventAsync(item.Id)">查看</button><button type="button" class="danger" @onclick="() => DeleteSingleAsync(item)">删除</button></td></tr> } }</tbody></table></div>
-                    <footer class="event-pagination"><span>共 @eventsPage.Total.ToString("N0") 条</span><div><select value="@eventPageSize" @onchange="PageSizeChangedAsync"><option value="10">10 / 页</option><option value="20">20 / 页</option><option value="50">50 / 页</option><option value="100">100 / 页</option></select><button type="button" class="icon-button" disabled="@(eventPage <= 1)" @onclick="() => ChangeEventPageAsync(eventPage - 1)"><Icon Name="chevron-left" Size="15" /></button><span>@(eventPage) / @EventTotalPages</span><button type="button" class="icon-button" disabled="@(eventPage >= EventTotalPages)" @onclick="() => ChangeEventPageAsync(eventPage + 1)"><Icon Name="chevron-right" Size="15" /></button></div></footer>
+                    @if (eventsLoading)
+                    {
+                        <LoadingState Text="正在载入审计事件" />
+                    }
+                    else if (eventsPage.Items.Count == 0)
+                    {
+                        <EmptyState Title="没有符合条件的事件" Description="调整筛选条件后重试。" />
+                    }
+                    else
+                    {
+                        <div class="events-table-wrap"><table class="events-table"><thead><tr><th><input type="checkbox" checked="@AllPageSelected" @onchange="ToggleAllEvents" aria-label="选择当前页全部事件" /></th><th>时间</th><th>用户 / 邮箱 / API Key</th><th>分组</th><th>入口 / 模型</th><th>判定 / 风险</th><th>脱敏预览</th><th>操作</th></tr></thead><tbody>@foreach (var item in eventsPage.Items) { <tr><td><input type="checkbox" checked="@selectedEventIds.Contains(item.Id)" @onchange="e => ToggleEvent(item.Id, e)" aria-label="选择事件 @item.Id" /></td><td class="nowrap">@FormatDateTime(item.CreatedAt)</td><td><span class="identity"><small>用户名</small><b>@Dash(item.Snapshot.Username)</b><small>用户邮箱</small><b>@Dash(item.Snapshot.UserEmail)</b><small>API Key</small><b>@Dash(item.Snapshot.ApiKeyName)</b></span></td><td>@Dash(item.Snapshot.GroupName)</td><td><span class="route"><b>@Dash(item.Snapshot.Endpoint)</b><small>@Dash(item.Snapshot.Model) · @Dash(item.Snapshot.Protocol) · @Dash(item.Snapshot.Stage)</small></span></td><td><span class="decision @DecisionTone(item.Decision)">@DecisionLabel(item.Decision) · @RiskLabel(item.RiskLevel)</span><small class="categories">@Categories(item.Categories)</small></td><td><p class="preview" title="@item.Snapshot.RedactedPreview">@Dash(item.Snapshot.RedactedPreview)</p></td><td class="row-actions"><button type="button" @onclick="() => OpenEventAsync(item.Id)">查看</button><button type="button" class="danger" @onclick="() => DeleteSingleAsync(item)">删除</button></td></tr> }</tbody></table></div>
+                        <footer class="event-pagination"><span>共 @eventsPage.Total.ToString("N0") 条</span><div><select value="@eventPageSize" @onchange="PageSizeChangedAsync"><option value="10">10 / 页</option><option value="20">20 / 页</option><option value="50">50 / 页</option><option value="100">100 / 页</option></select><button type="button" class="icon-button" disabled="@(eventPage <= 1)" @onclick="() => ChangeEventPageAsync(eventPage - 1)"><Icon Name="chevron-left" Size="15" /></button><span>@(eventPage) / @EventTotalPages</span><button type="button" class="icon-button" disabled="@(eventPage >= EventTotalPages)" @onclick="() => ChangeEventPageAsync(eventPage + 1)"><Icon Name="chevron-right" Size="15" /></button></div></footer>
+                    }
                 </section>
             }
-        </main>
-
         @if (activeTab == "config")
         {
             <div class="save-bar"><div class="save-toggles"><label><input type="checkbox" @bind="config.Enabled" />启用提示词审计</label><label><input type="checkbox" checked="@config.BlockingEnabled" disabled="@(!config.Enabled)" @onchange="BlockingChangedAsync" />同步阻止</label><label><input type="checkbox" @bind="config.BlockingLatestTurnOnly" disabled="@(!config.Enabled || !config.BlockingEnabled)" />仅审最新输入和上一轮输出</label><label><input type="checkbox" @bind="config.StorePassEvents" />保存安全事件</label></div><div class="save-actions"><span class="@(Dirty ? "dirty" : null)">@(Dirty ? "有未保存的更改" : "配置已同步")</span><button type="button" class="button secondary" disabled="@(!Dirty || saving)" @onclick="ResetDraft">重置</button><button type="button" class="button primary" disabled="@(!Dirty || saving)" @onclick="SaveConfigAsync">@(saving ? "保存中…" : "保存")</button></div></div>
@@ -153,6 +174,7 @@
 
     private List<PromptAuditGroupDto> FilteredGroups => groups.Where(x => string.IsNullOrWhiteSpace(groupSearch) || $"{x.Name} {x.Id} {x.Platform}".Contains(groupSearch, StringComparison.OrdinalIgnoreCase)).ToList();
     private bool AllPageSelected => eventsPage.Items.Count > 0 && eventsPage.Items.All(x => selectedEventIds.Contains(x.Id));
+    private string HealthyEndpointSummary => runtime.Endpoints.Count == 0 ? "等待运行态" : $"{runtime.Endpoints.Count(x => x.Value.Ok)} 个健康节点";
     private int EventTotalPages => Math.Max(1, eventsPage.Pages > 0 ? eventsPage.Pages : (int)Math.Ceiling(eventsPage.Total / (double)Math.Max(1, eventPageSize)));
     private bool DeleteRangeValid => deletePreset != "custom" || HasValidRange(deleteFilters);
     private static bool HasValidRange(PromptAuditEventFiltersDto value) => DateTimeOffset.TryParse(value.StartAt, out var start) && DateTimeOffset.TryParse(value.EndAt, out var end) && start < end;

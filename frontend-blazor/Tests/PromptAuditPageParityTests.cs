@@ -125,12 +125,23 @@ public sealed class PromptAuditPageParityTests
     [Fact]
     public void PageHasResponsiveOfficialLikeLayout()
     {
+        var page = Read("Pages", "AdminPromptAudit.razor");
         var css = Read("Pages", "AdminPromptAudit.razor.css");
 
+        Assert.Contains("class=\"prompt-heading\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"prompt-actions\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"overview-grid\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"prompt-card runtime-section\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"prompt-card events-section\"", page, StringComparison.Ordinal);
         Assert.Contains(".prompt-heading", css, StringComparison.Ordinal);
+        Assert.Contains(".overview-card", css, StringComparison.Ordinal);
         Assert.Contains(".runtime-summary", css, StringComparison.Ordinal);
         Assert.Contains(".endpoint-table", css, StringComparison.Ordinal);
         Assert.Contains(".event-filters", css, StringComparison.Ordinal);
+        Assert.Contains("table-layout: fixed", css, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: anywhere", css, StringComparison.Ordinal);
+        Assert.Contains(".events-section ::deep(.state-panel)", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("width: min(100%, 1600px)", css, StringComparison.Ordinal);
         Assert.Contains(".save-bar", css, StringComparison.Ordinal);
         Assert.Contains("@media (max-width: 1180px)", css, StringComparison.Ordinal);
         Assert.Contains("@media (max-width: 760px)", css, StringComparison.Ordinal);
