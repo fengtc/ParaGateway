@@ -15,19 +15,22 @@
     <button type="button" id="admin-usage-tab-ranking" role="tab" aria-selected="@(activeTab == "ranking" ? "true" : "false")" aria-controls="admin-usage-panel-ranking" tabindex="@(activeTab == "ranking" ? 0 : -1)" class="@(activeTab == "ranking" ? "active" : null)" @onclick='() => SwitchTab("ranking")'><Icon Name="users" Size="16" /> 用户排行</button>
 </div>
 
-<section class="admin-usage-filter-bar" aria-label="用量筛选">
-    <div class="admin-usage-filter-grid">
+<section class="admin-usage-filter-card" aria-label="用量筛选">
+    <div class="admin-usage-filter-grid @(activeTab == "usage" ? "with-page-size" : null)">
         <div class="filter-field compact">
-            <label for="admin-usage-start-date">开始日期</label>
-            <input id="admin-usage-start-date" type="date" value="@draftStartDate" @onchange="args => draftStartDate = args.Value?.ToString() ?? string.Empty" />
+            <label for="admin-usage-start-date">开始时间</label>
+            <input id="admin-usage-start-date" type="datetime-local" step="1" value="@draftStartDate" @onchange="args => draftStartDate = args.Value?.ToString() ?? string.Empty" />
         </div>
         <div class="filter-field compact">
-            <label for="admin-usage-end-date">结束日期</label>
-            <input id="admin-usage-end-date" type="date" value="@draftEndDate" @onchange="args => draftEndDate = args.Value?.ToString() ?? string.Empty" />
+            <label for="admin-usage-end-date">结束时间</label>
+            <input id="admin-usage-end-date" type="datetime-local" step="1" value="@draftEndDate" @onchange="args => draftEndDate = args.Value?.ToString() ?? string.Empty" />
         </div>
         <div class="filter-field compact">
-            <label for="admin-usage-user-id">用户 ID</label>
-            <input id="admin-usage-user-id" type="number" min="1" inputmode="numeric" placeholder="全部用户" @bind="draftUserId" />
+            <label for="admin-usage-user-email">用户邮箱</label>
+            <input id="admin-usage-user-email" type="search" list="admin-usage-user-options" value="@draftUserEmail" placeholder="全部用户" autocomplete="off" @oninput="SearchUserEmailsAsync" />
+            <datalist id="admin-usage-user-options">
+                @foreach (var item in userOptions) { <option value="@item.Email">@(item.Deleted ? "已删除用户" : string.Empty)</option> }
+            </datalist>
         </div>
         <div class="filter-field compact">
             <label for="admin-usage-model">模型</label>
@@ -46,12 +49,12 @@
         }
     </div>
     <div class="admin-usage-filter-actions">
-        <button type="button" class="button primary" disabled="@loading" @onclick="ApplyFiltersAsync"><Icon Name="search" Size="16" /> 查询</button>
-        <button type="button" class="button secondary" disabled="@loading" @onclick="ResetFiltersAsync"><Icon Name="rotate-ccw" Size="16" /> 重置</button>
         @if (activeTab == "usage")
         {
             <span class="result-count">共 @UiFormat.Integer(result?.Total ?? 0) 条记录</span>
         }
+        <button type="button" class="button secondary" disabled="@loading" @onclick="ResetFiltersAsync"><Icon Name="rotate-ccw" Size="16" /> 重置</button>
+        <button type="button" class="button primary" disabled="@loading" @onclick="ApplyFiltersAsync"><Icon Name="search" Size="16" /> 查询</button>
     </div>
 </section>
 
@@ -135,6 +138,7 @@ else
 
 @code {
     [Parameter] public long? InitialUserId { get; set; }
+    [Parameter] public string? InitialUserEmail { get; set; }
     [Parameter] public string? InitialStartDate { get; set; }
     [Parameter] public string? InitialEndDate { get; set; }
 
@@ -148,27 +152,35 @@ else
     private int contentVersion;
     private string draftStartDate = string.Empty;
     private string draftEndDate = string.Empty;
-    private string draftUserId = string.Empty;
+    private string draftUserEmail = string.Empty;
     private string draftModel = string.Empty;
     private string selectedStartDate = string.Empty;
     private string selectedEndDate = string.Empty;
     private long? selectedUserId;
     private string selectedModel = string.Empty;
+    private readonly List<AdminUsageUserOptionDto> userOptions = [];
+    private int userSearchVersion;
     private int TotalPages => Math.Max(1, result?.TotalPages > 0 ? result.TotalPages : (int)Math.Ceiling((result?.Total ?? 0) / (double)pageSize));
 
-    protected override Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync()
     {
         SetDefaultDates();
-        if (TryParseDate(InitialStartDate, out _)) draftStartDate = InitialStartDate!;
-        if (TryParseDate(InitialEndDate, out _)) draftEndDate = InitialEndDate!;
-        if (InitialUserId is > 0) draftUserId = InitialUserId.Value.ToString(CultureInfo.InvariantCulture);
+        if (TryNormalizeInitialBoundary(InitialStartDate, false, out var initialStart)) draftStartDate = initialStart;
+        if (TryNormalizeInitialBoundary(InitialEndDate, true, out var initialEnd)) draftEndDate = initialEnd;
+        draftUserEmail = InitialUserEmail?.Trim() ?? string.Empty;
+        selectedUserId = InitialUserId is > 0 ? InitialUserId : null;
 
         if (!TryCommitFilters())
         {
             SetDefaultDates();
             _ = TryCommitFilters();
         }
-        return LoadUsageAsync();
+        if (selectedUserId is null && !await TryResolveUserAsync())
+        {
+            loading = false;
+            return;
+        }
+        await LoadUsageAsync();
     }
 
     private async Task LoadUsageAsync()
@@ -205,6 +217,7 @@ else
     private async Task ApplyFiltersAsync()
     {
         if (!TryCommitFilters()) return;
+        if (!await TryResolveUserAsync()) return;
         page = 1;
         if (activeTab == "usage") await LoadUsageAsync();
         else contentVersion++;
@@ -213,7 +226,7 @@ else
     private async Task ResetFiltersAsync()
     {
         SetDefaultDates();
-        draftUserId = string.Empty;
+        draftUserEmail = string.Empty;
         draftModel = string.Empty;
         await ApplyFiltersAsync();
     }
@@ -221,38 +234,95 @@ else
     private bool TryCommitFilters()
     {
         filterMessage = null;
-        if (!TryParseDate(draftStartDate, out var start) || !TryParseDate(draftEndDate, out var end))
+        if (!TryParseDateTime(draftStartDate, out var start) || !TryParseDateTime(draftEndDate, out var end))
         {
-            filterMessage = "请选择有效的开始和结束日期。";
+            filterMessage = "请选择有效的开始和结束时间。";
             return false;
         }
-        if (start > end)
+        if (end <= start)
         {
-            filterMessage = "开始日期不能晚于结束日期。";
+            filterMessage = "结束时间必须晚于开始时间。";
             return false;
         }
-        if (end.DayNumber - start.DayNumber >= 30)
+        if (end - start >= TimeSpan.FromDays(30))
         {
-            filterMessage = "错误请求接口单次最多查询 30 个自然日，请缩短日期范围。";
-            return false;
-        }
-        if (!string.IsNullOrWhiteSpace(draftUserId)
-            && (!long.TryParse(draftUserId, NumberStyles.None, CultureInfo.InvariantCulture, out var userId) || userId <= 0))
-        {
-            filterMessage = "用户 ID 必须是大于 0 的整数。";
+            filterMessage = "错误请求接口单次最多查询 30 天，请缩短时间范围。";
             return false;
         }
 
-        selectedStartDate = draftStartDate;
-        selectedEndDate = draftEndDate;
-        selectedUserId = long.TryParse(draftUserId, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedUserId) ? parsedUserId : null;
+        selectedStartDate = start.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
+        selectedEndDate = end.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
         selectedModel = draftModel.Trim();
         return true;
     }
 
+    private async Task<bool> TryResolveUserAsync()
+    {
+        var email = draftUserEmail.Trim();
+        if (email.Length == 0)
+        {
+            selectedUserId = null;
+            return true;
+        }
+
+        var match = userOptions.FirstOrDefault(x => string.Equals(x.Email, email, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            try
+            {
+                var matches = await Api.SearchAdminUsageUsersAsync(email);
+                ReplaceUserOptions(matches);
+                match = matches.FirstOrDefault(x => string.Equals(x.Email, email, StringComparison.OrdinalIgnoreCase));
+            }
+            catch (ApiException ex)
+            {
+                filterMessage = ex.Message;
+                return false;
+            }
+        }
+        if (match is null)
+        {
+            filterMessage = "未找到该邮箱对应的用户，请从匹配结果中选择。";
+            return false;
+        }
+
+        draftUserEmail = match.Email;
+        selectedUserId = match.Id;
+        return true;
+    }
+
+    private async Task SearchUserEmailsAsync(ChangeEventArgs args)
+    {
+        draftUserEmail = args.Value?.ToString() ?? string.Empty;
+        var version = ++userSearchVersion;
+        var keyword = draftUserEmail.Trim();
+        if (keyword.Length < 2)
+        {
+            userOptions.Clear();
+            return;
+        }
+        await Task.Delay(250);
+        if (version != userSearchVersion) return;
+        try
+        {
+            var matches = await Api.SearchAdminUsageUsersAsync(keyword);
+            if (version == userSearchVersion) ReplaceUserOptions(matches);
+        }
+        catch (ApiException)
+        {
+            if (version == userSearchVersion) userOptions.Clear();
+        }
+    }
+
+    private void ReplaceUserOptions(IEnumerable<AdminUsageUserOptionDto> matches)
+    {
+        userOptions.Clear();
+        userOptions.AddRange(matches.Where(x => !string.IsNullOrWhiteSpace(x.Email)));
+    }
+
     private async Task SelectRankedUserAsync(AdminDashboardUserBreakdownItemDto user)
     {
-        draftUserId = user.UserId.ToString(CultureInfo.InvariantCulture);
+        draftUserEmail = user.Email;
         selectedUserId = user.UserId;
         page = 1;
         activeTab = "usage";
@@ -261,13 +331,29 @@ else
 
     private void SetDefaultDates()
     {
-        var now = DateTime.Now;
-        draftStartDate = DateOnly.FromDateTime(now.AddHours(-24)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        draftEndDate = DateOnly.FromDateTime(now).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        draftStartDate = DateTime.Today.ToString("yyyy-MM-dd'T'00:00:00", CultureInfo.InvariantCulture);
+        draftEndDate = DateTime.Today.AddDays(1).ToString("yyyy-MM-dd'T'00:00:00", CultureInfo.InvariantCulture);
     }
 
-    private static bool TryParseDate(string? value, out DateOnly date) =>
-        DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+    private static bool TryParseDateTime(string? value, out DateTime dateTime) =>
+        DateTime.TryParseExact(value, ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm"], CultureInfo.InvariantCulture, DateTimeStyles.None, out dateTime);
+
+    private static bool TryNormalizeInitialBoundary(string? value, bool end, out string normalized)
+    {
+        if (TryParseDateTime(value, out var dateTime))
+        {
+            normalized = dateTime.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
+            return true;
+        }
+        if (DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            if (end) date = date.AddDays(1);
+            normalized = date.ToDateTime(TimeOnly.MinValue).ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
+            return true;
+        }
+        normalized = string.Empty;
+        return false;
+    }
 
     private async Task PageSizeChangedAsync(ChangeEventArgs args) { if (int.TryParse(args.Value?.ToString(), out var size)) pageSize = size; page = 1; await LoadUsageAsync(); }
     private async Task PreviousAsync() { if (page <= 1) return; page--; await LoadUsageAsync(); }

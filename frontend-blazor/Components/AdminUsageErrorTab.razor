@@ -34,8 +34,8 @@
         </div>
     </div>
     <div class="admin-error-actions">
-        <button type="button" class="button secondary" disabled="@loading" @onclick="ApplyLocalFiltersAsync"><Icon Name="search" Size="16" /> 筛选</button>
         <span class="result-count">共 @UiFormat.Integer(errors.Total) 条错误</span>
+        <button type="button" class="button secondary" disabled="@loading" @onclick="ApplyLocalFiltersAsync"><Icon Name="search" Size="16" /> 筛选</button>
     </div>
 </div>
 
@@ -183,7 +183,7 @@ else
                 PageSize = pageSize,
                 TimeRange = "custom",
                 StartTime = LocalBoundary(StartDate),
-                EndTime = LocalBoundary(EndDate, 1),
+                EndTime = LocalBoundary(EndDate),
                 UserId = UserId,
                 Model = Model,
                 Search = search.Trim(),
@@ -229,12 +229,11 @@ else
         detailError = null;
     }
 
-    private static DateTimeOffset LocalBoundary(string value, int days = 0)
+    private static DateTimeOffset LocalBoundary(string value)
     {
-        var date = DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
-            ? parsed.AddDays(days)
-            : DateOnly.FromDateTime(DateTime.Now).AddDays(days);
-        var local = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        var local = DateTime.TryParseExact(value, ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+            ? DateTime.SpecifyKind(parsed, DateTimeKind.Unspecified)
+            : DateTime.SpecifyKind(DateTime.Today, DateTimeKind.Unspecified);
         return new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local));
     }
 

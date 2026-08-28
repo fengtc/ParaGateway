@@ -1,31 +1,39 @@
 .admin-error-toolbar {
-    display: flex;
-    padding: 0 0 14px;
-    align-items: end;
-    justify-content: space-between;
-    gap: 14px;
+    min-width: 0;
+    margin-bottom: 16px;
+    padding: 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
 }
 
 .admin-error-filters {
     display: grid;
     min-width: 0;
-    flex: 1 1 auto;
-    grid-template-columns: minmax(240px, 2fr) repeat(2, minmax(120px, 1fr));
-    gap: 10px;
+    grid-template-columns: minmax(240px, 2fr) repeat(2, minmax(150px, 1fr));
+    gap: 13px;
 }
 
-.admin-error-filters .filter-field { min-width: 0; }
+.admin-error-filters .filter-field { min-width: 0; gap: 6px; }
+.admin-error-filters .filter-field label { color: var(--muted); font-size: .68rem; font-weight: 700; }
 .admin-error-filters input,
-.admin-error-filters select { width: 100%; min-width: 0; }
+.admin-error-filters select { width: 100%; min-width: 0; min-height: 36px; padding: 7px 10px; color: var(--ink); font-size: .75rem; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; outline: none; }
+.admin-error-filters select { padding-right: 30px; }
+.admin-error-filters input:focus,
+.admin-error-filters select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 13%, transparent); }
 
 .admin-error-actions {
     display: flex;
-    flex: 0 0 auto;
+    margin-top: 16px;
+    padding-top: 14px;
     align-items: center;
+    justify-content: flex-end;
     gap: 10px;
+    border-top: 1px solid var(--line);
 }
 
-.admin-error-actions .result-count { margin-left: 0; padding-bottom: 0; }
+.admin-error-actions .result-count { margin-right: auto; margin-left: 0; padding-bottom: 0; }
 .admin-error-table { min-width: 1180px; }
 .admin-error-table .clickable-row { cursor: pointer; }
 
@@ -70,11 +78,11 @@
 }
 
 @media (max-width: 850px) {
-    .admin-error-toolbar { align-items: stretch; flex-direction: column; }
-    .admin-error-actions { justify-content: flex-start; }
+    .admin-error-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 620px) {
+    .admin-error-toolbar { padding: 14px; }
     .admin-error-filters { grid-template-columns: 1fr; }
     .admin-error-detail-grid { grid-template-columns: 1fr; }
     .admin-error-actions { flex-wrap: wrap; }

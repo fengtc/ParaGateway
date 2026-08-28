@@ -15,7 +15,11 @@
     </section>
 
     @if (loading && summary is null) { <LoadingState Text="正在载入工作内容分析" /> }
-    else if (!string.IsNullOrWhiteSpace(error) && summary is null) { <ErrorState Message="@error" OnRetry="LoadAsync" /> }
+    else if (!string.IsNullOrWhiteSpace(error)) { <ErrorState Message="@error" OnRetry="LoadAsync" /> }
+    else if (summary is not null && (summary.Coverage.TotalRequests == 0 || string.Equals(summary.CollectionStatus, "no_data", StringComparison.OrdinalIgnoreCase)))
+    {
+        <EmptyState Title="暂无请求样本" Description="当前筛选范围内没有 API 请求，因此不生成工作分布统计。" />
+    }
     else if (summary is not null)
     {
         <section class="work-kpis">
@@ -71,7 +75,9 @@
     private async Task LoadAsync()
     {
         if (loading) return;
-        loading = true; error = null;
+        loading = true;
+        error = null;
+        summary = null;
         try
         {
             summary = await Api.GetAdminWorkDistributionSummaryAsync(new() { StartDate = startDate, EndDate = endDate, UserId = userId, Department = department, Role = role, Metric = metric });

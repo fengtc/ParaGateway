@@ -1,16 +1,24 @@
 .admin-ranking-toolbar {
     display: flex;
-    min-height: 58px;
-    padding: 8px 0 14px;
+    min-height: 78px;
+    margin-bottom: 16px;
+    padding: 18px;
     align-items: end;
     justify-content: space-between;
     gap: 16px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
 }
 
-.admin-ranking-toolbar > p { margin: 0 0 8px; color: var(--muted); font-size: .75rem; }
+.admin-ranking-toolbar > p { margin: 0 0 9px; color: var(--muted); font-size: .75rem; }
 .admin-ranking-toolbar > div { display: flex; align-items: end; gap: 14px; }
 .admin-ranking-toolbar .result-count { margin-left: 0; padding-bottom: 9px; }
-.admin-ranking-toolbar select { min-width: 110px; }
+.admin-ranking-toolbar .filter-field { min-width: 0; gap: 6px; }
+.admin-ranking-toolbar .filter-field label { color: var(--muted); font-size: .68rem; font-weight: 700; }
+.admin-ranking-toolbar select { min-width: 120px; min-height: 36px; padding: 7px 30px 7px 10px; color: var(--ink); font-size: .75rem; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; outline: none; }
+.admin-ranking-toolbar select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 13%, transparent); }
 
 .admin-ranking-table { min-width: 1050px; }
 .admin-ranking-table .ranking-row { cursor: pointer; }
@@ -54,6 +62,7 @@
 }
 
 @media (max-width: 700px) {
+    .admin-ranking-toolbar { padding: 14px; }
     .admin-ranking-toolbar { align-items: stretch; flex-direction: column; }
     .admin-ranking-toolbar > div { justify-content: space-between; }
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
@@ -128,6 +129,41 @@ func TestAdminUsageListInvalidExactTotal(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestAdminUsageListAcceptsPreciseHalfOpenTimeRange(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage?start_date=2026-08-28T00:00:00&end_date=2026-08-29T00:00:00&timezone=Asia%2FShanghai", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.listFilters.StartTime)
+	require.NotNil(t, repo.listFilters.EndTime)
+	require.Equal(t, time.Date(2026, 8, 27, 16, 0, 0, 0, time.UTC), repo.listFilters.StartTime.UTC())
+	require.Equal(t, time.Date(2026, 8, 28, 16, 0, 0, 0, time.UTC), repo.listFilters.EndTime.UTC())
+}
+
+func TestAdminUsageListRejectsEmptyTimeRange(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage?start_date=2026-08-28T00:00:00&end_date=2026-08-28T00:00:00&timezone=UTC", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestParseAdminUsageTimeValuePreservesDateOnlyCompatibility(t *testing.T) {
+	start, ok := parseAdminUsageTimeValue("2026-08-28", "UTC", false)
+	require.True(t, ok)
+	end, ok := parseAdminUsageTimeValue("2026-08-28", "UTC", true)
+	require.True(t, ok)
+	require.Equal(t, time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC), start)
+	require.Equal(t, time.Date(2026, 8, 29, 0, 0, 0, 0, time.UTC), end)
 }
 
 func TestAdminUsageStatsRequestTypePriority(t *testing.T) {

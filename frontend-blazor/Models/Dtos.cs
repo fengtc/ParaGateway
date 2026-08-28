@@ -1106,6 +1106,7 @@ public sealed class AdminDashboardUserBreakdownQueryDto
     public int? BillingType { get; set; }
     public string SortBy { get; set; } = string.Empty;
     public int Limit { get; set; } = 50;
+    public bool EndExclusive { get; set; }
 }
 public sealed class AdminDashboardUserBreakdownResponseDto
 {
@@ -3945,6 +3946,13 @@ public sealed class AdminUsageQuery
     public string Timezone { get; set; } = string.Empty;
     public string SortBy { get; set; } = "created_at";
     public string SortOrder { get; set; } = "desc";
+}
+
+public sealed class AdminUsageUserOptionDto
+{
+    public long Id { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public bool Deleted { get; set; }
 }
 public sealed class UserUsageStatsDto
 {

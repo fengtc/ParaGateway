@@ -15,6 +15,22 @@ public sealed class WorkDistributionPageTests
             Assert.DoesNotContain(excluded, page, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void PageShowsEmptyStateForZeroRequestsAndClearsStaleResultsBeforeLoading()
+    {
+        var root = FindRepositoryRoot();
+        var page = File.ReadAllText(Path.Combine(root, "frontend-blazor", "Pages", "AdminWorkDistribution.razor"));
+
+        Assert.Contains("summary.Coverage.TotalRequests == 0", page, StringComparison.Ordinal);
+        Assert.Contains("summary.CollectionStatus, \"no_data\"", page, StringComparison.Ordinal);
+        Assert.Contains("暂无请求样本", page, StringComparison.Ordinal);
+        Assert.Contains("当前筛选范围内没有 API 请求，因此不生成工作分布统计。", page, StringComparison.Ordinal);
+        var loadingIndex = page.IndexOf("loading = true;", StringComparison.Ordinal);
+        var clearSummaryIndex = page.IndexOf("summary = null;", loadingIndex, StringComparison.Ordinal);
+        var requestIndex = page.IndexOf("GetAdminWorkDistributionSummaryAsync", clearSummaryIndex, StringComparison.Ordinal);
+        Assert.True(loadingIndex >= 0 && clearSummaryIndex > loadingIndex && requestIndex > clearSummaryIndex);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

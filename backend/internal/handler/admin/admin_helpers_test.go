@@ -39,6 +39,17 @@ func TestParseTimeRange(t *testing.T) {
 	require.False(t, end.IsZero())
 }
 
+func TestParseUserBreakdownTimeRangeSupportsExclusiveDatetimeEnd(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/?start_date=2026-08-28T00:00:00&end_date=2026-08-29T00:00:00&timezone=Asia%2FShanghai&end_exclusive=true", nil)
+
+	start, end := parseUserBreakdownTimeRange(c)
+	require.Equal(t, time.Date(2026, 8, 27, 16, 0, 0, 0, time.UTC), start.UTC())
+	require.Equal(t, time.Date(2026, 8, 28, 16, 0, 0, 0, time.UTC), end.UTC())
+}
+
 func TestParseOpsViewParam(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

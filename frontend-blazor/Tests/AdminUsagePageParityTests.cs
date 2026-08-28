@@ -27,7 +27,14 @@ public sealed class AdminUsagePageParityTests
         Assert.Contains("<AdminUsageRankingTab @key=\"contentVersion\"", panel, StringComparison.Ordinal);
         Assert.Contains("SelectRankedUserAsync", panel, StringComparison.Ordinal);
         Assert.Contains("selectedUserId = user.UserId", panel, StringComparison.Ordinal);
+        Assert.Contains("type=\"datetime-local\"", panel, StringComparison.Ordinal);
+        Assert.Contains("step=\"1\"", panel, StringComparison.Ordinal);
+        Assert.Contains("用户邮箱", panel, StringComparison.Ordinal);
+        Assert.Contains("SearchAdminUsageUsersAsync", panel, StringComparison.Ordinal);
+        Assert.Contains("DateTime.Today.ToString(\"yyyy-MM-dd'T'00:00:00\"", panel, StringComparison.Ordinal);
+        Assert.Contains("DateTime.Today.AddDays(1).ToString(\"yyyy-MM-dd'T'00:00:00\"", panel, StringComparison.Ordinal);
         Assert.Contains("SupplyParameterFromQuery(Name = \"user_id\")", route, StringComparison.Ordinal);
+        Assert.Contains("SupplyParameterFromQuery(Name = \"user_email\")", route, StringComparison.Ordinal);
         Assert.Contains("@page \"/admin/usage\"", route, StringComparison.Ordinal);
         Assert.Contains("InitialStartDate=\"@QueryStartDate\"", route, StringComparison.Ordinal);
         Assert.Contains("InitialEndDate=\"@QueryEndDate\"", route, StringComparison.Ordinal);
@@ -36,6 +43,17 @@ public sealed class AdminUsagePageParityTests
         Assert.Contains("item.IpAddress", panel, StringComparison.Ordinal);
 
         var styles = ReadSource("Components", "AdminUsagePanel.razor.css");
+        var errorStyles = ReadSource("Components", "AdminUsageErrorTab.razor.css");
+        var rankingStyles = ReadSource("Components", "AdminUsageRankingTab.razor.css");
+        Assert.Contains("class=\"admin-usage-filter-card\"", panel, StringComparison.Ordinal);
+        foreach (var expected in new[] { "background: var(--surface)", "border: 1px solid var(--line)", "border-radius: 10px", "grid-template-columns: repeat(4" })
+        {
+            Assert.Contains(expected, styles, StringComparison.Ordinal);
+        }
+        Assert.Contains("background: var(--surface)", errorStyles, StringComparison.Ordinal);
+        Assert.Contains("border-radius: 10px", errorStyles, StringComparison.Ordinal);
+        Assert.Contains("background: var(--surface)", rankingStyles, StringComparison.Ordinal);
+        Assert.Contains("border-radius: 10px", rankingStyles, StringComparison.Ordinal);
         Assert.Contains(".source-ip", styles, StringComparison.Ordinal);
         Assert.Contains("overflow-wrap: anywhere", styles, StringComparison.Ordinal);
     }
@@ -122,8 +140,8 @@ public sealed class AdminUsagePageParityTests
         {
             Page = 2,
             PageSize = 50,
-            StartDate = "2026-08-23",
-            EndDate = "2026-08-24",
+            StartDate = "2026-08-23T00:00:00",
+            EndDate = "2026-08-24T00:00:00",
             Timezone = "Asia/Shanghai",
             UserId = 17,
             Model = "gpt-5.6",
@@ -132,7 +150,7 @@ public sealed class AdminUsagePageParityTests
         });
 
         Assert.Equal("/api/v1/admin/usage", handler.LastPath);
-        AssertQuery(handler, "page=2", "page_size=50", "start_date=2026-08-23", "end_date=2026-08-24", "timezone=Asia/Shanghai", "user_id=17", "model=gpt-5.6");
+        AssertQuery(handler, "page=2", "page_size=50", "start_date=2026-08-23T00:00:00", "end_date=2026-08-24T00:00:00", "timezone=Asia/Shanghai", "user_id=17", "model=gpt-5.6");
 
         await api.GetAdminOpsErrorLogsAsync(new OpsErrorListQueryDto
         {
@@ -152,17 +170,23 @@ public sealed class AdminUsagePageParityTests
 
         await api.GetAdminDashboardUserBreakdownAsync(new AdminDashboardUserBreakdownQueryDto
         {
-            StartDate = "2026-08-23",
-            EndDate = "2026-08-24",
+            StartDate = "2026-08-23T00:00:00",
+            EndDate = "2026-08-24T00:00:00",
             Timezone = "Asia/Shanghai",
             UserId = 17,
             Model = "gpt-5.6",
             SortBy = "total_tokens",
-            Limit = 100
+            Limit = 100,
+            EndExclusive = true
         });
 
         Assert.Equal("/api/v1/admin/dashboard/user-breakdown", handler.LastPath);
-        AssertQuery(handler, "start_date=2026-08-23", "end_date=2026-08-24", "timezone=Asia/Shanghai", "user_id=17", "model=gpt-5.6", "sort_by=total_tokens", "limit=100");
+        AssertQuery(handler, "start_date=2026-08-23T00:00:00", "end_date=2026-08-24T00:00:00", "timezone=Asia/Shanghai", "user_id=17", "model=gpt-5.6", "sort_by=total_tokens", "limit=100", "end_exclusive=true");
+
+        var users = await api.SearchAdminUsageUsersAsync("dev@example.com");
+        Assert.Equal("/api/v1/admin/usage/search-users", handler.LastPath);
+        AssertQuery(handler, "q=dev@example.com");
+        Assert.Equal("dev@example.com", Assert.Single(users).Email);
     }
 
     private static void AssertQuery(UsageQueryHandler handler, params string[] fragments)
@@ -201,6 +225,8 @@ public sealed class AdminUsagePageParityTests
             LastQuery = request.RequestUri?.Query ?? string.Empty;
             var payload = LastPath.EndsWith("/user-breakdown", StringComparison.Ordinal)
                 ? "{\"code\":0,\"message\":\"success\",\"data\":{\"users\":[],\"start_date\":\"2026-08-23\",\"end_date\":\"2026-08-24\"}}"
+                : LastPath.EndsWith("/search-users", StringComparison.Ordinal)
+                    ? "{\"code\":0,\"message\":\"success\",\"data\":[{\"id\":17,\"email\":\"dev@example.com\",\"deleted\":false}]}"
                 : UsagePayload ?? "{\"code\":0,\"message\":\"success\",\"data\":{\"items\":[],\"total\":0,\"page\":1,\"page_size\":20,\"pages\":0}}";
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {

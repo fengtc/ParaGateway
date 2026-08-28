@@ -109,8 +109,13 @@ public sealed class AuditLogPageParityTests
     [Fact]
     public void PageHasResponsiveOfficialLikeLayout()
     {
+        var page = Read("Pages", "AuditLogs.razor");
         var css = Read("Pages", "AuditLogs.razor.css");
 
+        Assert.Contains("class=\"audit-search-control\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"audit-search-icon\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("class=\"search-box\"", page, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: 34px minmax(0, 1fr)", css, StringComparison.Ordinal);
         Assert.Contains(".audit-filter-grid", css, StringComparison.Ordinal);
         Assert.Contains(".audit-table", css, StringComparison.Ordinal);
         Assert.Contains(".detail-overview", css, StringComparison.Ordinal);

@@ -98,7 +98,8 @@ else
                 Model = Model,
                 ModelSource = "requested",
                 SortBy = sortBy,
-                Limit = limit
+                Limit = limit,
+                EndExclusive = true
             });
         }
         catch (ApiException ex)

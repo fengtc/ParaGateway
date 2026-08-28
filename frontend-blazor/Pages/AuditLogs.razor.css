@@ -10,7 +10,11 @@
 .audit-filter-grid input, .audit-filter-grid select, .custom-time-form input, .audit-pagination select, .totp-form input { width: 100%; min-height: 36px; padding: 7px 10px; color: var(--ink); font-size: .75rem; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; outline: none; }
 .audit-filter-grid input:focus, .audit-filter-grid select:focus, .custom-time-form input:focus, .totp-form input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 13%, transparent); }
 .wide-filter { grid-column: span 2; }
-.search-box { position: relative; }.search-box svg { position: absolute; top: 50%; left: 10px; color: var(--muted); transform: translateY(-50%); }.search-box input { padding-left: 32px; }
+.audit-search-control { display: grid; width: 100%; min-width: 0; min-height: 36px; overflow: hidden; grid-template-columns: 34px minmax(0, 1fr); align-items: stretch; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; }
+.audit-search-control:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 13%, transparent); }
+.audit-search-icon { display: inline-flex; min-width: 34px; align-items: center; justify-content: center; color: var(--muted); border-right: 1px solid var(--line); }
+.audit-search-control input { min-width: 0; min-height: 34px; padding: 7px 10px; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+.audit-search-control input:focus { border-color: transparent; box-shadow: none; }
 .audit-filter-actions { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 .audit-table-card { overflow: hidden; }
 .audit-table-scroll { overflow: auto; }

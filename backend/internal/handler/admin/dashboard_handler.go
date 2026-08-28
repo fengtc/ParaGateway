@@ -686,7 +686,7 @@ func (h *DashboardHandler) GetBatchAPIKeysUsage(c *gin.Context) {
 // GET /api/v1/admin/dashboard/user-breakdown
 // Query params: start_date, end_date, group_id, model, endpoint, endpoint_type, limit
 func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
-	startTime, endTime := parseTimeRange(c)
+	startTime, endTime := parseUserBreakdownTimeRange(c)
 
 	dim := usagestats.UserBreakdownDimension{}
 	if v := c.Query("group_id"); v != "" {
@@ -764,4 +764,14 @@ func (h *DashboardHandler) GetUserBreakdown(c *gin.Context) {
 		"start_date": startTime.Format("2006-01-02"),
 		"end_date":   endTime.Add(-24 * time.Hour).Format("2006-01-02"),
 	})
+}
+
+func parseUserBreakdownTimeRange(c *gin.Context) (time.Time, time.Time) {
+	startTime, endTime := parseTimeRange(c)
+	if parseBoolQueryWithDefault(c.Query("end_exclusive"), false) {
+		if parsed, ok := parseAdminUsageTimeValue(c.Query("end_date"), c.Query("timezone"), true); ok {
+			endTime = parsed
+		}
+	}
+	return startTime, endTime
 }

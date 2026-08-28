@@ -29,7 +29,7 @@
         <div class="audit-filter-grid">
             <label class="wide-filter">
                 <span>全文搜索</span>
-                <div class="search-box"><Icon Name="search" Size="15" /><input @bind="filterSearch" placeholder="动作、路径或操作者邮箱" /></div>
+                <div class="audit-search-control"><span class="audit-search-icon" aria-hidden="true"><Icon Name="search" Size="15" /></span><input @bind="filterSearch" placeholder="动作、路径或操作者邮箱" /></div>
             </label>
             <label><span>操作者邮箱</span><input @bind="filterActorEmail" /></label>
             <label><span>动作</span><input @bind="filterAction" placeholder="例如 admin.accounts.update" /></label>

@@ -57,6 +57,31 @@ type CreateUsageCleanupTaskRequest struct {
 	Timezone    string  `json:"timezone"`
 }
 
+// parseAdminUsageTimeValue keeps date-only API compatibility while allowing
+// the admin usage page to submit precise, half-open datetime ranges.
+func parseAdminUsageTimeValue(raw, userTZ string, end bool) (time.Time, bool) {
+	value := strings.TrimSpace(raw)
+	for _, layout := range []string{
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+	} {
+		if parsed, err := timezone.ParseInUserLocation(layout, value, userTZ); err == nil {
+			return parsed, true
+		}
+	}
+
+	parsed, err := timezone.ParseInUserLocation("2006-01-02", value, userTZ)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if end {
+		parsed = parsed.AddDate(0, 0, 1)
+	}
+	return parsed, true
+}
+
 // List handles listing all usage records with filters
 // GET /api/v1/admin/usage
 func (h *UsageHandler) List(c *gin.Context) {
@@ -157,23 +182,25 @@ func (h *UsageHandler) List(c *gin.Context) {
 	var startTime, endTime *time.Time
 	userTZ := c.Query("timezone") // Get user's timezone from request
 	if startDateStr := c.Query("start_date"); startDateStr != "" {
-		t, err := timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
+		t, ok := parseAdminUsageTimeValue(startDateStr, userTZ, false)
+		if !ok {
+			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
 			return
 		}
 		startTime = &t
 	}
 
 	if endDateStr := c.Query("end_date"); endDateStr != "" {
-		t, err := timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
+		t, ok := parseAdminUsageTimeValue(endDateStr, userTZ, true)
+		if !ok {
+			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
 			return
 		}
-		// Use half-open range [start, end), move to next calendar day start (DST-safe).
-		t = t.AddDate(0, 0, 1)
 		endTime = &t
+	}
+	if startTime != nil && endTime != nil && !endTime.After(*startTime) {
+		response.BadRequest(c, "end_date must be later than start_date")
+		return
 	}
 
 	params := pagination.PaginationParams{
@@ -306,19 +333,21 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	endDateStr := c.Query("end_date")
 
 	if startDateStr != "" && endDateStr != "" {
-		var err error
-		startTime, err = timezone.ParseInUserLocation("2006-01-02", startDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
+		var ok bool
+		startTime, ok = parseAdminUsageTimeValue(startDateStr, userTZ, false)
+		if !ok {
+			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
 			return
 		}
-		endTime, err = timezone.ParseInUserLocation("2006-01-02", endDateStr, userTZ)
-		if err != nil {
-			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
+		endTime, ok = parseAdminUsageTimeValue(endDateStr, userTZ, true)
+		if !ok {
+			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS")
 			return
 		}
-		// 与 SQL 条件 created_at < end 对齐，使用次日 00:00 作为上边界（DST-safe）。
-		endTime = endTime.AddDate(0, 0, 1)
+		if !endTime.After(startTime) {
+			response.BadRequest(c, "end_date must be later than start_date")
+			return
+		}
 	} else {
 		period := c.DefaultQuery("period", "today")
 		switch period {

@@ -539,6 +539,7 @@
                 item.UserId,
                 index + 1,
                 GetUserDisplayName(item),
+                item.Email,
                 item.Requests,
                 item.Tokens,
                 item.ActualCost,
@@ -552,7 +553,7 @@
             var otherTokens = Math.Max(ranking.TotalTokens - rankedTokens, 0);
             if (otherCost > 0.000001 || otherRequests > 0 || otherTokens > 0)
             {
-                rows.Add(new RankingDisplayRow(0, 0, "其他用户", otherRequests, otherTokens, otherCost, true));
+                rows.Add(new RankingDisplayRow(0, 0, "其他用户", string.Empty, otherRequests, otherTokens, otherCost, true));
             }
 
             return rows;
@@ -657,9 +658,10 @@
     private void OpenUserUsage(RankingDisplayRow row)
     {
         if (row.IsOther || row.UserId <= 0) return;
-        var start = Uri.EscapeDataString(startDate.ToString("yyyy-MM-dd"));
-        var end = Uri.EscapeDataString(QueryEndDate);
-        Navigation.NavigateTo($"/admin/usage?user_id={row.UserId}&start_date={start}&end_date={end}");
+        var start = Uri.EscapeDataString(startDate.ToString("yyyy-MM-dd'T'HH:mm:ss"));
+        var end = Uri.EscapeDataString(endDate.ToString("yyyy-MM-dd'T'HH:mm:ss"));
+        var email = Uri.EscapeDataString(row.Email);
+        Navigation.NavigateTo($"/admin/usage?user_id={row.UserId}&user_email={email}&start_date={start}&end_date={end}");
     }
 
     private async Task OnModelDistributionClick(ChartSeriesClickEventArgs args)
@@ -848,6 +850,7 @@
         long UserId,
         int Rank,
         string DisplayName,
+        string Email,
         long Requests,
         long Tokens,
         double ActualCost,

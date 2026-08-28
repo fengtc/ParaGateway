@@ -488,6 +488,7 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         if (filter.GroupId is > 0) query.Add($"group_id={filter.GroupId.Value}");
         if (filter.Stream.HasValue) query.Add($"stream={filter.Stream.Value.ToString().ToLowerInvariant()}");
         if (filter.BillingType.HasValue) query.Add($"billing_type={filter.BillingType.Value}");
+        if (filter.EndExclusive) query.Add("end_exclusive=true");
 
         return SendAsync<AdminDashboardUserBreakdownResponseDto>(HttpMethod.Get,
             $"{ApiPrefix}/admin/dashboard/user-breakdown?{string.Join("&", query)}");
@@ -3134,6 +3135,10 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
             $"{ApiPrefix}/admin/usage?{BuildAdminUsageQuery(filter)}");
         return PagedResult<UsageRecordDto>.From(raw);
     }
+
+    public Task<List<AdminUsageUserOptionDto>> SearchAdminUsageUsersAsync(string email) =>
+        SendAsync<List<AdminUsageUserOptionDto>>(HttpMethod.Get,
+            $"{ApiPrefix}/admin/usage/search-users?q={Uri.EscapeDataString(email.Trim())}");
 
     private static string BuildAdminUsageQuery(AdminUsageQuery value)
     {
