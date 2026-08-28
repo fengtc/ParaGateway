@@ -2768,6 +2768,10 @@ func (r *stubUsageLogRepo) ListWithFilters(ctx context.Context, params paginatio
 	return out, paginationResult(total, params), nil
 }
 
+func (r *stubUsageLogRepo) ListExternalUsageLogs(context.Context, pagination.PaginationParams, service.ExternalUsageLogFilters) ([]service.ExternalUsageLog, *pagination.PaginationResult, *service.ExternalUsageLogTotals, error) {
+	return nil, nil, nil, errors.New("not implemented")
+}
+
 func stubUsageLogFilterModel(log service.UsageLog, source string) string {
 	if source == usagestats.ModelSourceRequested && log.RequestedModel != "" {
 		return log.RequestedModel
