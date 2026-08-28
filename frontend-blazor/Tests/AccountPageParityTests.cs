@@ -334,6 +334,28 @@ public sealed class AccountPageParityTests
     }
 
     [Fact]
+    public void ZhipuCodingQuotaUsesOfficialWindowLayoutWithoutOpenAIActions()
+    {
+        var quotaCell = Read("Components", "AccountQuotaUsageCell.razor");
+        var branchStart = quotaCell.IndexOf("else if (IsCNQuotaAccount)", StringComparison.Ordinal);
+        var branchEnd = quotaCell.IndexOf("else if (IsCNBalanceAccount)", branchStart, StringComparison.Ordinal);
+
+        Assert.True(branchStart >= 0 && branchEnd > branchStart);
+        var branch = quotaCell[branchStart..branchEnd];
+        Assert.Contains("class=\"quota-window\"", branch, StringComparison.Ordinal);
+        Assert.Contains("class=\"quota-label @tone\"", branch, StringComparison.Ordinal);
+        Assert.Contains("class=\"quota-reset\"", branch, StringComparison.Ordinal);
+        Assert.Contains("class=\"quota-actions\"", branch, StringComparison.Ordinal);
+        Assert.Contains("tier.Window == \"weekly\" ? \"emerald\" : \"indigo\"", branch, StringComparison.Ordinal);
+        Assert.Contains("@(actionLoading ? \"查询中\" : \"查询\")", branch, StringComparison.Ordinal);
+        Assert.DoesNotContain("quota-query", branch, StringComparison.Ordinal);
+        Assert.DoesNotContain("QueryOpenAIQuotaCountAsync", branch, StringComparison.Ordinal);
+        Assert.DoesNotContain("ResetOpenAIQuotaAsync", branch, StringComparison.Ordinal);
+        Assert.DoesNotContain("次数", branch, StringComparison.Ordinal);
+        Assert.DoesNotContain("重置", branch, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CopilotUsesBillingCapacityAndHidesOfficialUsageWindows()
     {
         var page = Read("Pages", "Providers.razor");

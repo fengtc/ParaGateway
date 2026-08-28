@@ -65,13 +65,22 @@
     }
     else if (IsCNQuotaAccount)
     {
-        <button type="button" class="quota-query" disabled="@actionLoading" title="查询上游 5 小时和每周额度" @onclick="QueryCNQuotaAsync">
-            <Icon Name="refresh" Size="13" /> @(actionLoading ? "查询中" : "查询额度")
-        </button>
         @foreach (var tier in CurrentCNTiers)
         {
-            @PercentWindow(tier.Window == "weekly" ? "周" : "5h", tier.UsedPercent, tier.ResetAt)
+            var label = tier.Window == "weekly" ? "周" : "5h";
+            var tone = tier.Window == "weekly" ? "emerald" : "indigo";
+            <div class="quota-window" title="@($"{label}用量")">
+                <small class="quota-label @tone">@label</small>
+                <i><em class="@PercentTone(tier.UsedPercent) @tone" style="width:@PercentWidth(tier.UsedPercent)"></em></i>
+                <b>@tier.UsedPercent.ToString("0.#")%</b>
+                <small class="quota-reset" title="@tier.ResetAt">@FormatQuotaReset(tier.ResetAt)</small>
+            </div>
         }
+        <div class="quota-actions">
+            <button type="button" disabled="@actionLoading" title="查询上游 5 小时和每周额度" @onclick="QueryCNQuotaAsync">
+                <Icon Name="refresh" Size="12" /> @(actionLoading ? "查询中" : "查询")
+            </button>
+        </div>
     }
     else if (IsCNBalanceAccount)
     {
@@ -418,6 +427,7 @@
     private static string FormatReset(string value) => DateTimeOffset.TryParse(value, out var reset)
         ? reset.ToLocalTime().ToString("MM-dd HH:mm")
         : value;
+    private static string FormatQuotaReset(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : FormatReset(value);
 
     private sealed record UsageWindowRow(string Label, string Title, AccountUsageProgressDto Window, string Tone);
 }
