@@ -7,11 +7,14 @@
 <PageTitle>请求审计 · ParaGateway</PageTitle>
 
 <div class="request-audit-page">
-    <header class="page-heading">
-        <div><span>企业安全</span><h1>请求审计</h1><p>按企业策略归档 API 请求与响应；列表仅展示脱敏预览，原文查看受二次验证和操作日志保护。</p></div>
+    <header class="audit-heading">
+        <div><h1>请求审计</h1><p>按企业策略归档 API 请求与响应；列表仅展示脱敏预览，原文查看受二次验证和操作日志保护。</p></div>
         @if (!loading)
         {
-            <aside class="policy-state @(policy.Enabled ? "enabled" : null)"><i></i><span>@(policy.Enabled ? "正在记录" : "已关闭")</span><small>策略 v@policy.Version</small></aside>
+            <div class="audit-actions">
+                <button type="button" class="button secondary" @onclick="LoadRuntimeAsync"><Icon Name="refresh" Size="16" />刷新状态</button>
+                <button type="button" class="button primary" @onclick='() => activeTab = "policy"'><Icon Name="settings" Size="16" />审计策略</button>
+            </div>
         }
     </header>
 
@@ -25,6 +28,13 @@
     }
     else
     {
+        <section class="overview-grid" aria-label="请求审计概览">
+            <article class="overview-card"><span class="overview-icon green"><Icon Name="shield" Size="18" /></span><div><small>运行状态</small><strong>@(policy.Enabled ? "正在记录" : "已关闭")</strong><p>@CaptureModeLabel(policy.CaptureMode)</p></div><b class="state-pill @(policy.Enabled ? "success" : "neutral")">策略 v@policy.Version</b></article>
+            <article class="overview-card"><span class="overview-icon blue"><Icon Name="inbox" Size="18" /></span><div><small>审计队列</small><strong>@runtime.QueueDepth.ToString("N0") / @runtime.QueueCapacity.ToString("N0")</strong><p>累计入队 @runtime.EnqueuedTotal.ToString("N0")</p></div></article>
+            <article class="overview-card"><span class="overview-icon purple"><Icon Name="database" Size="18" /></span><div><small>已保存</small><strong>@runtime.PersistedTotal.ToString("N0")</strong><p>最近 @FormatDateTime(runtime.LastPersistedAt)</p></div></article>
+            <article class="overview-card"><span class="overview-icon amber"><Icon Name="alert" Size="18" /></span><div><small>丢弃 / 失败</small><strong>@((runtime.DroppedTotal + runtime.FailedTotal).ToString("N0"))</strong><p>@runtime.DroppedTotal.ToString("N0") 丢弃 · @runtime.FailedTotal.ToString("N0") 失败</p></div></article>
+        </section>
+
         <nav class="page-tabs" role="tablist" aria-label="请求审计">
             <button type="button" role="tab" aria-selected="@(activeTab == "records")" class="@(activeTab == "records" ? "active" : null)" @onclick='() => activeTab = "records"'>审计记录</button>
             <button type="button" role="tab" aria-selected="@(activeTab == "policy")" class="@(activeTab == "policy" ? "active" : null)" @onclick='() => activeTab = "policy"'>审计策略</button>
@@ -32,23 +42,15 @@
 
         @if (activeTab == "records")
         {
-            <section class="runtime-strip" aria-label="请求审计运行状态">
-                <article><span>队列</span><strong>@runtime.QueueDepth / @runtime.QueueCapacity</strong></article>
-                <article><span>已入队</span><strong>@runtime.EnqueuedTotal.ToString("N0")</strong></article>
-                <article><span>已保存</span><strong>@runtime.PersistedTotal.ToString("N0")</strong></article>
-                <article><span>丢弃 / 失败</span><strong>@runtime.DroppedTotal / @runtime.FailedTotal</strong></article>
-                <article><span>最近保存</span><strong>@FormatDateTime(runtime.LastPersistedAt)</strong></article>
-                <button type="button" class="icon-button" title="刷新运行状态" @onclick="LoadRuntimeAsync"><Icon Name="refresh" Size="16" /></button>
-            </section>
-
             @if (!policy.Enabled)
             {
                 <div class="policy-notice"><Icon Name="info" Size="17" /><span>当前策略已关闭，不会新增审计记录；历史记录仍按各自到期时间自动清理。</span><button type="button" @onclick='() => activeTab = "policy"'>打开策略</button></div>
             }
 
-            <section class="records-section">
-                <header><div><h2>请求与响应记录</h2><p>可按用户、模型、状态码、Request ID 和时间检索。</p></div><button type="button" class="button secondary small" @onclick="LoadRecordsAsync"><Icon Name="refresh" Size="15" />刷新</button></header>
-                <div class="filters">
+            <section class="audit-card records-section">
+                <header class="records-header">
+                    <div class="card-title-row"><div><h2>请求与响应记录</h2><p>可按用户、模型、状态码、Request ID 和时间检索。</p></div><button type="button" class="button secondary small" @onclick="LoadRecordsAsync"><Icon Name="refresh" Size="15" />刷新</button></div>
+                    <div class="filters">
                     <FilterInput Label="关键词" Value="@filters.Query" Changed="v => filters.Query = v" />
                     <FilterInput Label="用户 ID" Type="number" Value="@filters.UserId" Changed="v => filters.UserId = v" />
                     <FilterInput Label="模型" Value="@filters.Model" Changed="v => filters.Model = v" />
@@ -56,40 +58,47 @@
                     <FilterInput Label="Request ID" Value="@filters.RequestId" Changed="v => filters.RequestId = v" />
                     <label><span>开始时间</span><input type="datetime-local" value="@filters.StartAt" @onchange="e => filters.StartAt = e.Value?.ToString() ?? string.Empty" /></label>
                     <label><span>结束时间</span><input type="datetime-local" value="@filters.EndAt" @onchange="e => filters.EndAt = e.Value?.ToString() ?? string.Empty" /></label>
-                    <div class="filter-actions"><button type="button" class="button primary small" @onclick="ApplyFiltersAsync"><Icon Name="search" Size="15" />搜索</button><button type="button" class="text-action" @onclick="ResetFiltersAsync">重置</button></div>
-                </div>
+                    <div class="filter-actions"><button type="button" class="button primary small" @onclick="ApplyFiltersAsync"><Icon Name="search" Size="15" />搜索</button><button type="button" class="button secondary small" @onclick="ResetFiltersAsync"><Icon Name="rotate-ccw" Size="15" />重置</button></div>
+                    </div>
+                </header>
 
                 @if (!string.IsNullOrWhiteSpace(recordsError)) { <div class="inline-alert danger"><span>@recordsError</span></div> }
-                <div class="records-table-wrap">
+                @if (recordsLoading)
+                {
+                    <LoadingState Text="正在载入审计记录" />
+                }
+                else if (records.Items.Count == 0)
+                {
+                    <EmptyState Title="暂无请求审计记录" Description="启用策略或调整筛选条件后重试。" />
+                }
+                else
+                {
+                    <div class="records-table-wrap">
                     <table class="records-table">
                         <thead><tr><th>时间</th><th>用户 / API Key</th><th>入口 / 模型</th><th>状态</th><th>正文</th><th>脱敏预览</th><th>操作</th></tr></thead>
                         <tbody>
-                            @if (recordsLoading) { <tr><td colspan="7"><LoadingState Text="正在载入审计记录" /></td></tr> }
-                            else if (records.Items.Count == 0) { <tr><td colspan="7"><EmptyState Title="暂无请求审计记录" Description="启用策略或调整筛选条件后重试。" /></td></tr> }
-                            else
+                            @foreach (var item in records.Items)
                             {
-                                @foreach (var item in records.Items)
-                                {
-                                    <tr>
-                                        <td class="nowrap">@FormatDateTime(item.CreatedAt)</td>
-                                        <td><span class="identity"><b>@Dash(item.Username)</b><small>@Dash(item.UserEmail)</small><small>@Dash(item.ApiKeyName)</small></span></td>
-                                        <td><span class="route"><b>@item.Method @Dash(item.Endpoint)</b><small>@Dash(item.Model) · @Dash(item.RequestId)</small></span></td>
-                                        <td><span class="status @StatusTone(item.StatusCode)">@item.StatusCode</span><small class="latency">@item.LatencyMs ms</small></td>
-                                        <td><span class="body-state @(item.RawContentAvailable ? "encrypted" : null)"><Icon Name="@(item.RawContentAvailable ? "shield" : "eye-off")" Size="14" />@(item.RawContentAvailable ? "已加密" : "仅预览")</span>@if (item.RequestTruncated || item.ResponseTruncated) { <small class="truncated">存在截断</small> }</td>
-                                        <td><p class="preview" title="@Preview(item)">@Preview(item)</p></td>
-                                        <td><button type="button" class="row-action" @onclick="() => OpenRecordAsync(item.Id)">查看</button></td>
-                                    </tr>
-                                }
+                                <tr>
+                                    <td class="nowrap">@FormatDateTime(item.CreatedAt)</td>
+                                    <td><span class="identity"><b>@Dash(item.Username)</b><small>@Dash(item.UserEmail)</small><small>@Dash(item.ApiKeyName)</small></span></td>
+                                    <td><span class="route"><b>@item.Method @Dash(item.Endpoint)</b><small>@Dash(item.Model) · @Dash(item.RequestId)</small></span></td>
+                                    <td><span class="status @StatusTone(item.StatusCode)">@item.StatusCode</span><small class="latency">@item.LatencyMs ms</small></td>
+                                    <td><span class="body-state @(item.RawContentAvailable ? "encrypted" : null)"><Icon Name="@(item.RawContentAvailable ? "shield" : "eye-off")" Size="14" />@(item.RawContentAvailable ? "已加密" : "仅预览")</span>@if (item.RequestTruncated || item.ResponseTruncated) { <small class="truncated">存在截断</small> }</td>
+                                    <td><p class="preview" title="@Preview(item)">@Preview(item)</p></td>
+                                    <td><button type="button" class="row-action" @onclick="() => OpenRecordAsync(item.Id)">查看</button></td>
+                                </tr>
                             }
                         </tbody>
                     </table>
-                </div>
-                <footer class="pagination"><span>共 @records.Total.ToString("N0") 条</span><div><select value="@pageSize" @onchange="PageSizeChangedAsync"><option value="10">10 / 页</option><option value="20">20 / 页</option><option value="50">50 / 页</option><option value="100">100 / 页</option></select><button type="button" class="icon-button" disabled="@(page <= 1)" @onclick="() => ChangePageAsync(page - 1)"><Icon Name="chevron-left" Size="15" /></button><span>@(page) / @TotalPages</span><button type="button" class="icon-button" disabled="@(page >= TotalPages)" @onclick="() => ChangePageAsync(page + 1)"><Icon Name="chevron-right" Size="15" /></button></div></footer>
+                    </div>
+                    <footer class="pagination"><span>共 @records.Total.ToString("N0") 条</span><div><select value="@pageSize" @onchange="PageSizeChangedAsync"><option value="10">10 / 页</option><option value="20">20 / 页</option><option value="50">50 / 页</option><option value="100">100 / 页</option></select><button type="button" class="icon-button" disabled="@(page <= 1)" @onclick="() => ChangePageAsync(page - 1)"><Icon Name="chevron-left" Size="15" /></button><span>@(page) / @TotalPages</span><button type="button" class="icon-button" disabled="@(page >= TotalPages)" @onclick="() => ChangePageAsync(page + 1)"><Icon Name="chevron-right" Size="15" /></button></div></footer>
+                }
             </section>
         }
         else
         {
-            <section class="policy-section">
+            <section class="audit-card policy-section">
                 <header><div><h2>企业留存策略</h2><p>默认关闭。启用即代表企业确认其员工请求可按此策略用于内部安全审计。</p></div><span>最后更新 @FormatDateTime(policy.UpdatedAt)</span></header>
 
                 <div class="policy-grid">
@@ -224,6 +233,7 @@
     private static string Preview(RequestAuditRecordDto item) => !string.IsNullOrWhiteSpace(item.RequestPreview) ? item.RequestPreview : !string.IsNullOrWhiteSpace(item.ResponsePreview) ? item.ResponsePreview : "—";
     private static string BodyMeta(long bytes, bool truncated, bool omitted) => omitted ? "正文未保存" : $"{FormatBytes(bytes)}{(truncated ? " · 已截断" : string.Empty)}";
     private static string FormatBytes(long bytes) => bytes < 1024 ? $"{bytes} B" : bytes < 1024 * 1024 ? $"{bytes / 1024d:0.0} KB" : $"{bytes / 1024d / 1024:0.0} MB";
+    private static string CaptureModeLabel(string value) => value switch { "all" => "全部请求", "errors" => "仅异常请求", "sample" => "普通请求抽样", _ => "等待策略配置" };
     private static string StatusTone(int status) => status >= 500 ? "danger" : status >= 400 ? "warning" : "success";
     private static string Dash(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value;
     private static string FormatDateTime(DateTimeOffset? value) => value.HasValue && value.Value != default ? value.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") : "—";

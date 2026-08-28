@@ -91,15 +91,23 @@ public sealed class RequestAuditPageTests
     }
 
     [Fact]
-    public void PageHasBoundedResponsiveOperationalLayout()
+    public void PageUsesRiskControlVisualSystemAndResponsiveOperationalLayout()
     {
+        var page = Read("Pages", "AdminRequestAudit.razor");
         var css = Read("Pages", "AdminRequestAudit.razor.css");
 
-        Assert.Contains("max-width: 1540px", css, StringComparison.Ordinal);
+        Assert.Contains("class=\"audit-heading\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"overview-grid\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"audit-card records-section\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"audit-card policy-section\"", page, StringComparison.Ordinal);
+        Assert.Contains("display: grid; gap: 20px", css, StringComparison.Ordinal);
+        Assert.Contains(".overview-card", css, StringComparison.Ordinal);
+        Assert.Contains(".audit-card", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("max-width: 1540px", css, StringComparison.Ordinal);
         Assert.Contains("table-layout: fixed", css, StringComparison.Ordinal);
         Assert.Contains("overflow-wrap: anywhere", css, StringComparison.Ordinal);
-        Assert.Contains("@media (max-width: 1100px)", css, StringComparison.Ordinal);
-        Assert.Contains("@media (max-width: 720px)", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 1180px)", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 760px)", css, StringComparison.Ordinal);
     }
 
     private static string Read(params string[] parts)
