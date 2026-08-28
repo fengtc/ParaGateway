@@ -38,6 +38,11 @@ public sealed class AdminDashboardPageTests
         Assert.Contains("GroupAllowsBatchImageGeneration", dashboard, StringComparison.Ordinal);
         Assert.Contains("分组定价", dashboard, StringComparison.Ordinal);
         Assert.Contains("DxDateRangePicker", dashboard, StringComparison.Ordinal);
+        Assert.Contains("private DateTime startDate = DateTime.Today;", dashboard, StringComparison.Ordinal);
+        Assert.Contains("private DateTime endDate = DateTime.Today.AddDays(1);", dashboard, StringComparison.Ordinal);
+        Assert.Contains("private string QueryEndDate => endDate.AddDays(-1).ToString(\"yyyy-MM-dd\");", dashboard, StringComparison.Ordinal);
+        Assert.Contains("if (endDate <= startDate) endDate = startDate.AddDays(1);", dashboard, StringComparison.Ordinal);
+        Assert.Contains("if (endDate <= startDate) startDate = endDate.AddDays(-1);", dashboard, StringComparison.Ordinal);
         Assert.Contains("粒度", dashboard, StringComparison.Ordinal);
         Assert.Contains("模型分布", dashboard, StringComparison.Ordinal);
         Assert.Contains("用户消费榜", dashboard, StringComparison.Ordinal);

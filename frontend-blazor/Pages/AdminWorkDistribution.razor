@@ -51,8 +51,8 @@
     private WorkDistributionSummaryDto? summary;
     private bool loading;
     private string? error;
-    private string startDate = DateTime.Today.AddDays(-29).ToString("yyyy-MM-dd'T'00:00:00", CultureInfo.InvariantCulture);
-    private string endDate = DateTime.Today.AddDays(1).AddSeconds(-1).ToString("yyyy-MM-dd'T'23:59:59", CultureInfo.InvariantCulture);
+    private string startDate = DateTime.Today.ToString("yyyy-MM-dd'T'00:00:00", CultureInfo.InvariantCulture);
+    private string endDate = DateTime.Today.AddDays(1).ToString("yyyy-MM-dd'T'00:00:00", CultureInfo.InvariantCulture);
     private string department = string.Empty;
     private string role = string.Empty;
     private string metric = "requests";

@@ -406,8 +406,9 @@
 @code {
     private AdminDashboardSnapshotDto? snapshot;
     private AdminDashboardRankingResponseDto? ranking;
-    private DateTime startDate = DateTime.Today.AddDays(-1);
-    private DateTime endDate = DateTime.Today;
+    // The dashboard uses an exclusive end date so the default covers today only.
+    private DateTime startDate = DateTime.Today;
+    private DateTime endDate = DateTime.Today.AddDays(1);
     private string granularity = "hour";
     private string activeDistributionView = "models";
     private string? expandedModel;
@@ -580,7 +581,7 @@
         rankingError = false;
 
         var start = startDate.ToString("yyyy-MM-dd");
-        var end = endDate.ToString("yyyy-MM-dd");
+        var end = QueryEndDate;
         var timezone = TimeZoneInfo.Local.Id;
         var snapshotTask = Api.GetAdminDashboardSnapshotAsync(start, end, granularity, includeStats, timezone);
         var rankingTask = Api.GetAdminDashboardRankingAsync(start, end, 12, timezone);
@@ -627,7 +628,7 @@
     private async Task OnStartDateChangedAsync(DateTime value)
     {
         startDate = value.Date;
-        if (endDate < startDate) endDate = startDate;
+        if (endDate <= startDate) endDate = startDate.AddDays(1);
         ClearModelBreakdown();
         UpdateGranularityForRange();
         await LoadChartDataAsync();
@@ -636,7 +637,7 @@
     private async Task OnEndDateChangedAsync(DateTime value)
     {
         endDate = value.Date;
-        if (startDate > endDate) startDate = endDate;
+        if (endDate <= startDate) startDate = endDate.AddDays(-1);
         ClearModelBreakdown();
         UpdateGranularityForRange();
         await LoadChartDataAsync();
@@ -657,7 +658,7 @@
     {
         if (row.IsOther || row.UserId <= 0) return;
         var start = Uri.EscapeDataString(startDate.ToString("yyyy-MM-dd"));
-        var end = Uri.EscapeDataString(endDate.ToString("yyyy-MM-dd"));
+        var end = Uri.EscapeDataString(QueryEndDate);
         Navigation.NavigateTo($"/admin/usage?user_id={row.UserId}&start_date={start}&end_date={end}");
     }
 
@@ -692,7 +693,7 @@
         {
             var response = await Api.GetAdminDashboardUserBreakdownAsync(
                 startDate.ToString("yyyy-MM-dd"),
-                endDate.ToString("yyyy-MM-dd"),
+                QueryEndDate,
                 model.Model,
                 "requested",
                 50,
@@ -719,6 +720,8 @@
         modelBreakdown = [];
         modelBreakdownLoading = false;
     }
+
+    private string QueryEndDate => endDate.AddDays(-1).ToString("yyyy-MM-dd");
 
     private async Task LoadBatchImageAccessAsync()
     {
