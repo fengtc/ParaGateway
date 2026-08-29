@@ -78,6 +78,17 @@ func (c *snapshotCache) Set(key string, payload any) snapshotCacheEntry {
 	return entry
 }
 
+// Clear removes all cached snapshots. It is used when the underlying data
+// changes and serving a stale snapshot would be observable to the caller.
+func (c *snapshotCache) Clear() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.items = make(map[string]snapshotCacheEntry)
+	c.mu.Unlock()
+}
+
 func (c *snapshotCache) GetOrLoad(key string, load func() (any, error)) (snapshotCacheEntry, bool, error) {
 	if load == nil {
 		return snapshotCacheEntry{}, false, nil

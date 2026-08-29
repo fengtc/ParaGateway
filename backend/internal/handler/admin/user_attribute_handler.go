@@ -306,6 +306,9 @@ func (h *UserAttributeHandler) UpdateUserAttributes(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	// The batch endpoint is cached by user-ID set. Invalidate it immediately so
+	// the users list reflects an attribute edit without waiting for the TTL.
+	userAttributesBatchCache.Clear()
 
 	// Return updated values
 	values, err := h.attrService.GetUserAttributes(c.Request.Context(), userID)

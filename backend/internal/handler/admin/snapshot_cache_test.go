@@ -45,6 +45,24 @@ func TestSnapshotCache_GetMiss(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestSnapshotCache_Clear(t *testing.T) {
+	c := newSnapshotCache(5 * time.Second)
+	c.Set("key1", "value1")
+	c.Set("key2", "value2")
+
+	c.Clear()
+
+	_, ok := c.Get("key1")
+	require.False(t, ok)
+	_, ok = c.Get("key2")
+	require.False(t, ok)
+}
+
+func TestSnapshotCache_ClearNilReceiver(t *testing.T) {
+	var c *snapshotCache
+	c.Clear()
+}
+
 func TestSnapshotCache_NilReceiver(t *testing.T) {
 	var c *snapshotCache
 	_, ok := c.Get("key")
