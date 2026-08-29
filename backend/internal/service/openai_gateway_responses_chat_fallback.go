@@ -79,6 +79,13 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat completions fallback request: %w", err)
 	}
+	if account.Platform == PlatformZhipu {
+		normalizedBody, _, normalizeErr := NormalizeZhipuChatCompletionsContent(chatBody)
+		if normalizeErr != nil {
+			return nil, fmt.Errorf("normalize Zhipu chat message content: %w", normalizeErr)
+		}
+		chatBody = normalizedBody
+	}
 	chatBody, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, chatBody)
 	if err != nil {
 		var blocked *OpenAIFastBlockedError

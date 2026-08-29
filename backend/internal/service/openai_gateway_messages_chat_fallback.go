@@ -86,6 +86,13 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat completions request: %w", err)
 	}
+	if account.Platform == PlatformZhipu {
+		normalizedBody, _, normalizeErr := NormalizeZhipuChatCompletionsContent(chatBody)
+		if normalizeErr != nil {
+			return nil, fmt.Errorf("normalize Zhipu chat message content: %w", normalizeErr)
+		}
+		chatBody = normalizedBody
+	}
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(chatBody, upstreamModel); normalized {
 		chatBody = normalizedBody
 	}

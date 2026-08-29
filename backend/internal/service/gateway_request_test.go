@@ -1655,3 +1655,31 @@ func TestNormalizeGLMOpenAIReasoningEffort(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeZhipuChatCompletionsContent(t *testing.T) {
+	t.Run("string content remains byte-identical", func(t *testing.T) {
+		input := []byte(`{"model":"glm-5.3","messages":[{"role":"user","content":"hello"}]}`)
+
+		got, changed, err := NormalizeZhipuChatCompletionsContent(input)
+
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, input, got)
+	})
+
+	t.Run("typed text and media content becomes one text string", func(t *testing.T) {
+		input := []byte(`{"model":"glm-5.3","messages":[{"role":"user","content":[{"type":"input_text","text":"inspect this"},{"type":"image_url","image_url":{"url":"data:image/png;base64,secret"}},{"type":"custom","text":"keep custom text"}]}]}`)
+
+		got, changed, err := NormalizeZhipuChatCompletionsContent(input)
+
+		require.NoError(t, err)
+		require.True(t, changed)
+		content := gjson.GetBytes(got, "messages.0.content")
+		require.Equal(t, gjson.String, content.Type)
+		require.Contains(t, content.String(), "inspect this")
+		require.Contains(t, content.String(), zhipuTextOnlyContentNotice)
+		require.Contains(t, content.String(), "keep custom text")
+		require.NotContains(t, string(got), "data:image/png")
+		require.False(t, gjson.GetBytes(got, "messages.0.content.0.type").Exists())
+	})
+}

@@ -164,6 +164,27 @@ func TestAdaptiveProtocolConvertsKimiResponsesToChatCompletions(t *testing.T) {
 	require.False(t, gjson.GetBytes(upstream.lastBody, "input").Exists())
 }
 
+func TestAdaptiveProtocolNormalizesZhipuResponsesMediaContentToText(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"glm-5.3","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect this"},{"type":"input_image","image_url":"data:image/png;base64,secret"}]}],"stream":false}`)
+	upstream := &httpUpstreamRecorder{err: errors.New("stop after capture")}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+	account := adaptiveProtocolTestAccount(PlatformZhipu, map[string]any{
+		APIProtocolChatCompletions: "http://chat.example",
+		APIProtocolAnthropic:       "http://anthropic.example",
+	})
+
+	_, err := svc.Forward(context.Background(), adaptiveProtocolTestContext("/v1/responses", body), account, body)
+
+	require.Error(t, err)
+	require.Equal(t, "http://chat.example/v1/chat/completions", upstream.lastReq.URL.String())
+	content := gjson.GetBytes(upstream.lastBody, "messages.0.content")
+	require.Equal(t, gjson.String, content.Type)
+	require.Contains(t, content.String(), "inspect this")
+	require.Contains(t, content.String(), zhipuTextOnlyContentNotice)
+	require.NotContains(t, string(upstream.lastBody), "data:image/png")
+}
+
 func TestAdaptiveProtocolRoutesDeepSeekResponsesToNativeResponses(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"deepseek-v4","input":"hello","max_output_tokens":32,"store":true,"previous_response_id":"resp_old","stream":false}`)

@@ -93,6 +93,13 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(upstreamBody, upstreamModel); normalized {
 		upstreamBody = normalizedBody
 	}
+	if account.Platform == PlatformZhipu {
+		normalizedBody, _, normalizeErr := NormalizeZhipuChatCompletionsContent(upstreamBody)
+		if normalizeErr != nil {
+			return nil, fmt.Errorf("normalize Zhipu chat message content: %w", normalizeErr)
+		}
+		upstreamBody = normalizedBody
+	}
 
 	// 4. Apply OpenAI fast policy on the CC body
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, upstreamBody)

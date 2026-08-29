@@ -1350,6 +1350,116 @@ func NormalizeGLMOpenAIReasoningEffort(body []byte, mappedModel string) ([]byte,
 	return modified, true
 }
 
+const zhipuTextOnlyContentNotice = "[Non-text content omitted because the selected Zhipu endpoint accepts text messages only.]"
+
+// NormalizeZhipuChatCompletionsContent converts Chat Completions message
+// content to the text-only shape accepted by Zhipu's Coding Plan endpoint.
+// Text is preserved, while unsupported media/content blocks become an explicit
+// textual notice instead of being silently discarded or forwarded as an
+// upstream-invalid image_url/input_image block.
+func NormalizeZhipuChatCompletionsContent(body []byte) ([]byte, bool, error) {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return body, false, fmt.Errorf("parse chat completions request: %w", err)
+	}
+
+	rawMessages, ok := envelope["messages"]
+	if !ok {
+		return body, false, nil
+	}
+	var messages []map[string]json.RawMessage
+	if err := json.Unmarshal(rawMessages, &messages); err != nil {
+		return body, false, fmt.Errorf("parse chat completions messages: %w", err)
+	}
+
+	changed := false
+	for _, message := range messages {
+		rawContent, ok := message["content"]
+		if !ok {
+			continue
+		}
+		normalized, contentChanged, err := normalizeZhipuChatMessageContent(rawContent)
+		if err != nil {
+			return body, false, err
+		}
+		if contentChanged {
+			message["content"] = normalized
+			changed = true
+		}
+	}
+	if !changed {
+		return body, false, nil
+	}
+
+	normalizedMessages, err := json.Marshal(messages)
+	if err != nil {
+		return body, false, fmt.Errorf("serialize normalized chat completions messages: %w", err)
+	}
+	envelope["messages"] = normalizedMessages
+	normalizedBody, err := json.Marshal(envelope)
+	if err != nil {
+		return body, false, fmt.Errorf("serialize normalized chat completions request: %w", err)
+	}
+	return normalizedBody, true, nil
+}
+
+func normalizeZhipuChatMessageContent(raw json.RawMessage) (json.RawMessage, bool, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || trimmed[0] == '"' {
+		return raw, false, nil
+	}
+
+	var parts []json.RawMessage
+	if err := json.Unmarshal(trimmed, &parts); err != nil {
+		var single map[string]json.RawMessage
+		if objectErr := json.Unmarshal(trimmed, &single); objectErr != nil {
+			return raw, false, fmt.Errorf("parse Zhipu chat message content: %w", err)
+		}
+		parts = []json.RawMessage{trimmed}
+	}
+
+	texts := make([]string, 0, len(parts))
+	for _, rawPart := range parts {
+		var directText string
+		if err := json.Unmarshal(rawPart, &directText); err == nil {
+			if strings.TrimSpace(directText) != "" {
+				texts = append(texts, directText)
+			}
+			continue
+		}
+
+		var part map[string]json.RawMessage
+		if err := json.Unmarshal(rawPart, &part); err != nil {
+			return raw, false, fmt.Errorf("parse Zhipu chat message content part: %w", err)
+		}
+		var partType string
+		_ = json.Unmarshal(part["type"], &partType)
+		partType = strings.ToLower(strings.TrimSpace(partType))
+		var text string
+		_ = json.Unmarshal(part["text"], &text)
+		switch partType {
+		case "", "text", "input_text", "output_text":
+			if strings.TrimSpace(text) != "" {
+				texts = append(texts, text)
+			}
+		case "image", "image_url", "input_image":
+			texts = append(texts, zhipuTextOnlyContentNotice)
+		default:
+			if strings.TrimSpace(text) != "" {
+				texts = append(texts, text)
+			} else {
+				texts = append(texts, zhipuTextOnlyContentNotice)
+			}
+		}
+	}
+
+	normalized, err := json.Marshal(strings.Join(texts, "\n\n"))
+	if err != nil {
+		return raw, false, fmt.Errorf("serialize Zhipu chat message content: %w", err)
+	}
+	return normalized, true, nil
+}
+
 func normalizeGLMOpenAIReasoningEffort(raw string) string {
 	value := strings.ToLower(strings.TrimSpace(raw))
 	if value == "" {
