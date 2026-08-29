@@ -82,6 +82,30 @@ public sealed class AccountPageParityTests
     }
 
     [Fact]
+    public void AccountEditorGroupPickerMatchesCreateTypographyAndControlSizing()
+    {
+        var editCss = Read("Pages", "Providers.razor.css");
+        var createCss = Read("Components", "NativeAccountCreateModal.razor.css");
+
+        foreach (var declaration in new[]
+        {
+            "min-height: 36px", "padding: 7px 9px", "gap: 8px",
+            "border-radius: 5px", "font-size: .76rem",
+            "width: 16px", "height: 16px", "font-size: .68rem"
+        })
+        {
+            Assert.Contains(declaration, editCss, StringComparison.Ordinal);
+            Assert.Contains(declaration, createCss, StringComparison.Ordinal);
+        }
+
+        Assert.Contains(".editor-group-picker label:has(input:checked)", editCss, StringComparison.Ordinal);
+        Assert.Contains(".native-check-option:has(input:checked)", createCss, StringComparison.Ordinal);
+        Assert.Contains("font-weight: 400", editCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("font-size: .63rem", editCss, StringComparison.Ordinal);
+        Assert.DoesNotContain("font-size: .53rem", editCss, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AccountRowActionMenuUsesViewportOverlayInsteadOfTableOverflow()
     {
         var markup = Read("Pages", "Providers.razor");
