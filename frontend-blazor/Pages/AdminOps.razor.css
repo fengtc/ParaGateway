@@ -184,10 +184,10 @@
 .health-score > b { margin-top: 3px; font-size: .72rem; }
 
 .realtime-panel { min-width: 0; }
-.realtime-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.realtime-heading > span { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: .65rem; font-weight: 800; text-transform: uppercase; }
+.realtime-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.realtime-heading > span { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; color: var(--muted); font-size: .65rem; font-weight: 800; text-transform: uppercase; white-space: nowrap; }
 .realtime-heading i { width: 9px; height: 9px; background: #3b82f6; border-radius: 50%; box-shadow: 0 0 0 4px rgb(59 130 246 / 16%); }
-.window-tabs { display: flex; gap: 3px; }
+.window-tabs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; }
 .window-tabs button { padding: 3px 5px; color: var(--muted); background: #e8eeeb; border: 0; border-radius: 4px; font-size: .58rem; font-weight: 750; cursor: pointer; }
 .window-tabs button.active { color: #fff; background: #3b82f6; }
 .metric-kicker { display: block; margin-top: 15px; }
