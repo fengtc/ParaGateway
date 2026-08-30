@@ -203,7 +203,7 @@
 @keyframes heartbeat { to { transform: translateX(-280px); } }
 
 .ops-metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
-.ops-metric-card { min-height: 118px; padding: 13px; background: #f7f9f8; border-radius: 9px; }
+.ops-metric-card { container-type: inline-size; min-height: 118px; padding: 13px; background: #f7f9f8; border-radius: 9px; }
 .ops-metric-card header,
 .resource-grid article header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ops-metric-card header span,
@@ -584,6 +584,11 @@
 .correlated-errors h3,
 .diagnosis-panel h3 { font-size: .88rem; }
 .ops-metric-card dd { font-size: .8rem; }
+
+@container (max-width: 380px) {
+    .ops-metric-card dl { grid-template-columns: 1fr; }
+}
+
 .error-payload pre,
 .correlated-errors pre { font-size: .8rem; }
 .correlated-errors > p,
