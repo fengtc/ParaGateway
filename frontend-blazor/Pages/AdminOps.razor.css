@@ -335,10 +335,11 @@
 .correlated-errors article p { margin: 5px 0; font-size: .7rem; }
 .correlated-errors article small { display: block; margin-bottom: 7px; color: var(--muted); font-size: .62rem; }
 .ops-metric-card dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px 10px; margin: 9px 0 0; }
-.ops-metric-card dl div { display: flex; justify-content: space-between; gap: 5px; }
+.ops-metric-card dl div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 5px; }
 .ops-metric-card dt,
 .ops-metric-card p { margin: 5px 0 0; color: var(--muted); font-size: .65rem; }
-.ops-metric-card dd { margin: 0; font-size: .68rem; font-weight: 800; }
+.ops-metric-card dt { white-space: nowrap; }
+.ops-metric-card dd { margin: 0; font-size: .68rem; font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
 .metric-main { display: block; margin-top: 8px; color: var(--ink); font-size: 1.35rem; font-weight: 850; }
 .metric-main small { color: var(--muted); font-size: .6rem; }
 .ops-metric-card p { display: flex; justify-content: space-between; }
