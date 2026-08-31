@@ -4,6 +4,7 @@
 @inject ApiClient Api
 @inject ToastService Toasts
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
 
 <PageTitle>系统设置 · ParaGateway</PageTitle>
 
@@ -16,7 +17,7 @@
     <nav class="settings-tabs" role="tablist" aria-label="系统设置">
         @foreach (var tab in Tabs)
         {
-            <button type="button" id="settings-tab-@tab.Id" role="tab" aria-selected="@(activeTab == tab.Id)" class="@(activeTab == tab.Id ? "active" : null)" @onclick="() => activeTab = tab.Id"><Icon Name="@tab.Icon" Size="16" />@tab.Label</button>
+            <button type="button" id="settings-tab-@tab.Id" role="tab" aria-selected="@(activeTab == tab.Id)" class="@(activeTab == tab.Id ? "active" : null)" @onclick="() => SelectTab(tab.Id)"><Icon Name="@tab.Icon" Size="16" />@tab.Label</button>
         }
     </nav>
 
@@ -211,13 +212,6 @@
                 <NotificationSettings Settings="settings" />
                 <EmailTemplateEditor />
             }
-            else if (activeTab == "backup")
-            {
-                <section class="settings-card backup-links">
-                    <header><div><h2>备份管理</h2><p>备份目标修改、下载和恢复属于敏感操作，由 Go 后端执行 step-up 2FA。</p></div></header>
-                    <div><a class="backup-link" href="/admin/backups"><Icon Name="box" Size="22" /><span><b>备份管理</b><small>S3、定时备份、下载、恢复及删除</small></span><Icon Name="chevron-right" /></a></div>
-                </section>
-            }
         </main>
 
         @if (activeTab != "backup")
@@ -252,6 +246,17 @@
     private string smtpPassword = string.Empty, generatedAdminApiKey = string.Empty, testEmailAddress = string.Empty;
     private bool loading = true, saving, runtimeSaving, adminKeyBusy, smtpBusy;
     private string? error;
+
+    private void SelectTab(string tabId)
+    {
+        if (tabId == "backup")
+        {
+            Navigation.NavigateTo("/admin/backups");
+            return;
+        }
+
+        activeTab = tabId;
+    }
 
     protected override Task OnInitializedAsync() => LoadAsync();
 

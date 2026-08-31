@@ -115,6 +115,18 @@ public sealed class AdminSettingsParityTests
         Assert.Contains("上游账号配额提醒", notifications, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void BackupSettingsTabNavigatesDirectlyToBackupManagement()
+    {
+        var page = ReadSource("Pages", "AdminSettings.razor");
+
+        Assert.Contains("@inject NavigationManager Navigation", page, StringComparison.Ordinal);
+        Assert.Contains("@onclick=\"() => SelectTab(tab.Id)\"", page, StringComparison.Ordinal);
+        Assert.Contains("if (tabId == \"backup\")", page, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(\"/admin/backups\")", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("class=\"settings-card backup-links\"", page, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("SecurityAdvancedSettings.razor.css", ".security-advanced-card > header h2")]
     [InlineData("UserDefaultsSettings.razor.css", ".user-defaults-card > header h2")]
