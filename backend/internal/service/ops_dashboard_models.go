@@ -1,6 +1,9 @@
 package service
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type OpsDashboardFilter struct {
 	StartTime time.Time
@@ -8,10 +11,27 @@ type OpsDashboardFilter struct {
 
 	Platform string
 	GroupID  *int64
+	// Model and AccountID are optional exact-match dimensions for historical
+	// request statistics.  They are intentionally not part of the pre-aggregated
+	// hourly key, so callers using either dimension must query raw usage/error logs.
+	Model     string
+	AccountID *int64
 
 	// QueryMode controls whether dashboard queries should use raw logs or pre-aggregated tables.
 	// Expected values: auto/raw/preagg (see OpsQueryMode).
 	QueryMode OpsQueryMode
+}
+
+// RequiresRaw reports whether this filter needs request-level dimensions that
+// are not represented by the hourly pre-aggregation tables.
+func (f *OpsDashboardFilter) RequiresRaw() bool {
+	if f == nil {
+		return false
+	}
+	if strings.TrimSpace(f.Model) != "" {
+		return true
+	}
+	return f.AccountID != nil && *f.AccountID > 0
 }
 
 type OpsRateSummary struct {
@@ -34,6 +54,8 @@ type OpsDashboardOverview struct {
 	EndTime   time.Time `json:"end_time"`
 	Platform  string    `json:"platform"`
 	GroupID   *int64    `json:"group_id"`
+	Model     string    `json:"model,omitempty"`
+	AccountID *int64    `json:"account_id,omitempty"`
 
 	// HealthScore is a backend-computed overall health score (0-100).
 	// It is derived from the monitored metrics in this overview, plus best-effort system metrics/job heartbeats.
@@ -81,7 +103,16 @@ type OpsLatencyHistogramResponse struct {
 	EndTime   time.Time `json:"end_time"`
 	Platform  string    `json:"platform"`
 	GroupID   *int64    `json:"group_id"`
+	Model     string    `json:"model,omitempty"`
+	AccountID *int64    `json:"account_id,omitempty"`
 
+	// TotalRequests/Buckets are retained as aliases for older clients and map
+	// to the complete response duration (E2E) distribution.
 	TotalRequests int64                        `json:"total_requests"`
 	Buckets       []*OpsLatencyHistogramBucket `json:"buckets"`
+
+	DurationTotalRequests int64                        `json:"duration_total_requests"`
+	DurationBuckets       []*OpsLatencyHistogramBucket `json:"duration_buckets"`
+	TTFTTotalRequests     int64                        `json:"ttft_total_requests"`
+	TTFTBuckets           []*OpsLatencyHistogramBucket `json:"ttft_buckets"`
 }

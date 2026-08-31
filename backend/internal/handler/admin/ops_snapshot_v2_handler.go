@@ -3,8 +3,6 @@ package admin
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -28,6 +26,8 @@ type opsDashboardSnapshotV2CacheKey struct {
 	EndTime      string               `json:"end_time"`
 	Platform     string               `json:"platform"`
 	GroupID      *int64               `json:"group_id"`
+	Model        string               `json:"model"`
+	AccountID    *int64               `json:"account_id"`
 	QueryMode    service.OpsQueryMode `json:"mode"`
 	BucketSecond int                  `json:"bucket_second"`
 }
@@ -44,26 +44,12 @@ func (h *OpsHandler) GetDashboardSnapshotV2(c *gin.Context) {
 		return
 	}
 
-	startTime, endTime, err := parseOpsTimeRange(c, "1h")
+	filter, err := parseOpsDashboardFilter(c, "1h")
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
-
-	filter := &service.OpsDashboardFilter{
-		StartTime: startTime,
-		EndTime:   endTime,
-		Platform:  strings.TrimSpace(c.Query("platform")),
-		QueryMode: parseOpsQueryMode(c),
-	}
-	if v := strings.TrimSpace(c.Query("group_id")); v != "" {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || id <= 0 {
-			response.BadRequest(c, "Invalid group_id")
-			return
-		}
-		filter.GroupID = &id
-	}
+	startTime, endTime := filter.StartTime, filter.EndTime
 	bucketSeconds := pickThroughputBucketSeconds(endTime.Sub(startTime))
 
 	keyRaw, _ := json.Marshal(opsDashboardSnapshotV2CacheKey{
@@ -71,6 +57,8 @@ func (h *OpsHandler) GetDashboardSnapshotV2(c *gin.Context) {
 		EndTime:      endTime.UTC().Format(time.RFC3339),
 		Platform:     filter.Platform,
 		GroupID:      filter.GroupID,
+		Model:        filter.Model,
+		AccountID:    filter.AccountID,
 		QueryMode:    filter.QueryMode,
 		BucketSecond: bucketSeconds,
 	})

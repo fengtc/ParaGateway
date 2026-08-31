@@ -11,12 +11,15 @@ type latencyHistogramBucket struct {
 }
 
 var latencyHistogramBuckets = []latencyHistogramBucket{
-	{upperMs: 100, label: "0-100ms"},
-	{upperMs: 200, label: "100-200ms"},
-	{upperMs: 500, label: "200-500ms"},
-	{upperMs: 1000, label: "500-1000ms"},
-	{upperMs: 2000, label: "1000-2000ms"},
-	{upperMs: 0, label: "2000ms+"}, // default bucket
+	// The previous 100/200/500/1000/2000ms buckets made normal model
+	// generation look like one giant "2000ms+" tail.  These wider buckets are
+	// useful for both E2E duration and TTFT, while preserving deterministic
+	// ordering for the dashboard.
+	{upperMs: 1000, label: "0-1000ms"},
+	{upperMs: 3000, label: "1000-3000ms"},
+	{upperMs: 10000, label: "3000-10000ms"},
+	{upperMs: 30000, label: "10000-30000ms"},
+	{upperMs: 0, label: "30000ms+"}, // default bucket
 }
 
 var latencyHistogramOrderedRanges = func() []string {

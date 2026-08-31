@@ -27,6 +27,12 @@ func (r *opsRepository) GetDashboardOverview(ctx context.Context, filter *servic
 	if filter.StartTime.IsZero() || filter.EndTime.IsZero() {
 		return nil, fmt.Errorf("start_time/end_time required")
 	}
+	// Hourly aggregates do not carry model/account dimensions.  Enforce raw
+	// execution here as a defense in depth for direct repository callers (the
+	// service layer applies the same rule before dispatching).
+	if filter.RequiresRaw() {
+		filter.QueryMode = service.OpsQueryModeRaw
+	}
 
 	mode := filter.QueryMode
 	if !mode.IsValid() {
@@ -58,7 +64,7 @@ func (r *opsRepository) getDashboardOverviewRaw(ctx context.Context, filter *ser
 	}
 
 	latencyCtx, cancelLatency := context.WithTimeout(ctx, opsRawLatencyQueryTimeout)
-	duration, ttft, _, err := r.queryUsageLatency(latencyCtx, filter, start, end)
+	duration, ttft, _, _, err := r.queryUsageLatency(latencyCtx, filter, start, end)
 	cancelLatency()
 	if err != nil {
 		if isQueryTimeoutErr(err) {
@@ -129,6 +135,8 @@ func (r *opsRepository) getDashboardOverviewRaw(ctx context.Context, filter *ser
 		EndTime:   end,
 		Platform:  strings.TrimSpace(filter.Platform),
 		GroupID:   filter.GroupID,
+		Model:     strings.TrimSpace(filter.Model),
+		AccountID: filter.AccountID,
 
 		SuccessCount:         successCount,
 		ErrorCountTotal:      errorTotal,
@@ -163,6 +171,7 @@ func (r *opsRepository) getDashboardOverviewRaw(ctx context.Context, filter *ser
 
 type opsDashboardPartial struct {
 	successCount         int64
+	durationSampleCount  int64
 	ttftSampleCount      int64
 	errorCountTotal      int64
 	businessLimitedCount int64
@@ -241,12 +250,12 @@ func (r *opsRepository) getDashboardOverviewPreaggregated(ctx context.Context, f
 	tokenConsumed := preagg.tokenConsumed + head.tokenConsumed + tail.tokenConsumed
 
 	// Approximate percentiles across segments:
-	// - p50/p90/avg: weighted average by success_count
+	// - p50/p90/avg: weighted average by each metric's actual sample count
 	// - p95/p99/max: max (conservative tail)
 	duration := combineApproxPercentiles([]opsPercentileSegment{
-		{weight: preagg.successCount, p: preagg.duration},
-		{weight: head.successCount, p: head.duration},
-		{weight: tail.successCount, p: tail.duration},
+		{weight: preagg.durationSampleCount, p: preagg.duration},
+		{weight: head.durationSampleCount, p: head.duration},
+		{weight: tail.durationSampleCount, p: tail.duration},
 	})
 	// TTFT segments are weighted by the streaming sample count (rows that
 	// actually recorded first_token_ms), not the total success count.
@@ -312,6 +321,8 @@ func (r *opsRepository) getDashboardOverviewPreaggregated(ctx context.Context, f
 		EndTime:   end,
 		Platform:  strings.TrimSpace(filter.Platform),
 		GroupID:   filter.GroupID,
+		Model:     strings.TrimSpace(filter.Model),
+		AccountID: filter.AccountID,
 
 		SuccessCount:         successCount,
 		ErrorCountTotal:      errorTotal,
@@ -348,6 +359,7 @@ type opsHourlyMetricsRow struct {
 	bucketStart time.Time
 
 	successCount         int64
+	durationSampleCount  int64
 	ttftSampleCount      int64
 	errorCountTotal      int64
 	businessLimitedCount int64
@@ -415,6 +427,7 @@ func (r *opsRepository) listHourlyMetricsRows(ctx context.Context, filter *servi
 SELECT
   bucket_start,
   success_count,
+  duration_sample_count,
   error_count_total,
   business_limited_count,
   error_count_sla,
@@ -451,6 +464,7 @@ ORDER BY bucket_start ASC`
 		if err := rows.Scan(
 			&row.bucketStart,
 			&row.successCount,
+			&row.durationSampleCount,
 			&row.errorCountTotal,
 			&row.businessLimitedCount,
 			&row.errorCountSLA,
@@ -517,6 +531,7 @@ func aggregateHourlyRows(rows []opsHourlyMetricsRow) opsDashboardPartial {
 
 	for _, row := range rows {
 		out.successCount += row.successCount
+		out.durationSampleCount += row.durationSampleCount
 		out.ttftSampleCount += row.ttftSampleCount
 		out.errorCountTotal += row.errorCountTotal
 		out.businessLimitedCount += row.businessLimitedCount
@@ -528,18 +543,21 @@ func aggregateHourlyRows(rows []opsHourlyMetricsRow) opsDashboardPartial {
 
 		out.tokenConsumed += row.tokenConsumed
 
-		if row.successCount > 0 {
+		// E2E duration is only defined for rows with a non-null duration_ms.
+		// Weighting by success_count would include successful rows that did not
+		// produce a complete response and would dilute the merged latency.
+		if row.durationSampleCount > 0 {
 			if row.durationP50.Valid {
-				p50Sum += float64(row.durationP50.Int64) * float64(row.successCount)
-				p50W += row.successCount
+				p50Sum += float64(row.durationP50.Int64) * float64(row.durationSampleCount)
+				p50W += row.durationSampleCount
 			}
 			if row.durationP90.Valid {
-				p90Sum += float64(row.durationP90.Int64) * float64(row.successCount)
-				p90W += row.successCount
+				p90Sum += float64(row.durationP90.Int64) * float64(row.durationSampleCount)
+				p90W += row.durationSampleCount
 			}
 			if row.durationAvg.Valid {
-				avgSum += row.durationAvg.Float64 * float64(row.successCount)
-				avgW += row.successCount
+				avgSum += row.durationAvg.Float64 * float64(row.durationSampleCount)
+				avgW += row.durationSampleCount
 			}
 		}
 
@@ -561,38 +579,38 @@ func aggregateHourlyRows(rows []opsHourlyMetricsRow) opsDashboardPartial {
 			}
 		}
 
-		if row.durationP95.Valid {
+		if row.durationSampleCount > 0 && row.durationP95.Valid {
 			v := int(row.durationP95.Int64)
 			if p95Max == nil || v > *p95Max {
 				p95Max = &v
 			}
 		}
-		if row.durationP99.Valid {
+		if row.durationSampleCount > 0 && row.durationP99.Valid {
 			v := int(row.durationP99.Int64)
 			if p99Max == nil || v > *p99Max {
 				p99Max = &v
 			}
 		}
-		if row.durationMax.Valid {
+		if row.durationSampleCount > 0 && row.durationMax.Valid {
 			v := int(row.durationMax.Int64)
 			if maxMax == nil || v > *maxMax {
 				maxMax = &v
 			}
 		}
 
-		if row.ttftP95.Valid {
+		if row.ttftSampleCount > 0 && row.ttftP95.Valid {
 			v := int(row.ttftP95.Int64)
 			if ttftP95Max == nil || v > *ttftP95Max {
 				ttftP95Max = &v
 			}
 		}
-		if row.ttftP99.Valid {
+		if row.ttftSampleCount > 0 && row.ttftP99.Valid {
 			v := int(row.ttftP99.Int64)
 			if ttftP99Max == nil || v > *ttftP99Max {
 				ttftP99Max = &v
 			}
 		}
-		if row.ttftMax.Valid {
+		if row.ttftSampleCount > 0 && row.ttftMax.Valid {
 			v := int(row.ttftMax.Int64)
 			if ttftMaxMax == nil || v > *ttftMaxMax {
 				ttftMaxMax = &v
@@ -644,12 +662,13 @@ func (r *opsRepository) queryRawPartial(ctx context.Context, filter *service.Ops
 	}
 
 	latencyCtx, cancelLatency := context.WithTimeout(ctx, opsRawLatencyQueryTimeout)
-	duration, ttft, ttftSampleCount, err := r.queryUsageLatency(latencyCtx, filter, start, end)
+	duration, ttft, durationSampleCount, ttftSampleCount, err := r.queryUsageLatency(latencyCtx, filter, start, end)
 	cancelLatency()
 	if err != nil {
 		if isQueryTimeoutErr(err) {
 			duration = service.OpsPercentiles{}
 			ttft = service.OpsPercentiles{}
+			durationSampleCount = 0
 			ttftSampleCount = 0
 		} else {
 			return nil, err
@@ -663,6 +682,7 @@ func (r *opsRepository) queryRawPartial(ctx context.Context, filter *service.Ops
 
 	return &opsDashboardPartial{
 		successCount:                 successCount,
+		durationSampleCount:          durationSampleCount,
 		ttftSampleCount:              ttftSampleCount,
 		errorCountTotal:              errorTotal,
 		businessLimitedCount:         businessLimited,
@@ -730,6 +750,9 @@ func combineApproxPercentiles(segments []opsPercentileSegment) service.OpsPercen
 	maxInt := func(get func(service.OpsPercentiles) *int) *int {
 		var max *int
 		for _, seg := range segments {
+			if seg.weight <= 0 {
+				continue
+			}
 			v := get(seg.p)
 			if v == nil {
 				continue
@@ -809,7 +832,7 @@ FROM usage_logs ul
 	return successCount, tokenConsumed, nil
 }
 
-func (r *opsRepository) queryUsageLatency(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (duration service.OpsPercentiles, ttft service.OpsPercentiles, ttftSampleCount int64, err error) {
+func (r *opsRepository) queryUsageLatency(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (duration service.OpsPercentiles, ttft service.OpsPercentiles, durationSampleCount int64, ttftSampleCount int64, err error) {
 	join, where, args, _ := buildUsageWhere(filter, start, end, 1)
 	q := `
 SELECT
@@ -825,6 +848,7 @@ SELECT
   percentile_cont(0.99) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_p99,
   AVG(first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_avg,
   MAX(first_token_ms) AS ttft_max,
+  COUNT(duration_ms) AS duration_sample_count,
   COUNT(first_token_ms) AS ttft_sample_count
 FROM usage_logs ul
 ` + join + `
@@ -836,12 +860,13 @@ FROM usage_logs ul
 	var tP50, tP90, tP95, tP99 sql.NullFloat64
 	var tAvg sql.NullFloat64
 	var tMax sql.NullInt64
+	var dCount int64
 	var tCount int64
 	if err := r.db.QueryRowContext(ctx, q, args...).Scan(
 		&dP50, &dP90, &dP95, &dP99, &dAvg, &dMax,
-		&tP50, &tP90, &tP95, &tP99, &tAvg, &tMax, &tCount,
+		&tP50, &tP90, &tP95, &tP99, &tAvg, &tMax, &dCount, &tCount,
 	); err != nil {
-		return service.OpsPercentiles{}, service.OpsPercentiles{}, 0, err
+		return service.OpsPercentiles{}, service.OpsPercentiles{}, 0, 0, err
 	}
 
 	duration.P50 = floatToIntPtr(dP50)
@@ -864,7 +889,7 @@ FROM usage_logs ul
 		ttft.Max = &v
 	}
 
-	return duration, ttft, tCount, nil
+	return duration, ttft, dCount, tCount, nil
 }
 
 func (r *opsRepository) queryErrorCounts(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (
@@ -975,13 +1000,17 @@ func isQueryTimeoutErr(err error) bool {
 func buildUsageWhere(filter *service.OpsDashboardFilter, start, end time.Time, startIndex int) (join string, where string, args []any, nextIndex int) {
 	platform := ""
 	groupID := (*int64)(nil)
+	model := ""
+	accountID := (*int64)(nil)
 	if filter != nil {
 		platform = strings.TrimSpace(strings.ToLower(filter.Platform))
 		groupID = filter.GroupID
+		model = strings.TrimSpace(filter.Model)
+		accountID = filter.AccountID
 	}
 
 	idx := startIndex
-	clauses := make([]string, 0, 4)
+	clauses := make([]string, 0, 6)
 	args = make([]any, 0, 4)
 
 	args = append(args, start)
@@ -1004,6 +1033,16 @@ func buildUsageWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 		clauses = append(clauses, fmt.Sprintf("COALESCE(NULLIF(g.platform,''), a.platform) = $%d", idx))
 		idx++
 	}
+	if model != "" {
+		args = append(args, model)
+		clauses = append(clauses, fmt.Sprintf("%s = $%d", opsEffectiveModelSQL("ul."), idx))
+		idx++
+	}
+	if accountID != nil && *accountID > 0 {
+		args = append(args, *accountID)
+		clauses = append(clauses, fmt.Sprintf("ul.account_id = $%d", idx))
+		idx++
+	}
 
 	where = "WHERE " + strings.Join(clauses, " AND ")
 	return join, where, args, idx
@@ -1012,14 +1051,18 @@ func buildUsageWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 func buildErrorWhere(filter *service.OpsDashboardFilter, start, end time.Time, startIndex int) (where string, args []any, nextIndex int) {
 	platform := ""
 	groupID := (*int64)(nil)
+	model := ""
+	accountID := (*int64)(nil)
 	if filter != nil {
 		platform = strings.TrimSpace(strings.ToLower(filter.Platform))
 		groupID = filter.GroupID
+		model = strings.TrimSpace(filter.Model)
+		accountID = filter.AccountID
 	}
 
 	idx := startIndex
 	clauses := make([]string, 0, 5)
-	args = make([]any, 0, 5)
+	args = make([]any, 0, 7)
 
 	args = append(args, start)
 	clauses = append(clauses, fmt.Sprintf("created_at >= $%d", idx))
@@ -1040,9 +1083,73 @@ func buildErrorWhere(filter *service.OpsDashboardFilter, start, end time.Time, s
 		clauses = append(clauses, fmt.Sprintf("platform = $%d", idx))
 		idx++
 	}
+	if model != "" {
+		args = append(args, model)
+		clauses = append(clauses, fmt.Sprintf("%s = $%d", opsEffectiveModelOrEmptySQL(""), idx))
+		idx++
+	}
+	if accountID != nil && *accountID > 0 {
+		args = append(args, *accountID)
+		clauses = append(clauses, fmt.Sprintf("account_id = $%d", idx))
+		idx++
+	}
 
 	where = "WHERE " + strings.Join(clauses, " AND ")
 	return where, args, idx
+}
+
+// opsEntityFilterSQL returns matching predicates for the two CTEs used by
+// throughput drill-down queries.  Both CTEs share the same placeholder values,
+// so each dimension is appended once to args and referenced by both predicates.
+// Prefixes may be empty for an unaliased table (for example ops_error_logs).
+func opsEntityFilterSQL(filter *service.OpsDashboardFilter, usagePrefix, errorPrefix string, startIndex int) (usageSQL, errorSQL string, args []any, nextIndex int) {
+	if startIndex <= 0 {
+		startIndex = 1
+	}
+	model := ""
+	var accountID *int64
+	if filter != nil {
+		model = strings.TrimSpace(filter.Model)
+		accountID = filter.AccountID
+	}
+
+	idx := startIndex
+	var usageClauses, errorClauses []string
+	qualify := func(prefix, column string) string {
+		return prefix + column
+	}
+	if model != "" {
+		args = append(args, model)
+		usageClauses = append(usageClauses, fmt.Sprintf(" AND %s = $%d", opsEffectiveModelSQL(usagePrefix), idx))
+		errorClauses = append(errorClauses, fmt.Sprintf(" AND %s = $%d", opsEffectiveModelOrEmptySQL(errorPrefix), idx))
+		idx++
+	}
+	if accountID != nil && *accountID > 0 {
+		args = append(args, *accountID)
+		usageClauses = append(usageClauses, fmt.Sprintf(" AND %s = $%d", qualify(usagePrefix, "account_id"), idx))
+		errorClauses = append(errorClauses, fmt.Sprintf(" AND %s = $%d", qualify(errorPrefix, "account_id"), idx))
+		idx++
+	}
+	return strings.Join(usageClauses, ""), strings.Join(errorClauses, ""), args, idx
+}
+
+// opsEffectiveModelSQL matches the model shown to users throughout usage
+// reporting: prefer a non-blank requested_model and fall back to model for
+// legacy rows. Prefixes are fixed repository aliases, never user input.
+func opsEffectiveModelSQL(prefix string) string {
+	return fmt.Sprintf(
+		"COALESCE(NULLIF(TRIM(%srequested_model), ''), %smodel)",
+		prefix,
+		prefix,
+	)
+}
+
+func opsEffectiveModelOrEmptySQL(prefix string) string {
+	return fmt.Sprintf(
+		"COALESCE(NULLIF(TRIM(%srequested_model), ''), %smodel, '')",
+		prefix,
+		prefix,
+	)
 }
 
 func floatToIntPtr(v sql.NullFloat64) *int {

@@ -605,7 +605,22 @@ public sealed class OpsLatencyHistogramDto
     public string Platform { get; set; } = string.Empty;
     [JsonPropertyName("group_id")] public long? GroupId { get; set; }
     [JsonPropertyName("total_requests")] public long TotalRequests { get; set; }
-    public List<OpsLatencyBucketDto> Buckets { get; set; } = [];
+    [JsonPropertyName("duration_total_requests")] public long DurationTotalRequests { get; set; }
+    [JsonPropertyName("duration_buckets")] public List<OpsLatencyBucketDto>? DurationBuckets { get; set; } = [];
+    [JsonPropertyName("ttft_total_requests")] public long TtftTotalRequests { get; set; }
+    [JsonPropertyName("ttft_buckets")] public List<OpsLatencyBucketDto>? TtftBuckets { get; set; } = [];
+    // Older backend responses only contain total_requests/buckets. Keep those
+    // values usable while the candidate and production services are upgraded.
+    public List<OpsLatencyBucketDto>? Buckets { get; set; } = [];
+
+    [JsonIgnore]
+    public IReadOnlyList<OpsLatencyBucketDto> EffectiveDurationBuckets => DurationBuckets is { Count: > 0 } ? DurationBuckets : Buckets ?? [];
+
+    [JsonIgnore]
+    public IReadOnlyList<OpsLatencyBucketDto> EffectiveTtftBuckets => TtftBuckets ?? [];
+
+    [JsonIgnore]
+    public long EffectiveDurationTotalRequests => DurationTotalRequests > 0 ? DurationTotalRequests : TotalRequests;
 }
 
 public sealed class OpsLatencyBucketDto
@@ -724,6 +739,8 @@ public sealed class OpsRealtimeTrafficDto
     [JsonPropertyName("end_time")] public DateTimeOffset? EndTime { get; set; }
     public string Platform { get; set; } = string.Empty;
     [JsonPropertyName("group_id")] public long? GroupId { get; set; }
+    public string Model { get; set; } = string.Empty;
+    [JsonPropertyName("account_id")] public long? AccountId { get; set; }
     public OpsRateSummaryDto Qps { get; set; } = new();
     public OpsRateSummaryDto Tps { get; set; } = new();
 }
@@ -932,6 +949,7 @@ public sealed class OpsRequestDetailDto
     public string Platform { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
     [JsonPropertyName("duration_ms")] public int? DurationMs { get; set; }
+    [JsonPropertyName("first_token_ms")] public int? FirstTokenMs { get; set; }
     [JsonPropertyName("status_code")] public int? StatusCode { get; set; }
     [JsonPropertyName("error_id")] public long? ErrorId { get; set; }
     public string Phase { get; set; } = string.Empty;

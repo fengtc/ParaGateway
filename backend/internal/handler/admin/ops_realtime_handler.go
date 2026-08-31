@@ -202,6 +202,8 @@ func parseOpsRealtimeWindow(v string) (time.Duration, string, bool) {
 // - window: 1min|5min|30min|1h (default: 1min)
 // - platform: optional
 // - group_id: optional
+// - model: optional exact-match model name
+// - account_id: optional account ID
 func (h *OpsHandler) GetRealtimeTrafficSummary(c *gin.Context) {
 	if h.opsService == nil {
 		response.Error(c, http.StatusServiceUnavailable, "Ops service not available")
@@ -218,15 +220,10 @@ func (h *OpsHandler) GetRealtimeTrafficSummary(c *gin.Context) {
 		return
 	}
 
-	platform := strings.TrimSpace(c.Query("platform"))
-	var groupID *int64
-	if v := strings.TrimSpace(c.Query("group_id")); v != "" {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || id <= 0 {
-			response.BadRequest(c, "Invalid group_id")
-			return
-		}
-		groupID = &id
+	platform, model, groupID, accountID, err := parseOpsEntityDimensions(c)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
 	}
 
 	endTime := time.Now().UTC()
@@ -239,6 +236,8 @@ func (h *OpsHandler) GetRealtimeTrafficSummary(c *gin.Context) {
 			EndTime:   endTime,
 			Platform:  platform,
 			GroupID:   groupID,
+			Model:     model,
+			AccountID: accountID,
 			QPS:       service.OpsRateSummary{},
 			TPS:       service.OpsRateSummary{},
 		}
@@ -255,6 +254,8 @@ func (h *OpsHandler) GetRealtimeTrafficSummary(c *gin.Context) {
 		EndTime:   endTime,
 		Platform:  platform,
 		GroupID:   groupID,
+		Model:     model,
+		AccountID: accountID,
 		QueryMode: service.OpsQueryModeRaw,
 	}
 

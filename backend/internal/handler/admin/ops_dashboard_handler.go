@@ -24,25 +24,10 @@ func (h *OpsHandler) GetDashboardOverview(c *gin.Context) {
 		return
 	}
 
-	startTime, endTime, err := parseOpsTimeRange(c, "1h")
+	filter, err := parseOpsDashboardFilter(c, "1h")
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
-	}
-
-	filter := &service.OpsDashboardFilter{
-		StartTime: startTime,
-		EndTime:   endTime,
-		Platform:  strings.TrimSpace(c.Query("platform")),
-		QueryMode: parseOpsQueryMode(c),
-	}
-	if v := strings.TrimSpace(c.Query("group_id")); v != "" {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || id <= 0 {
-			response.BadRequest(c, "Invalid group_id")
-			return
-		}
-		filter.GroupID = &id
 	}
 
 	data, err := h.opsService.GetDashboardOverview(c.Request.Context(), filter)
@@ -65,28 +50,13 @@ func (h *OpsHandler) GetDashboardThroughputTrend(c *gin.Context) {
 		return
 	}
 
-	startTime, endTime, err := parseOpsTimeRange(c, "1h")
+	filter, err := parseOpsDashboardFilter(c, "1h")
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	filter := &service.OpsDashboardFilter{
-		StartTime: startTime,
-		EndTime:   endTime,
-		Platform:  strings.TrimSpace(c.Query("platform")),
-		QueryMode: parseOpsQueryMode(c),
-	}
-	if v := strings.TrimSpace(c.Query("group_id")); v != "" {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || id <= 0 {
-			response.BadRequest(c, "Invalid group_id")
-			return
-		}
-		filter.GroupID = &id
-	}
-
-	bucketSeconds := pickThroughputBucketSeconds(endTime.Sub(startTime))
+	bucketSeconds := pickThroughputBucketSeconds(filter.EndTime.Sub(filter.StartTime))
 	data, err := h.opsService.GetThroughputTrend(c.Request.Context(), filter, bucketSeconds)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -107,25 +77,10 @@ func (h *OpsHandler) GetDashboardLatencyHistogram(c *gin.Context) {
 		return
 	}
 
-	startTime, endTime, err := parseOpsTimeRange(c, "1h")
+	filter, err := parseOpsDashboardFilter(c, "1h")
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
-	}
-
-	filter := &service.OpsDashboardFilter{
-		StartTime: startTime,
-		EndTime:   endTime,
-		Platform:  strings.TrimSpace(c.Query("platform")),
-		QueryMode: parseOpsQueryMode(c),
-	}
-	if v := strings.TrimSpace(c.Query("group_id")); v != "" {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || id <= 0 {
-			response.BadRequest(c, "Invalid group_id")
-			return
-		}
-		filter.GroupID = &id
 	}
 
 	data, err := h.opsService.GetLatencyHistogram(c.Request.Context(), filter)
@@ -148,28 +103,13 @@ func (h *OpsHandler) GetDashboardErrorTrend(c *gin.Context) {
 		return
 	}
 
-	startTime, endTime, err := parseOpsTimeRange(c, "1h")
+	filter, err := parseOpsDashboardFilter(c, "1h")
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
 	}
 
-	filter := &service.OpsDashboardFilter{
-		StartTime: startTime,
-		EndTime:   endTime,
-		Platform:  strings.TrimSpace(c.Query("platform")),
-		QueryMode: parseOpsQueryMode(c),
-	}
-	if v := strings.TrimSpace(c.Query("group_id")); v != "" {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || id <= 0 {
-			response.BadRequest(c, "Invalid group_id")
-			return
-		}
-		filter.GroupID = &id
-	}
-
-	bucketSeconds := pickThroughputBucketSeconds(endTime.Sub(startTime))
+	bucketSeconds := pickThroughputBucketSeconds(filter.EndTime.Sub(filter.StartTime))
 	data, err := h.opsService.GetErrorTrend(c.Request.Context(), filter, bucketSeconds)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -190,25 +130,10 @@ func (h *OpsHandler) GetDashboardErrorDistribution(c *gin.Context) {
 		return
 	}
 
-	startTime, endTime, err := parseOpsTimeRange(c, "1h")
+	filter, err := parseOpsDashboardFilter(c, "1h")
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
-	}
-
-	filter := &service.OpsDashboardFilter{
-		StartTime: startTime,
-		EndTime:   endTime,
-		Platform:  strings.TrimSpace(c.Query("platform")),
-		QueryMode: parseOpsQueryMode(c),
-	}
-	if v := strings.TrimSpace(c.Query("group_id")); v != "" {
-		id, err := strconv.ParseInt(v, 10, 64)
-		if err != nil || id <= 0 {
-			response.BadRequest(c, "Invalid group_id")
-			return
-		}
-		filter.GroupID = &id
 	}
 
 	data, err := h.opsService.GetErrorDistribution(c.Request.Context(), filter)
@@ -266,6 +191,7 @@ func parseOpsOpenAITokenStatsFilter(c *gin.Context) (*service.OpsOpenAITokenStat
 		StartTime: start,
 		EndTime:   end,
 		Platform:  strings.TrimSpace(c.Query("platform")),
+		Model:     strings.TrimSpace(c.Query("model")),
 	}
 
 	if v := strings.TrimSpace(c.Query("group_id")); v != "" {
@@ -274,6 +200,13 @@ func parseOpsOpenAITokenStatsFilter(c *gin.Context) (*service.OpsOpenAITokenStat
 			return nil, fmt.Errorf("invalid group_id")
 		}
 		filter.GroupID = &id
+	}
+	if v := strings.TrimSpace(c.Query("account_id")); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf("invalid account_id")
+		}
+		filter.AccountID = &id
 	}
 
 	topNRaw := strings.TrimSpace(c.Query("top_n"))
@@ -350,4 +283,58 @@ func parseOpsQueryMode(c *gin.Context) service.OpsQueryMode {
 		return ""
 	}
 	return service.ParseOpsQueryMode(raw)
+}
+
+// parseOpsDashboardFilter centralizes the dimensions shared by all historical
+// Ops dashboard endpoints.  Keeping parsing in one place prevents one card
+// from silently ignoring a model/account selection made by the user.
+func parseOpsDashboardFilter(c *gin.Context, defaultRange string) (*service.OpsDashboardFilter, error) {
+	if c == nil {
+		return nil, fmt.Errorf("invalid request")
+	}
+	startTime, endTime, err := parseOpsTimeRange(c, defaultRange)
+	if err != nil {
+		return nil, err
+	}
+
+	filter := &service.OpsDashboardFilter{
+		StartTime: startTime,
+		EndTime:   endTime,
+		Platform:  strings.TrimSpace(c.Query("platform")),
+		QueryMode: parseOpsQueryMode(c),
+	}
+
+	filter.Platform, filter.Model, filter.GroupID, filter.AccountID, err = parseOpsEntityDimensions(c)
+	if err != nil {
+		return nil, err
+	}
+
+	return filter, nil
+}
+
+// parseOpsEntityDimensions parses the optional dimensions shared by historical
+// and realtime dashboard endpoints.  Model and account_id are exact-match
+// filters; an omitted value means no restriction.
+func parseOpsEntityDimensions(c *gin.Context) (platform, model string, groupID, accountID *int64, err error) {
+	if c == nil {
+		return "", "", nil, nil, fmt.Errorf("invalid request")
+	}
+
+	platform = strings.TrimSpace(c.Query("platform"))
+	model = strings.TrimSpace(c.Query("model"))
+	if v := strings.TrimSpace(c.Query("group_id")); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id <= 0 {
+			return "", "", nil, nil, fmt.Errorf("Invalid group_id")
+		}
+		groupID = &id
+	}
+	if v := strings.TrimSpace(c.Query("account_id")); v != "" {
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id <= 0 {
+			return "", "", nil, nil, fmt.Errorf("Invalid account_id")
+		}
+		accountID = &id
+	}
+	return platform, model, groupID, accountID, nil
 }

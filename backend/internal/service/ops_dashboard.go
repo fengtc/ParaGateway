@@ -29,6 +29,12 @@ func (s *OpsService) GetDashboardOverview(ctx context.Context, filter *OpsDashbo
 
 	// Resolve query mode (requested via query param, or DB default).
 	filter.QueryMode = s.resolveOpsQueryMode(ctx, filter.QueryMode)
+	if filter.RequiresRaw() {
+		// The hourly tables intentionally omit model/account dimensions.  A
+		// filtered dashboard must therefore use request-level logs even when the
+		// caller (or server default) requested pre-aggregation.
+		filter.QueryMode = OpsQueryModeRaw
+	}
 
 	overview, err := s.opsRepo.GetDashboardOverview(ctx, filter)
 	if err != nil && shouldFallbackOpsPreagg(filter, err) {

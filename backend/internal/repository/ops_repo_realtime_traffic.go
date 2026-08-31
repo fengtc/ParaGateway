@@ -115,6 +115,8 @@ FROM combined`
 		EndTime:   end,
 		Platform:  strings.TrimSpace(filter.Platform),
 		GroupID:   filter.GroupID,
+		Model:     strings.TrimSpace(filter.Model),
+		AccountID: filter.AccountID,
 		QPS: service.OpsRateSummary{
 			Current: qpsCurrent,
 			Peak:    qpsPeak,

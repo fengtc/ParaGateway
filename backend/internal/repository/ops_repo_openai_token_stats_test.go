@@ -154,3 +154,37 @@ func TestOpsRepositoryGetOpenAITokenStats_EmptyResult(t *testing.T) {
 
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestOpsRepositoryGetOpenAITokenStatsUsesEffectiveRequestedModel(t *testing.T) {
+	db, mock := newSQLMock(t)
+	repo := &opsRepository{db: db}
+	start := time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	accountID := int64(34)
+	filter := &service.OpsOpenAITokenStatsFilter{
+		TimeRange: "1h",
+		StartTime: start,
+		EndTime:   end,
+		Model:     "gpt-5.6-sol",
+		AccountID: &accountID,
+		TopN:      5,
+	}
+
+	effectiveModelPattern := `COALESCE\(NULLIF\(TRIM\(ul\.requested_model\), ''\), ul\.model\)`
+	mock.ExpectQuery(`(?s)SELECT `+effectiveModelPattern+` AS model.*AND `+effectiveModelPattern+` = \$3.*AND ul\.account_id = \$4.*AND `+effectiveModelPattern+` LIKE 'gpt%'.*GROUP BY `+effectiveModelPattern+`.*SELECT COUNT\(\*\) FROM stats`).
+		WithArgs(start, end, "gpt-5.6-sol", accountID).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	mock.ExpectQuery(`(?s)SELECT `+effectiveModelPattern+` AS model.*GROUP BY `+effectiveModelPattern+`.*ORDER BY request_count DESC, model ASC.*LIMIT \$5`).
+		WithArgs(start, end, "gpt-5.6-sol", accountID, 5).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"model", "request_count", "avg_tokens_per_sec", "avg_first_token_ms",
+			"total_output_tokens", "avg_duration_ms", "requests_with_first_token",
+		}))
+
+	resp, err := repo.GetOpenAITokenStats(context.Background(), filter)
+	require.NoError(t, err)
+	require.Empty(t, resp.Items)
+	require.Equal(t, "gpt-5.6-sol", resp.Model)
+	require.Equal(t, &accountID, resp.AccountID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}

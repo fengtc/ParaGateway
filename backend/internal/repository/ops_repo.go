@@ -184,7 +184,7 @@ func opsErrorLogsOrderBy(filter *service.OpsErrorLogFilter) string {
 	var column string
 	switch sortBy {
 	case "model":
-		column = "COALESCE(NULLIF(TRIM(e.requested_model), ''), e.model)"
+		column = opsEffectiveModelSQL("e.")
 	case "status_code":
 		// 与展示列/过滤保持同义:列表展示 COALESCE(upstream_status_code, status_code, 0),
 		// status_code 过滤也用同一表达式,故排序必须一致——否则 recovered upstream 行
@@ -242,7 +242,7 @@ SELECT
   e.severity,
   COALESCE(e.upstream_status_code, e.status_code, 0),
   COALESCE(e.platform, ''),
-  COALESCE(e.model, ''),
+  ` + opsEffectiveModelOrEmptySQL("e.") + `,
   COALESCE(e.resolved, false),
   e.resolved_at,
   e.resolved_by_user_id,
@@ -413,7 +413,7 @@ SELECT
   e.severity,
   COALESCE(e.upstream_status_code, e.status_code, 0),
   COALESCE(e.platform, ''),
-  COALESCE(e.model, ''),
+  ` + opsEffectiveModelOrEmptySQL("e.") + `,
   COALESCE(e.resolved, false),
   e.resolved_at,
   e.resolved_by_user_id,
@@ -1021,10 +1021,10 @@ func buildOpsErrorLogsWhere(filter *service.OpsErrorLogFilter) (string, []any) {
 	if m := strings.TrimSpace(filter.Model); m != "" {
 		if filter.ModelFuzzy {
 			args = append(args, "%"+escapeLikePattern(m)+"%")
-			clauses = append(clauses, "COALESCE(e.requested_model, e.model, '') ILIKE $"+itoa(len(args)))
+			clauses = append(clauses, opsEffectiveModelOrEmptySQL("e.")+" ILIKE $"+itoa(len(args)))
 		} else {
 			args = append(args, m)
-			clauses = append(clauses, "COALESCE(e.requested_model, e.model, '') = $"+itoa(len(args)))
+			clauses = append(clauses, opsEffectiveModelOrEmptySQL("e.")+" = $"+itoa(len(args)))
 		}
 	}
 	if filter.ExcludeCountTokens {

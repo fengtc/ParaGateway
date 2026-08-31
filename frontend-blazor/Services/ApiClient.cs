@@ -1753,25 +1753,25 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
     public Task<JsonElement> GetAdminOpsSnapshotRawAsync(string timeRange = "1h") =>
         SendAsync<JsonElement>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/snapshot-v2?time_range={Uri.EscapeDataString(timeRange)}");
 
-    public Task<OpsDashboardSnapshotDto> GetAdminOpsSnapshotAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null)
+    public Task<OpsDashboardSnapshotDto> GetAdminOpsSnapshotAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null, string? model = null, long? accountId = null)
     {
-        return SendAsync<OpsDashboardSnapshotDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/snapshot-v2?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end)}");
+        return SendAsync<OpsDashboardSnapshotDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/snapshot-v2?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end, model, accountId)}");
     }
 
-    public Task<OpsDashboardOverviewDto> GetAdminOpsOverviewAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null) =>
-        SendAsync<OpsDashboardOverviewDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/overview?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end)}");
+    public Task<OpsDashboardOverviewDto> GetAdminOpsOverviewAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null, string? model = null, long? accountId = null) =>
+        SendAsync<OpsDashboardOverviewDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/overview?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end, model, accountId)}");
 
-    public Task<OpsThroughputTrendDto> GetAdminOpsThroughputTrendAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null) =>
-        SendAsync<OpsThroughputTrendDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/throughput-trend?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end)}");
+    public Task<OpsThroughputTrendDto> GetAdminOpsThroughputTrendAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null, string? model = null, long? accountId = null) =>
+        SendAsync<OpsThroughputTrendDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/throughput-trend?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end, model, accountId)}");
 
-    public Task<OpsErrorTrendDto> GetAdminOpsErrorTrendAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null) =>
-        SendAsync<OpsErrorTrendDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/error-trend?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end)}");
+    public Task<OpsErrorTrendDto> GetAdminOpsErrorTrendAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null, string? model = null, long? accountId = null) =>
+        SendAsync<OpsErrorTrendDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/error-trend?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end, model, accountId)}");
 
-    public Task<OpsLatencyHistogramDto> GetAdminOpsLatencyHistogramAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null) =>
-        SendAsync<OpsLatencyHistogramDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/latency-histogram?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end)}");
+    public Task<OpsLatencyHistogramDto> GetAdminOpsLatencyHistogramAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null, string? model = null, long? accountId = null) =>
+        SendAsync<OpsLatencyHistogramDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/latency-histogram?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end, model, accountId)}");
 
-    public Task<OpsErrorDistributionDto> GetAdminOpsErrorDistributionAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null) =>
-        SendAsync<OpsErrorDistributionDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/error-distribution?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end)}");
+    public Task<OpsErrorDistributionDto> GetAdminOpsErrorDistributionAsync(string timeRange = "1h", string? platform = null, long? groupId = null, string? mode = null, DateTimeOffset? start = null, DateTimeOffset? end = null, string? model = null, long? accountId = null) =>
+        SendAsync<OpsErrorDistributionDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/error-distribution?{BuildOpsQuery(timeRange, platform, groupId, mode, start, end, model, accountId)}");
 
     public Task<OpsConcurrencyStatsDto> GetAdminOpsConcurrencyAsync(string? platform = null, long? groupId = null) =>
         SendAsync<OpsConcurrencyStatsDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/concurrency?{BuildOpsRealtimeFilter(platform, groupId)}");
@@ -1782,13 +1782,13 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
     public Task<OpsAccountAvailabilityStatsDto> GetAdminOpsAccountAvailabilityAsync(string? platform = null, long? groupId = null) =>
         SendAsync<OpsAccountAvailabilityStatsDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/account-availability?{BuildOpsRealtimeFilter(platform, groupId)}");
 
-    public Task<OpsRealtimeTrafficResponseDto> GetAdminOpsRealtimeTrafficAsync(string window = "1min", string? platform = null, long? groupId = null)
+    public Task<OpsRealtimeTrafficResponseDto> GetAdminOpsRealtimeTrafficAsync(string window = "1min", string? platform = null, long? groupId = null, string? model = null, long? accountId = null)
     {
-        var query = BuildOpsRealtimeFilter(platform, groupId);
+        var query = BuildOpsRealtimeFilter(platform, groupId, model, accountId);
         return SendAsync<OpsRealtimeTrafficResponseDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/realtime-traffic?window={Uri.EscapeDataString(window)}{(query.Length > 0 ? $"&{query}" : string.Empty)}");
     }
 
-    public Task<OpsOpenAiTokenStatsDto> GetAdminOpsOpenAiTokenStatsAsync(string timeRange = "1h", string? platform = null, long? groupId = null, int page = 1, int pageSize = 20, int? topN = null)
+    public Task<OpsOpenAiTokenStatsDto> GetAdminOpsOpenAiTokenStatsAsync(string timeRange = "1h", string? platform = null, long? groupId = null, int page = 1, int pageSize = 20, int? topN = null, string? model = null, long? accountId = null)
     {
         var query = new List<string>
         {
@@ -1805,6 +1805,8 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         }
         if (!string.IsNullOrWhiteSpace(platform)) query.Add($"platform={Uri.EscapeDataString(platform.Trim())}");
         if (groupId.HasValue) query.Add($"group_id={groupId.Value}");
+        if (!string.IsNullOrWhiteSpace(model)) query.Add($"model={Uri.EscapeDataString(model.Trim())}");
+        if (accountId.HasValue && accountId.Value > 0) query.Add($"account_id={accountId.Value}");
         return SendAsync<OpsOpenAiTokenStatsDto>(HttpMethod.Get, $"{ApiPrefix}/admin/ops/dashboard/openai-token-stats?{string.Join("&", query)}");
     }
 
@@ -2069,7 +2071,7 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         if (value.HasValue) query.Add($"{key}={Uri.EscapeDataString(value.Value.ToUniversalTime().ToString("O"))}");
     }
 
-    private static string BuildOpsQuery(string timeRange, string? platform, long? groupId, string? mode, DateTimeOffset? start, DateTimeOffset? end)
+    private static string BuildOpsQuery(string timeRange, string? platform, long? groupId, string? mode, DateTimeOffset? start, DateTimeOffset? end, string? model = null, long? accountId = null)
     {
         var query = new List<string>();
         if (string.Equals(timeRange, "custom", StringComparison.OrdinalIgnoreCase) && start.HasValue && end.HasValue)
@@ -2081,14 +2083,18 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         if (!string.IsNullOrWhiteSpace(platform)) query.Add($"platform={Uri.EscapeDataString(platform.Trim())}");
         if (groupId.HasValue) query.Add($"group_id={groupId.Value}");
         if (!string.IsNullOrWhiteSpace(mode)) query.Add($"mode={Uri.EscapeDataString(mode.Trim())}");
+        if (!string.IsNullOrWhiteSpace(model)) query.Add($"model={Uri.EscapeDataString(model.Trim())}");
+        if (accountId.HasValue && accountId.Value > 0) query.Add($"account_id={accountId.Value}");
         return string.Join("&", query);
     }
 
-    private static string BuildOpsRealtimeFilter(string? platform, long? groupId)
+    private static string BuildOpsRealtimeFilter(string? platform, long? groupId, string? model = null, long? accountId = null)
     {
         var query = new List<string>();
         if (!string.IsNullOrWhiteSpace(platform)) query.Add($"platform={Uri.EscapeDataString(platform.Trim())}");
         if (groupId.HasValue) query.Add($"group_id={groupId.Value}");
+        if (!string.IsNullOrWhiteSpace(model)) query.Add($"model={Uri.EscapeDataString(model.Trim())}");
+        if (accountId.HasValue && accountId.Value > 0) query.Add($"account_id={accountId.Value}");
         return string.Join("&", query);
     }
 

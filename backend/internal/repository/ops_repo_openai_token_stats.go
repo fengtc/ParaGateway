@@ -29,15 +29,18 @@ func (r *opsRepository) GetOpenAITokenStats(ctx context.Context, filter *service
 		EndTime:   filter.EndTime.UTC(),
 		Platform:  strings.TrimSpace(strings.ToLower(filter.Platform)),
 		GroupID:   filter.GroupID,
+		Model:     strings.TrimSpace(filter.Model),
+		AccountID: filter.AccountID,
 	}
 
 	join, where, baseArgs, next := buildUsageWhere(dashboardFilter, dashboardFilter.StartTime, dashboardFilter.EndTime, 1)
-	where += " AND ul.model LIKE 'gpt%'"
+	effectiveModelSQL := opsEffectiveModelSQL("ul.")
+	where += " AND " + effectiveModelSQL + " LIKE 'gpt%'"
 
 	baseCTE := `
 WITH stats AS (
   SELECT
-    ul.model AS model,
+    ` + effectiveModelSQL + ` AS model,
     COUNT(*)::bigint AS request_count,
     ROUND(
       AVG(
@@ -55,7 +58,7 @@ WITH stats AS (
   FROM usage_logs ul
   ` + join + `
   ` + where + `
-  GROUP BY ul.model
+  GROUP BY ` + effectiveModelSQL + `
 )
 `
 
@@ -131,6 +134,8 @@ ORDER BY request_count DESC, model ASC`
 		EndTime:   dashboardFilter.EndTime,
 		Platform:  dashboardFilter.Platform,
 		GroupID:   dashboardFilter.GroupID,
+		Model:     dashboardFilter.Model,
+		AccountID: dashboardFilter.AccountID,
 		Items:     items,
 		Total:     total,
 	}

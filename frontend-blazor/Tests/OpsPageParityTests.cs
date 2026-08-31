@@ -26,10 +26,77 @@ public sealed class OpsPageParityTests
     {
         var markup = Read("Pages", "AdminOps.razor");
 
-        foreach (var text in new[] { "并发 / 排队", "账号切换率趋势", "吞吐趋势", "请求时长分布", "错误分布", "错误趋势", "OpenAI Token 请求统计", "告警事件", "系统日志" })
+        foreach (var text in new[] { "并发 / 排队", "账号切换率趋势", "吞吐趋势", "请求时长分布", "完整响应耗时（E2E）", "首 Token 延迟（TTFT）", "错误分布", "错误趋势", "OpenAI Token 请求统计", "告警事件", "系统日志" })
         {
             Assert.Contains(text, markup, StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void OpsPageExposesLatencySplitAndModelAccountFilters()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+        var client = Read("Services", "ApiClient.cs");
+        var dtoSource = Read("Models", "AdminDtos.cs");
+        foreach (var text in new[] { "ops-model-filter", "ModelChangedAsync", "AccountChangedAsync", "FilteredAccounts", "model", "account_id", "duration_buckets", "ttft_buckets" })
+        {
+            Assert.Contains(text, markup + client + dtoSource, StringComparison.Ordinal);
+        }
+        Assert.Contains("latency.EffectiveDurationTotalRequests <= 0", markup, StringComparison.Ordinal);
+        Assert.Contains("latency.TtftTotalRequests <= 0", markup, StringComparison.Ordinal);
+        Assert.Contains("DurationBucketMax <= 0", markup, StringComparison.Ordinal);
+        Assert.Contains("TtftBucketMax <= 0", markup, StringComparison.Ordinal);
+        Assert.Contains("value <= 0 || max <= 0 ? 0", markup, StringComparison.Ordinal);
+        Assert.Contains("string.Equals(x.Platform, platform, StringComparison.OrdinalIgnoreCase)", markup, StringComparison.Ordinal);
+        Assert.Contains("accountId.HasValue ? \"指定账号\"", markup, StringComparison.Ordinal);
+        Assert.Contains("Where(x => x.AccountId == accountId.Value)", markup, StringComparison.Ordinal);
+
+        var dto = JsonSerializer.Deserialize<OpsLatencyHistogramDto>(
+            """
+            {
+              "total_requests": 4,
+              "duration_total_requests": 4,
+              "duration_buckets": [{"range":"0-1000ms","count":3}],
+              "ttft_total_requests": 2,
+              "ttft_buckets": [{"range":"0-1000ms","count":2}]
+            }
+            """);
+        Assert.NotNull(dto);
+        Assert.Equal(4, dto!.EffectiveDurationTotalRequests);
+        Assert.Single(dto.EffectiveDurationBuckets);
+        Assert.Equal(2, dto.TtftTotalRequests);
+        Assert.Single(dto.EffectiveTtftBuckets);
+    }
+
+    [Fact]
+    public void OpsLatencyDtoTreatsNullBucketArraysAsEmpty()
+    {
+        var dto = JsonSerializer.Deserialize<OpsLatencyHistogramDto>(
+            """{"total_requests":0,"buckets":null,"duration_buckets":null,"ttft_buckets":null}""");
+
+        Assert.NotNull(dto);
+        Assert.Empty(dto!.EffectiveDurationBuckets);
+        Assert.Empty(dto.EffectiveTtftBuckets);
+    }
+
+    [Fact]
+    public void OpsTtftDrilldownUsesFirstTokenSortAndGroupSelectionClearsInvalidAccount()
+    {
+        var markup = Read("Pages", "AdminOps.razor");
+        var backendModel = ReadBackend("internal", "service", "ops_request_details.go");
+        var backendRepository = ReadBackend("internal", "repository", "ops_repo_request_details.go");
+
+        Assert.Contains("OpenRequestsAsync(\"all\", \"first_token_desc\")", markup, StringComparison.Ordinal);
+        Assert.Contains("value=\"first_token_desc\"", markup, StringComparison.Ordinal);
+        Assert.Contains("ClearAccountOutsideCurrentFilters();", markup, StringComparison.Ordinal);
+        Assert.Contains("SelectBreakdownPlatformAsync(string value) { platform = value; groupId = null; ClearAccountOutsideCurrentFilters();", markup, StringComparison.Ordinal);
+        Assert.Matches("groupId = AlertDimensionLong\\(selectedAlertEvent, \\\"group_id\\\"\\);\\s+ClearAccountOutsideCurrentFilters\\(\\);", markup);
+        Assert.Contains("!groupId.HasValue || (account.GroupIds?.Contains(groupId.Value) ?? false)", markup, StringComparison.Ordinal);
+        Assert.Contains("FirstTokenMs", markup, StringComparison.Ordinal);
+        Assert.Contains("first_token_ms", backendModel, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY first_token_ms DESC NULLS LAST", backendRepository, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY created_at ASC", backendRepository, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY duration_ms ASC NULLS LAST", backendRepository, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -74,7 +141,7 @@ public sealed class OpsPageParityTests
         Assert.Contains("Navigation.NavigateTo(\"/admin/settings\", replace: true)", markup, StringComparison.Ordinal);
         Assert.Contains("Navigation.LocationChanged += OnLocationChanged", markup, StringComparison.Ordinal);
         Assert.Contains("Navigation.LocationChanged -= OnLocationChanged", markup, StringComparison.Ordinal);
-        foreach (var key in new[] { "\"tr\"", "\"platform\"", "\"group_id\"", "\"mode\"", "\"fullscreen\"", "\"open_error_details\"", "\"error_type\"", "\"alert_rule_id\"", "\"open_alert_rules\"" })
+        foreach (var key in new[] { "\"tr\"", "\"platform\"", "\"group_id\"", "\"model\"", "\"account_id\"", "\"mode\"", "\"fullscreen\"", "\"open_error_details\"", "\"error_type\"", "\"alert_rule_id\"", "\"open_alert_rules\"" })
         {
             Assert.Contains(key, markup, StringComparison.Ordinal);
         }
@@ -188,6 +255,35 @@ public sealed class OpsPageParityTests
     }
 
     [Fact]
+    public async Task OpsDashboardQueryCarriesModelAndAccountFilters()
+    {
+        var handler = new OpsQueryHandler();
+        var api = new ApiClient(new HttpClient(handler) { BaseAddress = new Uri("https://paragateway.test") }, new NullJsRuntime());
+
+        await api.GetAdminOpsLatencyHistogramAsync("1h", "openai", 12, "raw", model: "gpt-5.6-sol", accountId: 34);
+
+        Assert.Contains("platform=openai", handler.LastQuery, StringComparison.Ordinal);
+        Assert.Contains("group_id=12", handler.LastQuery, StringComparison.Ordinal);
+        Assert.Contains("model=gpt-5.6-sol", handler.LastQuery, StringComparison.Ordinal);
+        Assert.Contains("account_id=34", handler.LastQuery, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OpsRealtimeQueryCarriesModelAndAccountFilters()
+    {
+        var handler = new OpsQueryHandler();
+        var api = new ApiClient(new HttpClient(handler) { BaseAddress = new Uri("https://paragateway.test") }, new NullJsRuntime());
+
+        await api.GetAdminOpsRealtimeTrafficAsync("5min", "openai", 12, "gpt-5.6-sol", 34);
+
+        Assert.Contains("window=5min", handler.LastQuery, StringComparison.Ordinal);
+        Assert.Contains("platform=openai", handler.LastQuery, StringComparison.Ordinal);
+        Assert.Contains("group_id=12", handler.LastQuery, StringComparison.Ordinal);
+        Assert.Contains("model=gpt-5.6-sol", handler.LastQuery, StringComparison.Ordinal);
+        Assert.Contains("account_id=34", handler.LastQuery, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void OpsSystemLogsExposeOfficialFiltersHealthAndCleanupScope()
     {
         var markup = Read("Pages", "AdminOps.razor");
@@ -285,6 +381,12 @@ public sealed class OpsPageParityTests
     private static string Read(params string[] segments)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+        return File.ReadAllText(Path.Combine([root, .. segments]));
+    }
+
+    private static string ReadBackend(params string[] segments)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "backend"));
         return File.ReadAllText(Path.Combine([root, .. segments]));
     }
 

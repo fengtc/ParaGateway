@@ -48,6 +48,14 @@
                                 <option value="@group.Id">@group.Name</option>
                             }
                         </select>
+                        <input class="ops-model-filter" value="@model" @onchange="ModelChangedAsync" placeholder="模型（精确匹配）" aria-label="模型" />
+                        <select value="@AccountFilterValue" @onchange="AccountChangedAsync" aria-label="账号">
+                            <option value="">全部账号</option>
+                            @foreach (var account in FilteredAccounts)
+                            {
+                                <option value="@account.Id">@account.Name</option>
+                            }
+                        </select>
                         <select value="@timeRange" @onchange="TimeRangeChangedAsync" aria-label="时间范围">
                             <option value="5m">5 分钟</option><option value="30m">30 分钟</option><option value="1h">1 小时</option><option value="6h">6 小时</option><option value="24h">24 小时</option><option value="custom">自定义</option>
                         </select>
@@ -87,7 +95,7 @@
                     <article class="ops-metric-card"><header><span>SLA</span><button type="button" @onclick='() => OpenRequestsAsync("error")'>详情</button></header><strong class="metric-main @SlaTone">@SlaValueLabel</strong><div class="meter"><i class="@SlaTone" style="width:@SlaProgress%"></i></div><p>异常 <b>@FormatNumber(Math.Max(0, overview.RequestCountSla - overview.SuccessCount))</b></p></article>
                     <article class="ops-metric-card"><header><span>请求错误</span><button type="button" @onclick='() => OpenErrorsAsync("request")'>详情</button></header><strong class="metric-main @RequestErrorTone">@Percent(overview.ErrorRate, 2)</strong><p>错误数 <b>@FormatNumber(overview.ErrorCountSla)</b></p><p>业务限制 <b>@FormatNumber(overview.BusinessLimitedCount)</b></p></article>
                     <article class="ops-metric-card"><header><span>请求时长</span><button type="button" @onclick='() => OpenRequestsAsync("all", "duration_desc")'>详情</button></header><strong class="metric-main">@(overview.Duration.P99Ms?.ToString() ?? "-") <small>ms (P99)</small></strong><div class="percentile-grid"><span>P95 <b>@MsValue(overview.Duration.P95Ms)</b></span><span>P90 <b>@MsValue(overview.Duration.P90Ms)</b></span><span>P50 <b>@MsValue(overview.Duration.P50Ms)</b></span><span>Avg <b>@MsValue(overview.Duration.AvgMs)</b></span></div></article>
-                    <article class="ops-metric-card"><header><span>TTFT</span><button type="button" @onclick='() => OpenRequestsAsync("all", "duration_desc")'>详情</button></header><strong class="metric-main @TtftTone">@(overview.Ttft.P99Ms?.ToString() ?? "-") <small>ms (P99)</small></strong><div class="percentile-grid"><span>P95 <b>@MsValue(overview.Ttft.P95Ms)</b></span><span>P90 <b>@MsValue(overview.Ttft.P90Ms)</b></span><span>P50 <b>@MsValue(overview.Ttft.P50Ms)</b></span><span>Avg <b>@MsValue(overview.Ttft.AvgMs)</b></span></div></article>
+                    <article class="ops-metric-card"><header><span>TTFT</span><button type="button" @onclick='() => OpenRequestsAsync("all", "first_token_desc")'>详情</button></header><strong class="metric-main @TtftTone">@(overview.Ttft.P99Ms?.ToString() ?? "-") <small>ms (P99)</small></strong><div class="percentile-grid"><span>P95 <b>@MsValue(overview.Ttft.P95Ms)</b></span><span>P90 <b>@MsValue(overview.Ttft.P90Ms)</b></span><span>P50 <b>@MsValue(overview.Ttft.P50Ms)</b></span><span>Avg <b>@MsValue(overview.Ttft.AvgMs)</b></span></div></article>
                     <article class="ops-metric-card"><header><span>上游错误</span><button type="button" @onclick='() => OpenErrorsAsync("upstream")'>详情</button></header><strong class="metric-main @UpstreamErrorTone">@Percent(overview.UpstreamErrorRate, 2)</strong><p>错误数（排除 429/529） <b>@FormatNumber(overview.UpstreamErrorCountExcl429529)</b></p><p>429 / 529 <b>@FormatNumber(overview.Upstream429Count + overview.Upstream529Count)</b></p></article>
                 </div>
             </div>
@@ -172,7 +180,33 @@
         </div>
 
         <div class="ops-chart-grid">
-            <section class="ops-card"><header class="card-header"><div><h3>请求时长分布</h3><p>成功请求的耗时区间（毫秒）</p></div></header>@if (latency.Buckets.Count == 0) { <EmptyState Title="该时间窗口内暂无请求" Description="暂无延迟分布。" /> } else { <div class="bar-list">@foreach (var bucket in latency.Buckets) { <div><span>@bucket.Range</span><i><em style="width:@BarWidth(bucket.Count, latency.Buckets.Max(x => x.Count))%"></em></i><b>@bucket.Count</b></div> }</div> }</section>
+            <section class="ops-card latency-card">
+                <header class="card-header"><div><h3>请求时长分布</h3><p>完整响应耗时与首 Token 延迟分别统计（成功请求）</p></div></header>
+                <div class="latency-distributions">
+                    <section class="latency-distribution">
+                        <div class="latency-distribution-heading"><h4>完整响应耗时（E2E）</h4><span>@FormatNumber(latency.EffectiveDurationTotalRequests) 个样本</span></div>
+                        @if (latency.EffectiveDurationTotalRequests <= 0 || DurationBucketMax <= 0)
+                        {
+                            <EmptyState Title="暂无 E2E 数据" Description="当前时间窗口内没有完整响应耗时记录。" />
+                        }
+                        else
+                        {
+                            <div class="bar-list latency-bars">@foreach (var bucket in DurationBuckets) { <div><span>@bucket.Range</span><i><em style="width:@BarWidth(bucket.Count, DurationBucketMax)%"></em></i><b>@bucket.Count</b><small>@BucketPercent(bucket.Count, latency.EffectiveDurationTotalRequests)</small></div> }</div>
+                        }
+                    </section>
+                    <section class="latency-distribution">
+                        <div class="latency-distribution-heading"><h4>首 Token 延迟（TTFT）</h4><span>@FormatNumber(latency.TtftTotalRequests) 个样本</span></div>
+                        @if (latency.TtftTotalRequests <= 0 || TtftBucketMax <= 0)
+                        {
+                            <EmptyState Title="暂无 TTFT 数据" Description="当前时间窗口内没有首 Token 延迟记录。" />
+                        }
+                        else
+                        {
+                            <div class="bar-list latency-bars">@foreach (var bucket in TtftBuckets) { <div><span>@bucket.Range</span><i><em class="ttft-bar" style="width:@BarWidth(bucket.Count, TtftBucketMax)%"></em></i><b>@bucket.Count</b><small>@BucketPercent(bucket.Count, latency.TtftTotalRequests)</small></div> }</div>
+                        }
+                    </section>
+                </div>
+            </section>
             <section class="ops-card"><header class="card-header"><div><h3>错误分布</h3><p>按错误来源归类，排除业务限制</p></div><button type="button" class="text-button" @onclick='() => OpenErrorsAsync("request")'>查看明细</button></header>@if (ErrorDistributionRows.Count == 0) { <EmptyState Title="该时间窗口内暂无错误" Description="暂无错误分类分布。" /> } else { <div class="bar-list error-bars">@foreach (var item in ErrorDistributionRows) { <div><span>@item.Label</span><i><em class="@item.Tone" style="width:@BarWidth(item.Count, ErrorDistributionRows.Max(x => x.Count))%"></em></i><b>@item.Count</b></div> }</div> }</section>
             <section class="ops-card">
                 <header class="card-header"><div><h3>错误趋势</h3><p>请求错误与上游错误趋势</p></div><button type="button" class="text-button" @onclick='() => OpenErrorsAsync("upstream")'>查看明细</button></header>
@@ -288,13 +322,13 @@
         <div class="modal-toolbar ops-modal-heading"><span>时间范围：@CurrentRangeLabel</span><button type="button" class="secondary-button" @onclick="LoadRequestsAsync">刷新</button></div>
         <div class="modal-filter-row">
             <select @bind="requestKind"><option value="all">全部请求</option><option value="success">成功</option><option value="error">错误</option></select>
-            <select @bind="requestSort"><option value="created_at_desc">时间从新到旧</option><option value="created_at_asc">时间从旧到新</option><option value="duration_desc">耗时从高到低</option><option value="duration_asc">耗时从低到高</option></select>
+            <select @bind="requestSort"><option value="created_at_desc">时间从新到旧</option><option value="created_at_asc">时间从旧到新</option><option value="duration_desc">耗时从高到低</option><option value="duration_asc">耗时从低到高</option><option value="first_token_desc">首 Token 从慢到快</option><option value="first_token_asc">首 Token 从快到慢</option></select>
             <input @bind="requestSearch" placeholder="请求 ID、模型、用户..." />
             <button type="button" class="secondary-button" @onclick="LoadRequestsAsync">查询</button>
         </div>
-        <div class="table-scroll"><table class="ops-table"><thead><tr><th>时间</th><th>类型</th><th>请求 ID</th><th>平台 / 模型</th><th>状态</th><th>耗时</th><th>关联</th><th>操作</th></tr></thead><tbody>
+        <div class="table-scroll"><table class="ops-table"><thead><tr><th>时间</th><th>类型</th><th>请求 ID</th><th>平台 / 模型</th><th>状态</th><th>耗时 / 首 Token</th><th>关联</th><th>操作</th></tr></thead><tbody>
             @if (requests.Items.Count == 0) { <tr><td colspan="8" class="empty-cell">暂无请求记录</td></tr> }
-            else { @foreach (var row in requests.Items) { <tr><td>@row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss")</td><td><span class="level-badge @(row.Kind == "error" ? "danger" : "success")">@(row.Kind == "error" ? "错误" : "成功")</span></td><td><code title="@row.RequestId">@row.RequestId</code></td><td><b>@row.Platform</b><small>@row.Model</small></td><td>@(row.StatusCode?.ToString() ?? "-")</td><td>@(row.DurationMs?.ToString() ?? "-") ms</td><td><small>用户 @row.UserId · 账号 @row.AccountId</small></td><td><div class="row-actions"><button type="button" @onclick="() => CopyRequestIdAsync(row.RequestId)">复制 ID</button>@if (row.Kind == "error" && row.ErrorId.HasValue) { <button type="button" class="danger-link" @onclick='() => OpenErrorDetailAsync("request", row.ErrorId.Value)'>查看错误</button> }</div></td></tr> } }
+            else { @foreach (var row in requests.Items) { <tr><td>@row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss")</td><td><span class="level-badge @(row.Kind == "error" ? "danger" : "success")">@(row.Kind == "error" ? "错误" : "成功")</span></td><td><code title="@row.RequestId">@row.RequestId</code></td><td><b>@row.Platform</b><small>@row.Model</small></td><td>@(row.StatusCode?.ToString() ?? "-")</td><td><b>@DurationValue(row.DurationMs)</b><small>首 Token @DurationValue(row.FirstTokenMs)</small></td><td><small>用户 @row.UserId · 账号 @row.AccountId</small></td><td><div class="row-actions"><button type="button" @onclick="() => CopyRequestIdAsync(row.RequestId)">复制 ID</button>@if (row.Kind == "error" && row.ErrorId.HasValue) { <button type="button" class="danger-link" @onclick='() => OpenErrorDetailAsync("request", row.ErrorId.Value)'>查看错误</button> }</div></td></tr> } }
         </tbody></table></div>
         <div class="ops-pagination"><span>共 @requests.Total 条</span><div><button disabled="@(requestPage <= 1)" @onclick="() => ChangeRequestPageAsync(requestPage - 1)">上一页</button><span>@requestPage / @Math.Max(1, requests.Pages)</span><button disabled="@(requestPage >= Math.Max(1, requests.Pages))" @onclick="() => ChangeRequestPageAsync(requestPage + 1)">下一页</button></div></div>
     </ChildContent>
@@ -496,14 +530,15 @@
     private OpsEmailNotificationConfigDto emailConfig = new();
     private OpsRuntimeLogConfigDto runtimeLog = new();
     private List<GoGroup> groups = [];
-    private string timeRange = "1h", platform = string.Empty, queryMode = "auto", defaultQueryMode = "auto", realtimeWindow = "1min";
+    private List<AccountDto> accounts = [];
+    private string timeRange = "1h", platform = string.Empty, model = string.Empty, queryMode = "auto", defaultQueryMode = "auto", realtimeWindow = "1min";
     private string logTimeRange = "1h", logStartInput = string.Empty, logEndInput = string.Empty, logHost = string.Empty, logLevel = string.Empty, logComponent = string.Empty, logRequestId = string.Empty, logClientRequestId = string.Empty, logUserId = string.Empty, logApiKeyId = string.Empty, logAccountId = string.Empty, logPlatform = string.Empty, logModel = string.Empty, logSearch = string.Empty;
     private string requestKind = "all", requestSearch = string.Empty, requestSort = "created_at_desc";
     private string errorKind = "request", errorView = "errors", errorSearch = string.Empty, errorStatusCode = string.Empty, errorPhase = string.Empty, errorOwner = string.Empty, errorSortBy = "created_at", errorSortOrder = "desc", errorDetailKind = "request";
     private string tokenTimeRange = "30d", tokenViewMode = "topn";
     private string alertTimeRange = "24h", alertSeverity = string.Empty, alertStatusFilter = string.Empty, alertEmailSent = string.Empty, alertHistoryRange = "7d", alertSilenceDuration = "1h";
     private string customStartInput = string.Empty, customEndInput = string.Empty, settingsTab = "general", ruleGroupIdValue = string.Empty;
-    private long? groupId;
+    private long? groupId, accountId;
     private DateTimeOffset? customStart, customEnd, lastUpdated;
     private bool loading = true, loadedOnce, fullscreen, diagnosisOpen, showUserConcurrency, saving, settingsLoading;
     private bool customRangeOpen, jobsOpen, requestsOpen, errorsOpen, errorDetailOpen, errorDetailLoading, alertDetailOpen, alertDetailLoading, alertHistoryLoading, alertActionLoading, alertEventsLoading, alertLoadingMore, alertHasMore, alertRulesOpen, ruleEditorOpen, settingsOpen, logSettingsOpen;
@@ -518,20 +553,27 @@
     private OpsDashboardOverviewDto overview => snapshot.Overview;
     private OpsSystemMetricsDto? system => overview.SystemMetrics;
     private string GroupFilterValue => groupId?.ToString() ?? string.Empty;
+    private string AccountFilterValue => accountId?.ToString() ?? string.Empty;
     private IEnumerable<GoGroup> FilteredGroups => string.IsNullOrWhiteSpace(platform) ? groups : groups.Where(x => string.Equals(x.Platform, platform, StringComparison.OrdinalIgnoreCase));
+    private IEnumerable<AccountDto> FilteredAccounts => accounts.Where(AccountMatchesCurrentFilters)
+        .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase);
     private static readonly string[] RealtimeWindows = ["1min", "5min", "30min", "1h"];
     private const int AlertEventPageSize = 10;
     private static readonly int[] ErrorStatusCodes = [400, 401, 403, 404, 409, 422, 429, 500, 502, 503, 504, 529];
     private static readonly HashSet<string> GroupAlertMetricTypes = new(["group_available_accounts", "group_available_ratio", "group_rate_limit_ratio"], StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> AllowedTimeRanges = new(["5m", "30m", "1h", "6h", "24h", "custom"], StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> AllowedQueryModes = new(["auto", "raw", "preagg"], StringComparer.OrdinalIgnoreCase);
-    private static readonly string[] DashboardQueryKeys = ["tr", "platform", "group_id", "mode", "fullscreen", "open_error_details", "error_type", "alert_rule_id", "open_alert_rules"];
+    private static readonly string[] DashboardQueryKeys = ["tr", "platform", "group_id", "model", "account_id", "mode", "fullscreen", "open_error_details", "error_type", "alert_rule_id", "open_alert_rules"];
     private IReadOnlyList<OpsTrendRow> ThroughputRows => snapshot.ThroughputTrend.Points.Select(x => new OpsTrendRow(FormatBucket(x.BucketStart), x.Qps, x.Tps / 1000d)).ToList();
     private IReadOnlyList<OpsTrendRow> SwitchTrendRows => switchTrend.Points.Select(x => new OpsTrendRow(FormatBucket(x.BucketStart), x.RequestCount <= 0 ? 0 : x.SwitchCount * 100d / x.RequestCount, x.SwitchCount)).ToList();
     private IReadOnlyList<OpsTrendRow> ErrorTrendRows => snapshot.ErrorTrend.Points.Select(x => new OpsTrendRow(FormatBucket(x.BucketStart), x.ErrorCountSla, x.UpstreamErrorCountExcl429529)).ToList();
     private IReadOnlyList<ErrorDistributionRow> ErrorDistributionRows => BuildErrorDistributionRows(errorDistribution.Items);
     private IReadOnlyList<ConcurrencyRow> ConcurrencyRows => BuildConcurrencyRows();
-    private string ConcurrencyDimensionLabel => showUserConcurrency ? "按用户" : groupId.HasValue ? "按账号" : string.IsNullOrWhiteSpace(platform) ? "按平台" : "按分组";
+    private IReadOnlyList<OpsLatencyBucketDto> DurationBuckets => latency.EffectiveDurationBuckets;
+    private IReadOnlyList<OpsLatencyBucketDto> TtftBuckets => latency.EffectiveTtftBuckets;
+    private long DurationBucketMax => MaxBucketCount(DurationBuckets);
+    private long TtftBucketMax => MaxBucketCount(TtftBuckets);
+    private string ConcurrencyDimensionLabel => showUserConcurrency ? "按用户" : accountId.HasValue ? "指定账号" : groupId.HasValue ? "按账号" : string.IsNullOrWhiteSpace(platform) ? "按平台" : "按分组";
     private string HealthScoreLabel => overview.RequestCountTotal == 0 ? "空闲" : overview.HealthScore.ToString();
     private string HealthStatus => overview.RequestCountTotal == 0 ? "空闲" : overview.HealthScore >= 90 ? "健康" : overview.HealthScore >= 60 ? "需关注" : "高风险";
     private string HealthTone => overview.RequestCountTotal == 0 ? "muted" : overview.HealthScore >= 90 ? "success" : overview.HealthScore >= 60 ? "warning" : "danger";
@@ -588,7 +630,16 @@
         ApplyLocationState();
         logPlatform = platform;
         await LoadInitialSettingsAsync();
-        try { groups = await Api.GetAllAdminGroupsAsync(true); } catch { groups = []; }
+        var groupsTask = SafeAsync(() => Api.GetAllAdminGroupsAsync(true), new List<GoGroup>());
+        var accountsTask = SafeAsync(() => Api.GetAccountsAsync(), new List<AccountDto>());
+        await Task.WhenAll(groupsTask, accountsTask);
+        groups = await groupsTask;
+        accounts = await accountsTask;
+        if (accountId.HasValue && !accounts.Any(x => string.Equals(x.Id, accountId.Value.ToString(), StringComparison.Ordinal) && AccountMatchesCurrentFilters(x)))
+        {
+            accountId = null;
+            SyncLocation();
+        }
         await RefreshAllAsync();
         await ApplyDeepLinksAsync();
         StartAutoRefresh();
@@ -629,19 +680,19 @@
         loading = true; error = null;
         try
         {
-            snapshot = await Api.GetAdminOpsSnapshotAsync(timeRange, platform, groupId, queryMode, customStart, customEnd);
+            snapshot = await Api.GetAdminOpsSnapshotAsync(timeRange, platform, groupId, queryMode, customStart, customEnd, model, accountId);
             if (generation != loadGeneration) return;
-            var latencyTask = SafeAsync(() => Api.GetAdminOpsLatencyHistogramAsync(timeRange, platform, groupId, queryMode, customStart, customEnd), new OpsLatencyHistogramDto());
-            var distributionTask = SafeAsync(() => Api.GetAdminOpsErrorDistributionAsync(timeRange, platform, groupId, queryMode, customStart, customEnd), new OpsErrorDistributionDto());
+            var latencyTask = SafeAsync(() => Api.GetAdminOpsLatencyHistogramAsync(timeRange, platform, groupId, queryMode, customStart, customEnd, model, accountId), new OpsLatencyHistogramDto());
+            var distributionTask = SafeAsync(() => Api.GetAdminOpsErrorDistributionAsync(timeRange, platform, groupId, queryMode, customStart, customEnd, model, accountId), new OpsErrorDistributionDto());
             var concurrencyTask = SafeAsync(() => Api.GetAdminOpsConcurrencyAsync(platform, groupId), new OpsConcurrencyStatsDto());
             var availabilityTask = SafeAsync(() => Api.GetAdminOpsAccountAvailabilityAsync(platform, groupId), new OpsAccountAvailabilityStatsDto());
-            var realtimeTask = SafeAsync(() => Api.GetAdminOpsRealtimeTrafficAsync(realtimeWindow, platform, groupId), new OpsRealtimeTrafficResponseDto());
+            var realtimeTask = SafeAsync(() => Api.GetAdminOpsRealtimeTrafficAsync(realtimeWindow, platform, groupId, model, accountId), new OpsRealtimeTrafficResponseDto());
             var switchTrendEnd = DateTimeOffset.UtcNow;
-            var switchTrendTask = SafeAsync(() => Api.GetAdminOpsThroughputTrendAsync("custom", platform, groupId, queryMode, switchTrendEnd.AddHours(-5), switchTrendEnd), new OpsThroughputTrendDto());
+            var switchTrendTask = SafeAsync(() => Api.GetAdminOpsThroughputTrendAsync("custom", platform, groupId, queryMode, switchTrendEnd.AddHours(-5), switchTrendEnd, model, accountId), new OpsThroughputTrendDto());
             var alertsTask = SafeAsync(() => Api.GetAdminOpsAlertEventsAsync(BuildAlertEventsQuery()), new List<OpsAlertEventDto>());
             var logHealthTask = SafeAsync(Api.GetAdminOpsSystemLogHealthAsync, new OpsSystemLogSinkHealthDto());
             var logsTask = SafeAsync(() => Api.GetAdminOpsSystemLogsAsync(BuildSystemLogQuery()), new PagedEnvelope<OpsSystemLogDto>());
-            var tokenTask = advanced.DisplayOpenAiTokenStats ? SafeAsync(() => Api.GetAdminOpsOpenAiTokenStatsAsync(tokenTimeRange, platform, groupId, tokenPage, tokenPageSize, tokenViewMode == "topn" ? tokenTopN : null), new OpsOpenAiTokenStatsDto()) : Task.FromResult(new OpsOpenAiTokenStatsDto());
+            var tokenTask = advanced.DisplayOpenAiTokenStats ? SafeAsync(() => Api.GetAdminOpsOpenAiTokenStatsAsync(tokenTimeRange, platform, groupId, tokenPage, tokenPageSize, tokenViewMode == "topn" ? tokenTopN : null, model, accountId), new OpsOpenAiTokenStatsDto()) : Task.FromResult(new OpsOpenAiTokenStatsDto());
             await Task.WhenAll(latencyTask, distributionTask, concurrencyTask, availabilityTask, realtimeTask, switchTrendTask, alertsTask, logHealthTask, logsTask, tokenTask);
             if (generation != loadGeneration) return;
             latency = await latencyTask; errorDistribution = await distributionTask; concurrency = await concurrencyTask; availability = await availabilityTask;
@@ -653,14 +704,24 @@
     }
 
     private static async Task<T> SafeAsync<T>(Func<Task<T>> action, T fallback) { try { return await action(); } catch { return fallback; } }
-    private async Task PlatformChangedAsync(ChangeEventArgs e) { platform = e.Value?.ToString() ?? string.Empty; if (groupId.HasValue && !FilteredGroups.Any(x => x.Id == groupId.Value)) groupId = null; if (string.IsNullOrWhiteSpace(logPlatform)) logPlatform = platform; SyncLocation(); await RefreshAllAsync(); }
-    private async Task GroupChangedAsync(ChangeEventArgs e) { groupId = long.TryParse(e.Value?.ToString(), out var id) ? id : null; SyncLocation(); await RefreshAllAsync(); }
-    private async Task SelectBreakdownPlatformAsync(string value) { platform = value; groupId = null; SyncLocation(); await RefreshAllAsync(); }
-    private async Task SelectBreakdownGroupAsync(long value) { groupId = value; var group = groups.FirstOrDefault(x => x.Id == value); if (group is not null) platform = group.Platform; SyncLocation(); await RefreshAllAsync(); }
+    private async Task PlatformChangedAsync(ChangeEventArgs e) { platform = e.Value?.ToString() ?? string.Empty; if (groupId.HasValue && !FilteredGroups.Any(x => x.Id == groupId.Value)) groupId = null; if (accountId.HasValue && !FilteredAccounts.Any(x => string.Equals(x.Id, accountId.Value.ToString(), StringComparison.Ordinal))) accountId = null; if (string.IsNullOrWhiteSpace(logPlatform)) logPlatform = platform; SyncLocation(); await RefreshAllAsync(); }
+    private async Task GroupChangedAsync(ChangeEventArgs e) { groupId = ParsePositiveLong(e.Value?.ToString() ?? string.Empty); ClearAccountOutsideCurrentFilters(); SyncLocation(); await RefreshAllAsync(); }
+    private async Task ModelChangedAsync(ChangeEventArgs e) { model = e.Value?.ToString()?.Trim() ?? string.Empty; SyncLocation(); await RefreshAllAsync(); }
+    private async Task AccountChangedAsync(ChangeEventArgs e)
+    {
+        accountId = ParsePositiveLong(e.Value?.ToString() ?? string.Empty);
+        var selected = accountId.HasValue ? accounts.FirstOrDefault(x => string.Equals(x.Id, accountId.Value.ToString(), StringComparison.Ordinal)) : null;
+        if (selected is not null && string.IsNullOrWhiteSpace(platform)) platform = selected.Platform;
+        if (selected is not null && groupId.HasValue && !(selected.GroupIds?.Contains(groupId.Value) ?? false)) groupId = null;
+        SyncLocation();
+        await RefreshAllAsync();
+    }
+    private async Task SelectBreakdownPlatformAsync(string value) { platform = value; groupId = null; ClearAccountOutsideCurrentFilters(); SyncLocation(); await RefreshAllAsync(); }
+    private async Task SelectBreakdownGroupAsync(long value) { groupId = value; var group = groups.FirstOrDefault(x => x.Id == value); if (group is not null) platform = group.Platform; ClearAccountOutsideCurrentFilters(); SyncLocation(); await RefreshAllAsync(); }
     private async Task TimeRangeChangedAsync(ChangeEventArgs e) { var value = e.Value?.ToString() ?? "1h"; if (value == "custom") { var now = DateTime.Now; customStartInput = now.AddHours(-1).ToString("yyyy-MM-ddTHH:mm"); customEndInput = now.ToString("yyyy-MM-ddTHH:mm"); customRangeOpen = true; return; } timeRange = value; customStart = customEnd = null; SyncLocation(); await RefreshAllAsync(); }
     private Task CloseCustomRange() { customRangeOpen = false; return Task.CompletedTask; }
     private async Task ApplyCustomRangeAsync() { modalError = null; if (!DateTimeOffset.TryParse(customStartInput, out var start) || !DateTimeOffset.TryParse(customEndInput, out var end) || end <= start) { modalError = "结束时间必须晚于开始时间。"; return; } customStart = start; customEnd = end; timeRange = "custom"; customRangeOpen = false; SyncLocation(); await RefreshAllAsync(); }
-    private async Task ChangeRealtimeWindowAsync(string value) { realtimeWindow = value; realtime = await SafeAsync(() => Api.GetAdminOpsRealtimeTrafficAsync(value, platform, groupId), new OpsRealtimeTrafficResponseDto()); }
+    private async Task ChangeRealtimeWindowAsync(string value) { realtimeWindow = value; realtime = await SafeAsync(() => Api.GetAdminOpsRealtimeTrafficAsync(value, platform, groupId, model, accountId), new OpsRealtimeTrafficResponseDto()); }
     private void ToggleDiagnosis() => diagnosisOpen = !diagnosisOpen;
     private Task ToggleFullscreen()
     {
@@ -687,8 +748,12 @@
             ? requestedRange.ToLowerInvariant()
             : "1h";
         platform = values.GetValueOrDefault("platform")?.Trim().ToLowerInvariant() ?? string.Empty;
+        model = values.GetValueOrDefault("model")?.Trim() ?? string.Empty;
         groupId = long.TryParse(values.GetValueOrDefault("group_id"), out var parsedGroupId) && parsedGroupId > 0
             ? parsedGroupId
+            : null;
+        accountId = long.TryParse(values.GetValueOrDefault("account_id"), out var parsedAccountId) && parsedAccountId > 0
+            ? parsedAccountId
             : null;
 
         var requestedMode = values.GetValueOrDefault("mode");
@@ -751,10 +816,10 @@
         applyingLocation = true;
         try
         {
-            var previous = (timeRange, platform, groupId, queryMode, fullscreen, customStart, customEnd);
+            var previous = (timeRange, platform, groupId, model, accountId, queryMode, fullscreen, customStart, customEnd);
             ApplyLocationState();
             var filtersChanged = previous.timeRange != timeRange || previous.platform != platform || previous.groupId != groupId ||
-                                 previous.queryMode != queryMode || previous.customStart != customStart || previous.customEnd != customEnd;
+                                 previous.model != model || previous.accountId != accountId || previous.queryMode != queryMode || previous.customStart != customStart || previous.customEnd != customEnd;
             if (filtersChanged) await RefreshAllAsync();
             await ApplyDeepLinksAsync();
             StateHasChanged();
@@ -775,6 +840,8 @@
         if (!string.Equals(timeRange, "1h", StringComparison.OrdinalIgnoreCase)) values["tr"] = timeRange;
         if (!string.IsNullOrWhiteSpace(platform)) values["platform"] = platform;
         if (groupId.HasValue && groupId.Value > 0) values["group_id"] = groupId.Value.ToString();
+        if (!string.IsNullOrWhiteSpace(model)) values["model"] = model.Trim();
+        if (accountId.HasValue && accountId.Value > 0) values["account_id"] = accountId.Value.ToString();
         if (!string.Equals(queryMode, "auto", StringComparison.OrdinalIgnoreCase)) values["mode"] = queryMode;
         if (fullscreen) values["fullscreen"] = "1";
 
@@ -821,6 +888,7 @@
     private IReadOnlyList<ConcurrencyRow> BuildConcurrencyRows()
     {
         if (showUserConcurrency) return userConcurrency.User.Values.OrderByDescending(x => x.CurrentInUse).Select(x => new ConcurrencyRow(string.IsNullOrWhiteSpace(x.UserEmail) ? $"用户 {x.UserId}" : x.UserEmail, x.Username, x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
+        if (accountId.HasValue) return concurrency.Account.Values.Where(x => x.AccountId == accountId.Value).Select(x => new ConcurrencyRow(string.IsNullOrWhiteSpace(x.AccountName) ? $"账号 {x.AccountId}" : x.AccountName, x.GroupName, x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
         if (groupId.HasValue) return concurrency.Account.Values.OrderByDescending(x => x.LoadPercentage).Select(x => new ConcurrencyRow(string.IsNullOrWhiteSpace(x.AccountName) ? $"账号 {x.AccountId}" : x.AccountName, x.GroupName, x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
         if (!string.IsNullOrWhiteSpace(platform)) return concurrency.Group.Values.Where(x => string.Equals(x.Platform, platform, StringComparison.OrdinalIgnoreCase)).OrderByDescending(x => x.LoadPercentage).Select(x => new ConcurrencyRow(x.GroupName, x.Platform, x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
         return concurrency.Platform.Values.OrderByDescending(x => x.LoadPercentage).Select(x => new ConcurrencyRow(x.Platform.ToUpperInvariant(), $"可用账号 {availability.Platform.GetValueOrDefault(x.Platform)?.AvailableCount ?? 0}", x.CurrentInUse, x.MaxCapacity, x.WaitingInQueue, x.LoadPercentage)).ToList();
@@ -845,6 +913,17 @@
             new ErrorDistributionRow("系统", system, "system"),
             new ErrorDistributionRow("其他", other, "other")
         }.Where(row => row.Count > 0).ToList();
+    }
+
+    private bool AccountMatchesCurrentFilters(AccountDto account) =>
+        (string.IsNullOrWhiteSpace(platform) || string.Equals(account.Platform, platform, StringComparison.OrdinalIgnoreCase)) &&
+        (!groupId.HasValue || (account.GroupIds?.Contains(groupId.Value) ?? false));
+
+    private void ClearAccountOutsideCurrentFilters()
+    {
+        if (!accountId.HasValue) return;
+        var selected = accounts.FirstOrDefault(x => string.Equals(x.Id, accountId.Value.ToString(), StringComparison.Ordinal));
+        if (selected is null || !AccountMatchesCurrentFilters(selected)) accountId = null;
     }
 
     private IReadOnlyList<DiagnosisRow> BuildDiagnosis()
@@ -874,6 +953,8 @@
             Kind = requestKind,
             Platform = platform,
             GroupId = groupId,
+            AccountId = accountId,
+            Model = model,
             Search = requestSearch.Trim(),
             Sort = requestSort
         }), new PagedEnvelope<OpsRequestDetailDto>());
@@ -912,6 +993,8 @@
             EndTime = timeRange == "custom" ? customEnd : null,
             Platform = platform,
             GroupId = groupId,
+            AccountId = accountId,
+            Model = model,
             Phase = errorPhase,
             ErrorOwner = errorOwner,
             View = errorView,
@@ -986,13 +1069,13 @@
     {
         if (!advanced.DisplayOpenAiTokenStats) return;
         openAiStats = await SafeAsync(
-            () => Api.GetAdminOpsOpenAiTokenStatsAsync(tokenTimeRange, platform, groupId, tokenPage, tokenPageSize, tokenViewMode == "topn" ? tokenTopN : null),
+            () => Api.GetAdminOpsOpenAiTokenStatsAsync(tokenTimeRange, platform, groupId, tokenPage, tokenPageSize, tokenViewMode == "topn" ? tokenTopN : null, model, accountId),
             new OpsOpenAiTokenStatsDto());
         if (tokenViewMode == "pagination" && tokenPage > TokenTotalPages)
         {
             tokenPage = TokenTotalPages;
             openAiStats = await SafeAsync(
-                () => Api.GetAdminOpsOpenAiTokenStatsAsync(tokenTimeRange, platform, groupId, tokenPage, tokenPageSize),
+                () => Api.GetAdminOpsOpenAiTokenStatsAsync(tokenTimeRange, platform, groupId, tokenPage, tokenPageSize, null, model, accountId),
                 new OpsOpenAiTokenStatsDto());
         }
     }
@@ -1205,6 +1288,7 @@
         if (selectedAlertEvent is null) return;
         platform = AlertDimensionText(selectedAlertEvent, "platform");
         groupId = AlertDimensionLong(selectedAlertEvent, "group_id");
+        ClearAccountOutsideCurrentFilters();
         alertDetailOpen = false;
         SyncLocation();
         await OpenErrorsAsync("request");
@@ -1431,7 +1515,9 @@
     private static string FormatDateTime(DateTimeOffset? value) => value?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
     private static string FormatMemory(double mb) => mb >= 1024 ? $"{mb / 1024:0.0} GB" : $"{mb:0} MB";
     private static string BoolLabel(bool? value) => value switch { true => "正常", false => "异常", _ => "未知" };
-    private static double BarWidth(long value, long max) => max <= 0 ? 0 : Math.Clamp(value * 100d / max, 2, 100);
+    private static long MaxBucketCount(IEnumerable<OpsLatencyBucketDto>? buckets) => buckets?.Select(x => Math.Max(0, x?.Count ?? 0)).DefaultIfEmpty(0).Max() ?? 0;
+    private static double BarWidth(long value, long max) => value <= 0 || max <= 0 ? 0 : Math.Clamp(value * 100d / max, 2, 100);
+    private static string BucketPercent(long value, long total) => total <= 0 ? "0.0%" : $"{value * 100d / total:0.0}%";
     private static string ResourceTone(double? value, double warning, double danger) => value >= danger ? "danger" : value >= warning ? "warning" : "success";
     private static string LoadTone(double value) => value >= 90 ? "danger" : value >= 70 ? "warning" : "success";
     private static string ThresholdTone(double? value, double? threshold, bool lowerIsBad) { if (!value.HasValue || !threshold.HasValue) return "success"; var critical = lowerIsBad ? value.Value < threshold.Value : value.Value >= threshold.Value; if (critical) return "danger"; var warning = lowerIsBad ? value.Value < threshold.Value + .1 : value.Value >= threshold.Value * .8; return warning ? "warning" : "success"; }

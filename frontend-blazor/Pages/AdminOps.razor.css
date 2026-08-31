@@ -86,6 +86,7 @@
 }
 
 .ops-toolbar select,
+.ops-toolbar input,
 .card-controls select,
 .alert-event-filters select,
 .alert-detail-actions select,
@@ -108,6 +109,8 @@
 }
 
 .ops-toolbar select { min-width: 128px; }
+.ops-toolbar input { min-width: 170px; }
+.ops-model-filter { flex: 1 1 170px; }
 
 .ops-action,
 .primary-button,
@@ -439,6 +442,17 @@
 .error-bars em.other { background: #94a3b8; }
 .bar-list b { text-align: right; }
 
+.latency-card { min-width: 0; }
+.latency-distributions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; padding: 14px 16px 16px; }
+.latency-distribution { min-width: 0; padding: 11px 12px 4px; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--surface) 88%, #f1f5f3); }
+.latency-distribution-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.latency-distribution-heading h4 { margin: 0; color: var(--ink); font-size: .78rem; }
+.latency-distribution-heading span { color: var(--muted); font-size: .68rem; white-space: nowrap; }
+.latency-bars { gap: 9px; padding: 12px 0 8px; }
+.latency-bars > div { grid-template-columns: 88px minmax(0, 1fr) 42px 45px; gap: 7px; }
+.latency-bars .ttft-bar { background: #16883d; }
+.latency-bars small { color: var(--muted); text-align: right; font-size: .66rem; }
+
 .ops-table-card { min-height: auto; }
 .card-controls,
 .alert-event-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
@@ -644,6 +658,7 @@
     .ops-toolbar { align-items: flex-start; flex-direction: column; }
     .ops-toolbar-actions { width: 100%; }
     .ops-toolbar select { flex: 1; }
+    .ops-toolbar input { flex: 1 1 180px; }
     .health-realtime-panel { grid-template-columns: 1fr; }
     .health-score { height: auto; padding: 4px 0 14px; border-right: 0; border-bottom: 1px solid #dfe6e2; }
     .ops-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -658,12 +673,14 @@
 @media (max-width: 640px) {
     .ops-hero-card { padding: 13px; }
     .ops-toolbar-actions > select { flex: 1 1 calc(50% - 8px); }
+    .ops-toolbar-actions > input { flex: 1 1 100%; min-width: 0; }
     .ops-overview-grid { grid-template-columns: minmax(0, 1fr); }
     .ops-metric-grid,
     .ops-analysis-row,
     .resource-grid,
     .form-grid.two { grid-template-columns: 1fr; }
     .throughput-card { grid-column: auto; }
+    .latency-distributions { grid-template-columns: 1fr; gap: 10px; padding: 10px; }
     .form-grid .span-two { grid-column: auto; }
     .system-log-filters,
     .modal-filter-row { grid-template-columns: 1fr; }

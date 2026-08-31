@@ -11,8 +11,10 @@ type OpsRealtimeTrafficSummary struct {
 	StartTime time.Time `json:"start_time"`
 	EndTime   time.Time `json:"end_time"`
 
-	Platform string `json:"platform"`
-	GroupID  *int64 `json:"group_id"`
+	Platform  string `json:"platform"`
+	GroupID   *int64 `json:"group_id"`
+	Model     string `json:"model,omitempty"`
+	AccountID *int64 `json:"account_id,omitempty"`
 
 	QPS OpsRateSummary `json:"qps"`
 	TPS OpsRateSummary `json:"tps"`
