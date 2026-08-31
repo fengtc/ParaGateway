@@ -8,6 +8,18 @@
     align-items: flex-start;
 }
 
+/* Keep form content aligned with the padded settings cards. */
+.backup-card > .form-grid {
+    padding: 20px;
+}
+
+.backup-card > .section-footer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 20px 20px;
+}
+
 .text-link {
     padding: 0;
     color: var(--primary);
@@ -53,4 +65,14 @@
 @media (max-width: 760px) {
     .operations-header,
     .backup-create-actions { align-items: flex-start; flex-direction: column; }
+}
+
+@media (max-width: 520px) {
+    .backup-card > .form-grid {
+        padding: 15px;
+    }
+
+    .backup-card > .section-footer-actions {
+        padding: 0 15px 15px;
+    }
 }

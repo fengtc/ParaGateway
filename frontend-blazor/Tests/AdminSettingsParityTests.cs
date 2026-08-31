@@ -131,6 +131,7 @@ public sealed class AdminSettingsParityTests
     public void BackupPageUsesImageStorageAndPollsBackupAndRestoreStatus()
     {
         var page = ReadSource("Pages", "AdminBackup.razor");
+        var css = ReadSource("Pages", "AdminBackup.razor.css");
         var api = ReadSource("Services", "ApiClient.cs");
 
         Assert.Contains("异步生图对象存储", page, StringComparison.Ordinal);
@@ -141,6 +142,9 @@ public sealed class AdminSettingsParityTests
         Assert.Contains("PollActiveOperationsAsync", page, StringComparison.Ordinal);
         Assert.Contains("RestoreStatus", page, StringComparison.Ordinal);
         Assert.Contains("/admin/backups/image-storage", api, StringComparison.Ordinal);
+        Assert.Contains(".backup-card > .form-grid", css, StringComparison.Ordinal);
+        Assert.Contains("padding: 20px;", css, StringComparison.Ordinal);
+        Assert.Contains(".backup-card > .section-footer-actions", css, StringComparison.Ordinal);
     }
 
     [Fact]
