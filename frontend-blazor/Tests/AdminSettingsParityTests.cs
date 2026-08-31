@@ -144,22 +144,13 @@ public sealed class AdminSettingsParityTests
     }
 
     [Fact]
-    public void DataManagementPageConnectsAllAgentProfileAndBackupRoutes()
+    public void DataManagementCompatibilityPageDoesNotExposeDeprecatedAgentControls()
     {
         var page = ReadSource("Pages", "AdminDataManagement.razor");
         var api = ReadSource("Services", "ApiClient.cs");
 
-        Assert.Contains("if (!health.Enabled) return", page, StringComparison.Ordinal);
-        Assert.Contains("CreateDataManagementSourceProfileAsync", page, StringComparison.Ordinal);
-        Assert.Contains("UpdateDataManagementSourceProfileAsync", page, StringComparison.Ordinal);
-        Assert.Contains("ActivateDataManagementSourceProfileAsync", page, StringComparison.Ordinal);
-        Assert.Contains("DeleteDataManagementSourceProfileAsync", page, StringComparison.Ordinal);
-        Assert.Contains("CreateDataManagementS3ProfileAsync", page, StringComparison.Ordinal);
-        Assert.Contains("UpdateDataManagementS3ProfileAsync", page, StringComparison.Ordinal);
-        Assert.Contains("ActivateDataManagementS3ProfileAsync", page, StringComparison.Ordinal);
-        Assert.Contains("DeleteDataManagementS3ProfileAsync", page, StringComparison.Ordinal);
-        Assert.Contains("CreateDataManagementBackupJobAsync", page, StringComparison.Ordinal);
-        Assert.Contains("PollJobsAsync", page, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(\"/admin/backups\", replace: true)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetAdminDataManagementHealthAsync", page, StringComparison.Ordinal);
         foreach (var route in new[] { "/data-management/sources/", "/data-management/s3/profiles", "/data-management/s3/test", "/data-management/backups" })
         {
             Assert.Contains(route, api, StringComparison.Ordinal);

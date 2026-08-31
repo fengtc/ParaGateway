@@ -48,7 +48,6 @@ public sealed class FormControlConsistencyTests
         var files = new[]
         {
             (new[] { "Pages", "AdminSettings.razor.css" }, ".settings-grid"),
-            (new[] { "Pages", "AdminDataManagement.razor.css" }, ".modal-form-grid"),
             (new[] { "Pages", "AdminRiskControl.razor.css" }, ".risk-form"),
             (new[] { "Pages", "AdminPromptAudit.razor.css" }, ".endpoint-form"),
             (new[] { "Components", "AccountUsageRuntimeSettings.razor.css" }, ".runtime-grid"),

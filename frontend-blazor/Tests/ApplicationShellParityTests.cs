@@ -171,7 +171,7 @@ public sealed class ApplicationShellParityTests
         Assert.Contains("错误透传规则", accounts, StringComparison.Ordinal);
         Assert.Contains("TLS 指纹模板", accounts, StringComparison.Ordinal);
         Assert.Contains("OpenAttributesConfig", users, StringComparison.Ordinal);
-        Assert.Contains("href=\"/admin/data-management\"", settings, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("href=\"/admin/data-management\"", settings, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("href=\"/admin/backups\"", settings, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GitHub Copilot", createAccount, StringComparison.Ordinal);
         Assert.Contains("AccountModelRestrictionEditor", createAccount, StringComparison.Ordinal);

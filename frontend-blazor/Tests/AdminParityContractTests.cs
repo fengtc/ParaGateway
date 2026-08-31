@@ -49,22 +49,13 @@ public sealed class AdminParityContractTests
     }
 
     [Fact]
-    public void DataManagementSaveOnlySendsExplicitWriteOnlySecrets()
+    public void DeprecatedDataManagementRouteRedirectsToBackupManagement()
     {
         var page = ReadPage("AdminDataManagement.razor");
-        var start = page.IndexOf("private async Task SaveConfigAsync", StringComparison.Ordinal);
-        var end = page.IndexOf("private async Task TestCurrentS3Async", start, StringComparison.Ordinal);
-
-        Assert.True(start >= 0 && end > start, "Could not locate the data-management save block.");
-        var saveBlock = page[start..end];
-
-        Assert.Contains("if (!string.IsNullOrWhiteSpace(postgresPassword)) postgres[\"password\"] = postgresPassword;", saveBlock, StringComparison.Ordinal);
-        Assert.Contains("if (!string.IsNullOrWhiteSpace(redisPassword)) redis[\"password\"] = redisPassword;", saveBlock, StringComparison.Ordinal);
-        Assert.Contains("if (!string.IsNullOrWhiteSpace(defaultS3Secret)) s3[\"secret_access_key\"] = defaultS3Secret;", saveBlock, StringComparison.Ordinal);
-        Assert.DoesNotContain("config.Postgres.Password", saveBlock, StringComparison.Ordinal);
-        Assert.DoesNotContain("config.Redis.Password", saveBlock, StringComparison.Ordinal);
-        Assert.DoesNotContain("config.S3.SecretAccessKey", saveBlock, StringComparison.Ordinal);
-        Assert.Contains("postgresPassword = redisPassword = defaultS3Secret = string.Empty;", saveBlock, StringComparison.Ordinal);
+        Assert.Contains("@page \"/admin/data-management\"", page, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(\"/admin/backups\", replace: true)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetAdminDataManagementHealthAsync", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("UpdateAdminDataManagementConfigAsync", page, StringComparison.Ordinal);
     }
 
     [Fact]
