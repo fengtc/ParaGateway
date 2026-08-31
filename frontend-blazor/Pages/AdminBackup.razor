@@ -8,25 +8,21 @@
 
 <PageTitle>备份与数据 · ParaGateway</PageTitle>
 
-<div class="page-header">
-    <div><h1>备份与数据</h1><p>配置 S3 兼容对象存储、异步生图存储和定时策略，并管理数据库备份生命周期。</p></div>
-    <div class="page-header-actions">
-        <button type="button" class="icon-button" title="刷新" aria-label="刷新" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="17" /></button>
-    </div>
-</div>
+<div class="backup-settings-page">
+    <AdminSettingsNavigation ActiveTab="backup" Loading="@loading" OnRefresh="LoadAsync" />
 
-@if (!string.IsNullOrWhiteSpace(error))
-{
-    <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@error</span><button type="button" @onclick="LoadAsync">重试</button></div>
-}
+    @if (!string.IsNullOrWhiteSpace(error))
+    {
+        <div class="inline-alert danger" role="alert"><Icon Name="alert" Size="17" /><span>@error</span><button type="button" @onclick="LoadAsync">重试</button></div>
+    }
 
-@if (loading)
-{
-    <LoadingState Text="正在载入备份配置与记录" />
-}
-else
-{
-    <div class="backup-page-grid">
+    @if (loading)
+    {
+        <LoadingState Text="正在载入备份配置与记录" />
+    }
+    else
+    {
+        <div class="backup-page-grid">
         <section class="content-section backup-card">
             <div class="section-header">
                 <div><h2>备份对象存储</h2><p>数据库备份保存到 S3、Cloudflare R2 或其他 S3 兼容服务；密钥不会回显。</p></div>
@@ -104,10 +100,10 @@ else
                 </DxGrid>
             }
         </section>
-    </div>
-}
+        </div>
+    }
 
-<AppModal Open="r2GuideOpen" Title="Cloudflare R2 配置指南" OnClose="CloseR2Guide">
+    <AppModal Open="r2GuideOpen" Title="Cloudflare R2 配置指南" OnClose="CloseR2Guide">
     <ChildContent>
         <ol class="guide-steps">
             <li><b>创建存储桶</b><span>在 Cloudflare R2 中创建用于 ParaGateway 备份的 Bucket。</span></li>
@@ -118,15 +114,16 @@ else
         <div class="inline-alert success"><Icon Name="circle-check" Size="17" /><span>R2 免费额度适合小规模数据库备份；正式环境仍应配置生命周期与访问审计。</span></div>
     </ChildContent>
     <Footer><button type="button" class="button primary" @onclick="CloseR2Guide">知道了</button></Footer>
-</AppModal>
+    </AppModal>
 
-<AppModal Open="downloadOpen" Title="备份分卷下载" OnClose="CloseDownload">
+    <AppModal Open="downloadOpen" Title="备份分卷下载" OnClose="CloseDownload">
     <ChildContent>
         @if (downloadParts.Count == 0) { <p class="muted-text">未返回可下载链接。</p> }
         else { <div class="stack-list">@foreach (var part in downloadParts) { <div class="stack-row"><span>第 @part.Index 卷 · @FormatSize(part.SizeBytes)</span><a class="button secondary small" href="@part.Url" rel="noopener">下载</a></div> }</div> }
     </ChildContent>
     <Footer><button type="button" class="button secondary" @onclick="CloseDownload">关闭</button></Footer>
-</AppModal>
+    </AppModal>
+</div>
 
 @code {
     private BackupS3ConfigDto s3 = new();

@@ -1,0 +1,44 @@
+@inject NavigationManager Navigation
+
+<header class="settings-heading">
+    <div><span>系统配置</span><h1>系统设置</h1><p>配置站点、安全、用户默认值、网关行为、邮件和备份。敏感字段仅显示配置状态，不会回显服务端明文。</p></div>
+    <button type="button" class="button secondary" disabled="@Loading" @onclick="OnRefresh"><Icon Name="refresh" Size="16" />刷新</button>
+</header>
+
+<nav class="settings-tabs" role="tablist" aria-label="系统设置">
+    @foreach (var tab in Tabs)
+    {
+        <button type="button" id="settings-tab-@tab.Id" role="tab" aria-selected="@(ActiveTab == tab.Id)" class="@(ActiveTab == tab.Id ? "active" : null)" @onclick="() => SelectTabAsync(tab.Id)"><Icon Name="@tab.Icon" Size="16" />@tab.Label</button>
+    }
+</nav>
+
+@code {
+    [Parameter] public string ActiveTab { get; set; } = "general";
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public EventCallback OnRefresh { get; set; }
+    [Parameter] public EventCallback<string> TabChanged { get; set; }
+
+    private static readonly (string Id, string Label, string Icon)[] Tabs =
+    [
+        ("general", "常规", "dashboard"), ("agreement", "用户协议", "file-text"), ("features", "功能", "sparkles"),
+        ("security", "安全", "shield"), ("users", "用户", "user"), ("gateway", "网关", "server"),
+        ("email", "邮件", "bell"), ("backup", "备份", "database")
+    ];
+
+    private async Task SelectTabAsync(string tabId)
+    {
+        if (tabId == "backup")
+        {
+            if (ActiveTab != "backup") Navigation.NavigateTo("/admin/backups");
+            return;
+        }
+
+        if (ActiveTab == "backup")
+        {
+            Navigation.NavigateTo($"/admin/settings?tab={Uri.EscapeDataString(tabId)}");
+            return;
+        }
+
+        await TabChanged.InvokeAsync(tabId);
+    }
+}

@@ -163,6 +163,7 @@ public sealed class ApplicationShellParityTests
         var accounts = ReadSource("Pages", "Providers.razor");
         var users = ReadSource("Pages", "Users.razor");
         var settings = ReadSource("Pages", "AdminSettings.razor");
+        var settingsNavigation = ReadSource("Components", "AdminSettingsNavigation.razor");
         var createAccount = ReadSource("Components", "NativeAccountCreateModal.razor");
 
         Assert.DoesNotContain("扩展管理", menu, StringComparison.Ordinal);
@@ -172,7 +173,7 @@ public sealed class ApplicationShellParityTests
         Assert.Contains("TLS 指纹模板", accounts, StringComparison.Ordinal);
         Assert.Contains("OpenAttributesConfig", users, StringComparison.Ordinal);
         Assert.DoesNotContain("href=\"/admin/data-management\"", settings, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Navigation.NavigateTo(\"/admin/backups\")", settings, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(\"/admin/backups\")", settingsNavigation, StringComparison.Ordinal);
         Assert.Contains("GitHub Copilot", createAccount, StringComparison.Ordinal);
         Assert.Contains("AccountModelRestrictionEditor", createAccount, StringComparison.Ordinal);
     }

@@ -1,3 +1,9 @@
+.backup-settings-page {
+    display: grid;
+    gap: 18px;
+    padding-bottom: 96px;
+}
+
 .backup-page-grid,
 .backup-card {
     display: grid;
@@ -68,6 +74,10 @@
 }
 
 @media (max-width: 520px) {
+    .backup-settings-page {
+        gap: 14px;
+    }
+
     .backup-card > .form-grid {
         padding: 15px;
     }

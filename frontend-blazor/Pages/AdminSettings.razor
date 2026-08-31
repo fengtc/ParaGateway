@@ -4,22 +4,11 @@
 @inject ApiClient Api
 @inject ToastService Toasts
 @inject IJSRuntime JS
-@inject NavigationManager Navigation
 
 <PageTitle>系统设置 · ParaGateway</PageTitle>
 
 <div class="settings-page">
-    <header class="settings-heading">
-        <div><span>系统配置</span><h1>系统设置</h1><p>配置站点、安全、用户默认值、网关行为、邮件和备份。敏感字段仅显示配置状态，不会回显服务端明文。</p></div>
-        <button type="button" class="button secondary" disabled="@loading" @onclick="LoadAsync"><Icon Name="refresh" Size="16" />刷新</button>
-    </header>
-
-    <nav class="settings-tabs" role="tablist" aria-label="系统设置">
-        @foreach (var tab in Tabs)
-        {
-            <button type="button" id="settings-tab-@tab.Id" role="tab" aria-selected="@(activeTab == tab.Id)" class="@(activeTab == tab.Id ? "active" : null)" @onclick="() => SelectTab(tab.Id)"><Icon Name="@tab.Icon" Size="16" />@tab.Label</button>
-        }
-    </nav>
+    <AdminSettingsNavigation ActiveTab="@activeTab" Loading="@loading" OnRefresh="LoadAsync" TabChanged="SelectTab" />
 
     @if (!string.IsNullOrWhiteSpace(error))
     {
@@ -222,12 +211,6 @@
 </div>
 
 @code {
-    private static readonly (string Id, string Label, string Icon)[] Tabs =
-    [
-        ("general", "常规", "dashboard"), ("agreement", "用户协议", "file-text"), ("features", "功能", "sparkles"),
-        ("security", "安全", "shield"), ("users", "用户", "user"), ("gateway", "网关", "server"),
-        ("email", "邮件", "bell"), ("backup", "备份", "database")
-    ];
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
     private static readonly string[] AuthSourceIds = ["email", "linuxdo", "oidc", "wechat", "github", "google", "dingtalk"];
     private static readonly string[] QuotaPlatforms = ["anthropic", "openai", "gemini", "antigravity", "grok"];
@@ -246,16 +229,14 @@
     private string smtpPassword = string.Empty, generatedAdminApiKey = string.Empty, testEmailAddress = string.Empty;
     private bool loading = true, saving, runtimeSaving, adminKeyBusy, smtpBusy;
     private string? error;
+    [SupplyParameterFromQuery(Name = "tab")] private string? RequestedTab { get; set; }
 
-    private void SelectTab(string tabId)
+    private void SelectTab(string tabId) => activeTab = tabId;
+
+    protected override void OnParametersSet()
     {
-        if (tabId == "backup")
-        {
-            Navigation.NavigateTo("/admin/backups");
-            return;
-        }
-
-        activeTab = tabId;
+        if (RequestedTab is "general" or "agreement" or "features" or "security" or "users" or "gateway" or "email")
+            activeTab = RequestedTab;
     }
 
     protected override Task OnInitializedAsync() => LoadAsync();

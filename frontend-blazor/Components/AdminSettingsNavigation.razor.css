@@ -1,0 +1,86 @@
+.settings-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+}
+
+.settings-heading span {
+    color: var(--primary);
+    font-size: .72rem;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.settings-heading h1 {
+    margin: 4px 0 0;
+    color: var(--text);
+    font-size: 1.7rem;
+    letter-spacing: -.025em;
+}
+
+.settings-heading p {
+    max-width: 780px;
+    margin: 7px 0 0;
+    color: var(--muted);
+    font-size: .82rem;
+    line-height: 1.6;
+}
+
+.settings-tabs {
+    display: flex;
+    overflow-x: auto;
+    padding: 4px;
+    gap: 3px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-soft);
+    scrollbar-width: thin;
+}
+
+.settings-tabs button {
+    display: inline-flex;
+    flex: 0 0 auto;
+    min-height: 40px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 15px;
+    border: 0;
+    border-radius: 6px;
+    color: var(--muted);
+    background: transparent;
+    font: inherit;
+    font-size: .78rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.settings-tabs button:hover {
+    color: var(--text);
+    background: var(--surface-hover);
+}
+
+.settings-tabs button.active {
+    color: #fff;
+    background: var(--primary);
+    box-shadow: 0 1px 3px rgba(21, 91, 68, .22);
+}
+
+@media (max-width: 820px) {
+    .settings-heading {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .settings-heading .button {
+        width: 100%;
+    }
+}
+
+@media (max-width: 520px) {
+    .settings-heading h1 {
+        font-size: 1.4rem;
+    }
+}

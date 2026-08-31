@@ -116,14 +116,18 @@ public sealed class AdminSettingsParityTests
     }
 
     [Fact]
-    public void BackupSettingsTabNavigatesDirectlyToBackupManagement()
+    public void BackupSettingsPageRetainsSharedSettingsNavigation()
     {
         var page = ReadSource("Pages", "AdminSettings.razor");
+        var backup = ReadSource("Pages", "AdminBackup.razor");
+        var navigation = ReadSource("Components", "AdminSettingsNavigation.razor");
 
-        Assert.Contains("@inject NavigationManager Navigation", page, StringComparison.Ordinal);
-        Assert.Contains("@onclick=\"() => SelectTab(tab.Id)\"", page, StringComparison.Ordinal);
-        Assert.Contains("if (tabId == \"backup\")", page, StringComparison.Ordinal);
-        Assert.Contains("Navigation.NavigateTo(\"/admin/backups\")", page, StringComparison.Ordinal);
+        Assert.Contains("<AdminSettingsNavigation ActiveTab=\"@activeTab\"", page, StringComparison.Ordinal);
+        Assert.Contains("<AdminSettingsNavigation ActiveTab=\"backup\"", backup, StringComparison.Ordinal);
+        Assert.Contains("if (tabId == \"backup\")", navigation, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(\"/admin/backups\")", navigation, StringComparison.Ordinal);
+        Assert.Contains("/admin/settings?tab=", navigation, StringComparison.Ordinal);
+        Assert.Contains("[SupplyParameterFromQuery(Name = \"tab\")]", page, StringComparison.Ordinal);
         Assert.DoesNotContain("class=\"settings-card backup-links\"", page, StringComparison.Ordinal);
     }
 
