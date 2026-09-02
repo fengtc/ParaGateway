@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -406,18 +407,49 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 // SearchUsers handles searching users by email keyword
 // GET /api/v1/admin/usage/search-users
 func (h *UsageHandler) SearchUsers(c *gin.Context) {
-	keyword := c.Query("q")
+	keyword := strings.TrimSpace(c.Query("q"))
 	if keyword == "" {
 		response.Success(c, []any{})
 		return
 	}
 
-	// Limit to 30 results
-	users, _, err := h.adminService.ListUsers(c.Request.Context(), 1, 30, service.UserListFilters{Search: keyword, IncludeDeleted: true}, "email", "asc")
+	// Resolve a complete email as an identity first. The fallback keeps the
+	// type-ahead behavior for partial email/username searches.
+	users, _, err := h.adminService.ListUsers(c.Request.Context(), 1, 30, service.UserListFilters{EmailExact: keyword, IncludeDeleted: true}, "email", "asc")
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
+	if len(users) == 0 {
+		users, _, err = h.adminService.ListUsers(c.Request.Context(), 1, 30, service.UserListFilters{Search: keyword, IncludeDeleted: true}, "email", "asc")
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+
+	// ListUsers 的通用排序按原始 email 和 ID 排序；当软删除后重新创建了同邮箱账号时，
+	// 旧账号可能排在活动账号前面，前端会选中错误的 user_id。这里仅为 usage 联想结果
+	// 提供稳定的身份优先级：规范化精确邮箱、规范化邮箱、活动用户、ID。
+	normalizedKeyword := strings.ToLower(keyword)
+	sort.SliceStable(users, func(i, j int) bool {
+		leftEmail := strings.ToLower(strings.TrimSpace(users[i].Email))
+		rightEmail := strings.ToLower(strings.TrimSpace(users[j].Email))
+		leftExact := leftEmail == normalizedKeyword
+		rightExact := rightEmail == normalizedKeyword
+		if leftExact != rightExact {
+			return leftExact
+		}
+		if leftEmail != rightEmail {
+			return leftEmail < rightEmail
+		}
+		leftActive := users[i].DeletedAt == nil
+		rightActive := users[j].DeletedAt == nil
+		if leftActive != rightActive {
+			return leftActive
+		}
+		return users[i].ID < users[j].ID
+	})
 
 	// Return simplified user list (only id, email and deleted flag)
 	type SimpleUser struct {

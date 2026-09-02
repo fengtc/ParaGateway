@@ -31,6 +31,9 @@ public sealed class AdminUsagePageParityTests
         Assert.Contains("step=\"1\"", panel, StringComparison.Ordinal);
         Assert.Contains("用户邮箱", panel, StringComparison.Ordinal);
         Assert.Contains("SearchAdminUsageUsersAsync", panel, StringComparison.Ordinal);
+        Assert.Contains("AdminUsageUserSelectionPolicy.FindExact", panel, StringComparison.Ordinal);
+        Assert.Contains("AdminUsageUserSelectionPolicy.OrderOptions", panel, StringComparison.Ordinal);
+        Assert.Contains("match is null || match.Deleted", panel, StringComparison.Ordinal);
         Assert.Contains("DateTime.Today.ToString(\"yyyy-MM-dd'T'00:00:00\"", panel, StringComparison.Ordinal);
         Assert.Contains("DateTime.Today.AddDays(1).ToString(\"yyyy-MM-dd'T'00:00:00\"", panel, StringComparison.Ordinal);
         Assert.Contains("SupplyParameterFromQuery(Name = \"user_id\")", route, StringComparison.Ordinal);
@@ -102,6 +105,7 @@ public sealed class AdminUsagePageParityTests
         Assert.Contains("TimeRange = \"custom\"", tab, StringComparison.Ordinal);
         Assert.Contains("View = \"all\"", tab, StringComparison.Ordinal);
         Assert.Contains("UserId = UserId", tab, StringComparison.Ordinal);
+        Assert.Contains("错误消息或请求 ID", tab, StringComparison.Ordinal);
         Assert.Contains("Api.GetAdminOpsErrorLogDetailAsync", tab, StringComparison.Ordinal);
         Assert.Contains("错误请求详情", tab, StringComparison.Ordinal);
         Assert.Contains("响应正文", tab, StringComparison.Ordinal);

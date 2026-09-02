@@ -1,3 +1,4 @@
+@using System.Globalization
 @implements IDisposable
 @inject ApiClient Api
 @inject NavigationManager Navigation
@@ -115,44 +116,43 @@
             </article>
         </section>
 
-        <section class="dashboard-card quick-actions-card">
-            <div class="dashboard-card-heading">
-                <h2>快捷操作</h2>
-            </div>
-            <div class="quick-action-grid">
-                @if (canUseBatchImage)
-                {
-                    <a class="quick-action batch-image-action" href="/batch-image">
-                        <span class="quick-action-icon sky"><Icon Name="sparkles" Size="21" /></span>
-                        <span>
-                            <strong>批量生图</strong>
-                            <small>批量创建和管理图像任务</small>
-                        </span>
-                        <Icon Name="chevron-right" Size="17" />
-                    </a>
-                }
-                <a class="quick-action" href="/admin/groups">
-                    <span class="quick-action-icon"><Icon Name="dashboard" Size="21" /></span>
-                    <span>
-                        <strong>分组定价</strong>
-                        <small>设置批量折扣和冻结比例</small>
-                    </span>
-                    <Icon Name="chevron-right" Size="17" />
-                </a>
-            </div>
-        </section>
-
         <section class="dashboard-card dashboard-filter-card" aria-label="统计筛选">
-            <div class="dashboard-filter-group">
-                <span class="filter-label">时间范围：</span>
-                <DxDateRangePicker T="DateTime"
-                                   StartDate="@startDate"
-                                   EndDate="@endDate"
-                                   StartDateChanged="@((DateTime value) => OnStartDateChangedAsync(value))"
-                                   EndDateChanged="@((DateTime value) => OnEndDateChangedAsync(value))"
-                                   DisplayFormat="yyyy-MM-dd"
-                                   CssClass="dashboard-date-range" />
+            <div class="dashboard-filter-group primary-filter">
+                <label class="filter-label" for="dashboard-start-time">时间范围：</label>
+                <div class="dashboard-date-time-range">
+                    <input id="dashboard-start-time"
+                           class="dashboard-date-time-input"
+                           type="datetime-local"
+                           step="1"
+                           value="@FormatDateTimeInput(startDate)"
+                           aria-label="开始时间"
+                           disabled="@refreshing"
+                           @onchange="OnStartDateTimeChangedAsync" />
+                    <span class="range-separator">至</span>
+                    <input id="dashboard-end-time"
+                           class="dashboard-date-time-input"
+                           type="datetime-local"
+                           step="1"
+                           value="@FormatDateTimeInput(endDate)"
+                           aria-label="结束时间"
+                           disabled="@refreshing"
+                           @onchange="OnEndDateTimeChangedAsync" />
+                </div>
                 <button type="button" class="button secondary small" disabled="@refreshing" @onclick="LoadAllAsync">刷新</button>
+                <div class="dashboard-range-summary" aria-label="所选时间范围汇总">
+                    <span class="admin-metric-icon orange"><Icon Name="database" Size="20" /></span>
+                    <div class="admin-metric-content">
+                        <span>区间 Token</span>
+                        <strong>@FormatTokens(RangeTokens)</strong>
+                        <small class="cost-line">
+                            <b class="success-text" title="实际扣费">$@FormatCost(RangeActualCost)</b>
+                            <i>/</i>
+                            <b class="account-cost" title="账号成本">$@FormatCost(RangeAccountCost)</b>
+                            <i>/</i>
+                            <b title="标准费用">$@FormatCost(RangeCost)</b>
+                        </small>
+                    </div>
+                </div>
             </div>
             <div class="dashboard-filter-group granularity-filter">
                 <label class="filter-label" for="dashboard-granularity">粒度：</label>
@@ -406,9 +406,9 @@
 @code {
     private AdminDashboardSnapshotDto? snapshot;
     private AdminDashboardRankingResponseDto? ranking;
-    // The dashboard uses an exclusive end date so the default covers today only.
+    // Dashboard datetime end values are inclusive, so this default covers today only.
     private DateTime startDate = DateTime.Today;
-    private DateTime endDate = DateTime.Today.AddDays(1);
+    private DateTime endDate = DateTime.Today.AddDays(1).AddSeconds(-1);
     private string granularity = "hour";
     private string activeDistributionView = "models";
     private string? expandedModel;
@@ -417,7 +417,6 @@
     private bool refreshing;
     private bool rankingError;
     private bool modelBreakdownLoading;
-    private bool canUseBatchImage;
     private string? error;
     private int loadGeneration;
     private int breakdownGeneration;
@@ -430,6 +429,14 @@
     private AdminDashboardStats Stats => snapshot?.Stats ?? new AdminDashboardStats();
 
     private IReadOnlyList<AdminDashboardModelStatDto> ModelRows => modelRows;
+
+    private long RangeTokens => ModelRows.Sum(item => Math.Max(item.TotalTokens, 0));
+
+    private double RangeActualCost => ModelRows.Sum(item => item.ActualCost);
+
+    private double RangeAccountCost => ModelRows.Sum(item => item.AccountCost);
+
+    private double RangeCost => ModelRows.Sum(item => item.Cost);
 
     private const int ModelDistributionLimit = 6;
     private const int ModelDistributionLabelLimit = 24;
@@ -562,7 +569,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await Task.WhenAll(LoadAllAsync(), LoadBatchImageAccessAsync());
+        await LoadAllAsync();
     }
 
     private Task LoadAllAsync() => LoadDashboardAsync(includeStats: true);
@@ -581,8 +588,8 @@
         error = null;
         rankingError = false;
 
-        var start = startDate.ToString("yyyy-MM-dd");
-        var end = QueryEndDate;
+        var start = FormatDashboardTime(startDate);
+        var end = FormatDashboardTime(endDate);
         var timezone = TimeZoneInfo.Local.Id;
         var snapshotTask = Api.GetAdminDashboardSnapshotAsync(start, end, granularity, includeStats, timezone);
         var rankingTask = Api.GetAdminDashboardRankingAsync(start, end, 12, timezone);
@@ -626,19 +633,21 @@
         refreshing = false;
     }
 
-    private async Task OnStartDateChangedAsync(DateTime value)
+    private async Task OnStartDateTimeChangedAsync(ChangeEventArgs args)
     {
-        startDate = value.Date;
-        if (endDate <= startDate) endDate = startDate.AddDays(1);
+        if (!TryParseDateTimeInput(args.Value?.ToString(), out var value)) return;
+        startDate = value;
+        if (endDate <= startDate) endDate = startDate.AddSeconds(1);
         ClearModelBreakdown();
         UpdateGranularityForRange();
         await LoadChartDataAsync();
     }
 
-    private async Task OnEndDateChangedAsync(DateTime value)
+    private async Task OnEndDateTimeChangedAsync(ChangeEventArgs args)
     {
-        endDate = value.Date;
-        if (endDate <= startDate) startDate = endDate.AddDays(-1);
+        if (!TryParseDateTimeInput(args.Value?.ToString(), out var value)) return;
+        endDate = value;
+        if (endDate <= startDate) startDate = endDate.AddSeconds(-1);
         ClearModelBreakdown();
         UpdateGranularityForRange();
         await LoadChartDataAsync();
@@ -658,8 +667,9 @@
     private void OpenUserUsage(RankingDisplayRow row)
     {
         if (row.IsOther || row.UserId <= 0) return;
-        var start = Uri.EscapeDataString(startDate.ToString("yyyy-MM-dd'T'HH:mm:ss"));
-        var end = Uri.EscapeDataString(endDate.ToString("yyyy-MM-dd'T'HH:mm:ss"));
+        var start = Uri.EscapeDataString(FormatDashboardTime(startDate));
+        // The usage page uses an exclusive end boundary while dashboard end values are inclusive.
+        var end = Uri.EscapeDataString(FormatDashboardTime(endDate.AddSeconds(1)));
         var email = Uri.EscapeDataString(row.Email);
         Navigation.NavigateTo($"/admin/usage?user_id={row.UserId}&user_email={email}&start_date={start}&end_date={end}");
     }
@@ -694,8 +704,8 @@
         try
         {
             var response = await Api.GetAdminDashboardUserBreakdownAsync(
-                startDate.ToString("yyyy-MM-dd"),
-                QueryEndDate,
+                FormatDashboardTime(startDate),
+                FormatDashboardTime(endDate),
                 model.Model,
                 "requested",
                 50,
@@ -723,40 +733,18 @@
         modelBreakdownLoading = false;
     }
 
-    private string QueryEndDate => endDate.AddDays(-1).ToString("yyyy-MM-dd");
+    private static string FormatDateTimeInput(DateTime value) => FormatDashboardTime(value);
 
-    private async Task LoadBatchImageAccessAsync()
-    {
-        canUseBatchImage = false;
-        try
-        {
-            var page = 1;
-            while (!disposed)
-            {
-                var response = await Api.GetMyApiKeysPageAsync(new ApiKeyListQuery
-                {
-                    Page = page,
-                    PageSize = 100,
-                    Status = "active",
-                    SortBy = "created_at",
-                    SortOrder = "desc"
-                });
-                if (response.Items.Any(key => key.IsActive
-                    && string.Equals(key.GroupPlatform, "gemini", StringComparison.OrdinalIgnoreCase)
-                    && key.GroupAllowsBatchImageGeneration))
-                {
-                    canUseBatchImage = true;
-                    return;
-                }
-                if (page >= response.Pages || response.Items.Count == 0) return;
-                page++;
-            }
-        }
-        catch (ApiException)
-        {
-            canUseBatchImage = false;
-        }
-    }
+    private static string FormatDashboardTime(DateTime value) =>
+        value.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
+
+    private static bool TryParseDateTimeInput(string? value, out DateTime dateTime) =>
+        DateTime.TryParseExact(
+            value,
+            ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm"],
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out dateTime);
 
     private static string GetUserDisplayName(AdminDashboardUserTrendPointDto item) =>
         !string.IsNullOrWhiteSpace(item.Username) ? item.Username.Trim()

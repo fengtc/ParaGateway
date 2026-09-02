@@ -13,7 +13,9 @@ public sealed class DashboardOpsTypographyTests
         Assert.Contains(".admin-metric-content > span { font-size: .86rem; }", css);
         Assert.Contains(".admin-metric-content small { font-size: .8rem; }", css);
         Assert.Contains(".dashboard-card-heading h2 { font-size: 1rem; }", css);
-        Assert.Contains(".quick-action strong { font-size: .88rem; }", css);
+        Assert.Contains(".dashboard-date-time-input {", css);
+        Assert.Contains(".dashboard-range-summary {", css);
+        Assert.DoesNotContain(".quick-action", css, StringComparison.Ordinal);
         Assert.Contains(".compact-dashboard-table { font-size: .83rem; }", css);
         Assert.Contains(".compact-dashboard-table th { font-size: .76rem; }", css);
         Assert.Contains(":deep(.dxbl-chart) { font-size: .8rem; }", css);

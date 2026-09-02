@@ -538,7 +538,9 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	if filters.Role != "" {
 		q = q.Where(dbuser.RoleEQ(filters.Role))
 	}
-	if filters.Search != "" {
+	if filters.EmailExact != "" {
+		q = q.Where(userEmailLookupPredicate(filters.EmailExact))
+	} else if filters.Search != "" {
 		q = q.Where(
 			dbuser.Or(
 				dbuser.EmailContainsFold(filters.Search),
@@ -589,7 +591,16 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	usersQuery := q.
 		Offset(params.Offset()).
 		Limit(params.Limit())
-	for _, order := range userListOrder(params) {
+	orders := userListOrder(params)
+	if filters.EmailExact != "" && filters.IncludeDeleted {
+		// Exact identity lookups may include a soft-deleted predecessor and a
+		// current account with the same normalized email. Put the live identity
+		// first before applying the stable email/ID tie-breakers.
+		orders = append([]func(*entsql.Selector){
+			entsql.OrderByField(dbuser.FieldDeletedAt, entsql.OrderNullsFirst()).ToFunc(),
+		}, orders...)
+	}
+	for _, order := range orders {
 		usersQuery = usersQuery.Order(order)
 	}
 

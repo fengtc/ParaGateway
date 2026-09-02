@@ -32,17 +32,28 @@ public sealed class AdminDashboardPageTests
             Assert.Contains(label, dashboard, StringComparison.Ordinal);
         }
 
-        Assert.Contains("快捷操作", dashboard, StringComparison.Ordinal);
-        Assert.Contains("批量生图", dashboard, StringComparison.Ordinal);
-        Assert.Contains("canUseBatchImage", dashboard, StringComparison.Ordinal);
-        Assert.Contains("GroupAllowsBatchImageGeneration", dashboard, StringComparison.Ordinal);
-        Assert.Contains("分组定价", dashboard, StringComparison.Ordinal);
-        Assert.Contains("DxDateRangePicker", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("快捷操作", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("批量生图", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("canUseBatchImage", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("GroupAllowsBatchImageGeneration", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("分组定价", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("DxDateRangePicker", dashboard, StringComparison.Ordinal);
+        Assert.Equal(2, dashboard.Split("type=\"datetime-local\"", StringSplitOptions.None).Length - 1);
+        Assert.Equal(2, dashboard.Split("step=\"1\"", StringSplitOptions.None).Length - 1);
         Assert.Contains("private DateTime startDate = DateTime.Today;", dashboard, StringComparison.Ordinal);
-        Assert.Contains("private DateTime endDate = DateTime.Today.AddDays(1);", dashboard, StringComparison.Ordinal);
-        Assert.Contains("private string QueryEndDate => endDate.AddDays(-1).ToString(\"yyyy-MM-dd\");", dashboard, StringComparison.Ordinal);
-        Assert.Contains("if (endDate <= startDate) endDate = startDate.AddDays(1);", dashboard, StringComparison.Ordinal);
-        Assert.Contains("if (endDate <= startDate) startDate = endDate.AddDays(-1);", dashboard, StringComparison.Ordinal);
+        Assert.Contains("private DateTime endDate = DateTime.Today.AddDays(1).AddSeconds(-1);", dashboard, StringComparison.Ordinal);
+        Assert.Contains("[\"yyyy-MM-dd'T'HH:mm:ss\", \"yyyy-MM-dd'T'HH:mm\"]", dashboard, StringComparison.Ordinal);
+        Assert.Contains("value.ToString(\"yyyy-MM-dd'T'HH:mm:ss\", CultureInfo.InvariantCulture)", dashboard, StringComparison.Ordinal);
+        Assert.Contains("if (endDate <= startDate) endDate = startDate.AddSeconds(1);", dashboard, StringComparison.Ordinal);
+        Assert.Contains("if (endDate <= startDate) startDate = endDate.AddSeconds(-1);", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("QueryEndDate", dashboard, StringComparison.Ordinal);
+        Assert.Contains("区间 Token", dashboard, StringComparison.Ordinal);
+        Assert.Contains("private long RangeTokens => ModelRows.Sum", dashboard, StringComparison.Ordinal);
+        Assert.Contains("private double RangeActualCost => ModelRows.Sum", dashboard, StringComparison.Ordinal);
+        Assert.Contains("private double RangeAccountCost => ModelRows.Sum", dashboard, StringComparison.Ordinal);
+        Assert.Contains("private double RangeCost => ModelRows.Sum", dashboard, StringComparison.Ordinal);
+        Assert.Contains("FormatDashboardTime(startDate)", dashboard, StringComparison.Ordinal);
+        Assert.Contains("FormatDashboardTime(endDate)", dashboard, StringComparison.Ordinal);
         Assert.Contains("粒度", dashboard, StringComparison.Ordinal);
         Assert.Contains("模型分布", dashboard, StringComparison.Ordinal);
         Assert.Contains("用户消费榜", dashboard, StringComparison.Ordinal);
@@ -75,7 +86,7 @@ public sealed class AdminDashboardPageTests
         Assert.Contains("GetModelShare(model.TotalTokens)", dashboard, StringComparison.Ordinal);
         Assert.Contains("RefreshModelDistribution();", dashboard, StringComparison.Ordinal);
         Assert.Contains("modelTotalTokens = modelRows.Sum", dashboard, StringComparison.Ordinal);
-        Assert.DoesNotContain("ModelRows.Sum", dashboard, StringComparison.Ordinal);
+        Assert.Contains("private long ModelTotalTokens => modelTotalTokens;", dashboard, StringComparison.Ordinal);
         Assert.Contains("colspan=\"7\"", dashboard, StringComparison.Ordinal);
         Assert.Contains("SeriesClick=\"OnModelDistributionClick\"", dashboard, StringComparison.Ordinal);
         Assert.Contains("row?.Source is not null", dashboard, StringComparison.Ordinal);

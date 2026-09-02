@@ -29,7 +29,7 @@
             <label for="admin-usage-user-email">用户邮箱</label>
             <input id="admin-usage-user-email" type="search" list="admin-usage-user-options" value="@draftUserEmail" placeholder="全部用户" autocomplete="off" @oninput="SearchUserEmailsAsync" />
             <datalist id="admin-usage-user-options">
-                @foreach (var item in userOptions) { <option value="@item.Email">@(item.Deleted ? "已删除用户" : string.Empty)</option> }
+                @foreach (var item in userOptions) { <option value="@item.Email" label="@UserOptionLabel(item)"></option> }
             </datalist>
         </div>
         <div class="filter-field compact">
@@ -167,7 +167,7 @@ else
         SetDefaultDates();
         if (TryNormalizeInitialBoundary(InitialStartDate, false, out var initialStart)) draftStartDate = initialStart;
         if (TryNormalizeInitialBoundary(InitialEndDate, true, out var initialEnd)) draftEndDate = initialEnd;
-        draftUserEmail = InitialUserEmail?.Trim() ?? string.Empty;
+        draftUserEmail = AdminUsageUserSelectionPolicy.NormalizeEmail(InitialUserEmail);
         selectedUserId = InitialUserId is > 0 ? InitialUserId : null;
 
         if (!TryCommitFilters())
@@ -258,21 +258,21 @@ else
 
     private async Task<bool> TryResolveUserAsync()
     {
-        var email = draftUserEmail.Trim();
+        var email = AdminUsageUserSelectionPolicy.NormalizeEmail(draftUserEmail);
         if (email.Length == 0)
         {
             selectedUserId = null;
             return true;
         }
 
-        var match = userOptions.FirstOrDefault(x => string.Equals(x.Email, email, StringComparison.OrdinalIgnoreCase));
-        if (match is null)
+        var match = AdminUsageUserSelectionPolicy.FindExact(userOptions, email);
+        if (match is null || match.Deleted)
         {
             try
             {
                 var matches = await Api.SearchAdminUsageUsersAsync(email);
                 ReplaceUserOptions(matches);
-                match = matches.FirstOrDefault(x => string.Equals(x.Email, email, StringComparison.OrdinalIgnoreCase));
+                match = AdminUsageUserSelectionPolicy.FindExact(userOptions, email);
             }
             catch (ApiException ex)
             {
@@ -286,7 +286,7 @@ else
             return false;
         }
 
-        draftUserEmail = match.Email;
+        draftUserEmail = AdminUsageUserSelectionPolicy.NormalizeEmail(match.Email);
         selectedUserId = match.Id;
         return true;
     }
@@ -295,7 +295,7 @@ else
     {
         draftUserEmail = args.Value?.ToString() ?? string.Empty;
         var version = ++userSearchVersion;
-        var keyword = draftUserEmail.Trim();
+        var keyword = AdminUsageUserSelectionPolicy.NormalizeEmail(draftUserEmail);
         if (keyword.Length < 2)
         {
             userOptions.Clear();
@@ -317,12 +317,12 @@ else
     private void ReplaceUserOptions(IEnumerable<AdminUsageUserOptionDto> matches)
     {
         userOptions.Clear();
-        userOptions.AddRange(matches.Where(x => !string.IsNullOrWhiteSpace(x.Email)));
+        userOptions.AddRange(AdminUsageUserSelectionPolicy.OrderOptions(matches));
     }
 
     private async Task SelectRankedUserAsync(AdminDashboardUserBreakdownItemDto user)
     {
-        draftUserEmail = user.Email;
+        draftUserEmail = AdminUsageUserSelectionPolicy.NormalizeEmail(user.Email);
         selectedUserId = user.UserId;
         page = 1;
         activeTab = "usage";
@@ -358,5 +358,7 @@ else
     private async Task PageSizeChangedAsync(ChangeEventArgs args) { if (int.TryParse(args.Value?.ToString(), out var size)) pageSize = size; page = 1; await LoadUsageAsync(); }
     private async Task PreviousAsync() { if (page <= 1) return; page--; await LoadUsageAsync(); }
     private async Task NextAsync() { if (page >= TotalPages) return; page++; await LoadUsageAsync(); }
+    private static string UserOptionLabel(AdminUsageUserOptionDto option) =>
+        $"{AdminUsageUserSelectionPolicy.NormalizeEmail(option.Email)}（{(option.Deleted ? "已删除" : "活动")}） #{option.Id}";
     private static string ShortId(string value) => string.IsNullOrWhiteSpace(value) ? "-" : value.Length <= 12 ? value : $"{value[..8]}…";
 }

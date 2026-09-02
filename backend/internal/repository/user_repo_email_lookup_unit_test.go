@@ -10,6 +10,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/enttest"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 
@@ -147,6 +148,50 @@ func TestUserRepositoryGetByEmailReportsNormalizedEmailConflict(t *testing.T) {
 	_, err = repo.GetByEmail(ctx, "conflict@example.com")
 	require.Error(t, err)
 	require.ErrorContains(t, err, "normalized email lookup matched multiple users")
+}
+
+func TestUserRepositoryListByExactEmailPrefersActiveDuplicateBeforePagination(t *testing.T) {
+	repo, client := newUserEntRepo(t)
+	ctx := context.Background()
+
+	// Seed directly to reproduce legacy production data. The current service
+	// correctly rejects creating a second normalized email identity.
+	deleted, err := client.User.Create().
+		SetEmail(" XieGY@paratera.com ").
+		SetUsername("deleted-xiegy").
+		SetPasswordHash("hash").
+		SetRole(service.RoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	require.NoError(t, client.User.DeleteOneID(deleted.ID).Exec(ctx))
+
+	active, err := client.User.Create().
+		SetEmail("xiegy@paratera.com").
+		SetUsername("active-xiegy").
+		SetPasswordHash("hash").
+		SetRole(service.RoleUser).
+		SetStatus(service.StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+
+	filters := service.UserListFilters{EmailExact: "  XIEGY@PARATERA.COM ", IncludeDeleted: true}
+	firstPage, firstResult, err := repo.ListWithFilters(ctx, pagination.PaginationParams{
+		Page: 1, PageSize: 1, SortBy: "email", SortOrder: "asc",
+	}, filters)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, firstResult.Total)
+	require.Len(t, firstPage, 1)
+	require.Equal(t, active.ID, firstPage[0].ID)
+	require.Nil(t, firstPage[0].DeletedAt)
+
+	secondPage, _, err := repo.ListWithFilters(ctx, pagination.PaginationParams{
+		Page: 2, PageSize: 1, SortBy: "email", SortOrder: "asc",
+	}, filters)
+	require.NoError(t, err)
+	require.Len(t, secondPage, 1)
+	require.Equal(t, deleted.ID, secondPage[0].ID)
+	require.NotNil(t, secondPage[0].DeletedAt)
 }
 
 func TestUserRepositoryCreateSerializesNormalizedEmailConflictsUnderConcurrency(t *testing.T) {
