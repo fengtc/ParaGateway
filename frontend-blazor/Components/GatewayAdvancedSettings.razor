@@ -43,7 +43,7 @@
             <ToggleField Label="订阅优先级" Hint="把订阅优先级纳入候选排序"><InputCheckbox @bind-Value="Settings.OpenAIAdvancedSchedulerSubscriptionPriorityEnabled" /></ToggleField>
         </div>
         <div class="thresholds">
-            <h3>账号自动停调阈值</h3><p>剩余额度百分比低于阈值时暂停调度；100 表示关闭。</p>
+            <h3>账号自动停调阈值</h3><p>已使用量达到阈值时暂停调度；100 表示关闭。</p>
             <div>@foreach (var platform in ThresholdPlatforms) { <Field Label="@PlatformLabel(platform)"><input type="number" min="1" max="100" value="@Threshold(platform)" @onchange="args => SetThreshold(platform, args.Value)" /></Field> }</div>
         </div>
         @if (Settings.OpenAIAdvancedSchedulerEnabled)
