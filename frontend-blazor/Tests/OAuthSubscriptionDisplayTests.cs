@@ -61,6 +61,19 @@ public sealed class OAuthSubscriptionDisplayTests
     }
 
     [Fact]
+    public void ReadsNumericMetadataWrittenByLegacyJson()
+    {
+        var account = Account("openai", "pro");
+        account.Credentials!["subscription_expires_at"] = JsonSerializer.SerializeToElement(1784678400);
+
+        var display = OAuthSubscriptionDisplay.From(account);
+
+        Assert.NotNull(display);
+        Assert.Equal("Pro", display.PlanLabel);
+        Assert.Equal("到期 2026-07-22", display.ExpiryLabel);
+    }
+
+    [Fact]
     public void PrefersAccountMetadataOverShadowParentFallback()
     {
         var account = Account("openai", "plus", "2026-09-04T00:00:00Z");

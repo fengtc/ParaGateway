@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"testing"
 
@@ -115,4 +116,29 @@ func TestAccountFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {
 	require.NotNil(t, got)
 	require.Nil(t, got.Credentials)
 	require.Nil(t, got.CredentialsStatus)
+}
+
+func TestAccountFromServiceShallow_BackfillsOpenAIMetadataFromIDToken(t *testing.T) {
+	payload, err := json.Marshal(map[string]any{
+		"email": "oauth@example.com",
+		"https://api.openai.com/auth": map[string]string{
+			"chatgpt_plan_type":  "pro",
+			"chatgpt_account_id": "acct-1",
+			"chatgpt_user_id":    "user-1",
+		},
+	})
+	require.NoError(t, err)
+	idToken := "eyJhbGciOiJub25lIn0." + base64.RawURLEncoding.EncodeToString(payload) + ".sig"
+	src := &service.Account{
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeOAuth,
+		Credentials: map[string]any{
+			"id_token": idToken,
+		},
+	}
+
+	got := AccountFromServiceShallow(src)
+	require.Equal(t, "oauth@example.com", got.Credentials["email"])
+	require.Equal(t, "pro", got.Credentials["plan_type"])
+	require.Equal(t, "acct-1", got.Credentials["chatgpt_account_id"])
 }

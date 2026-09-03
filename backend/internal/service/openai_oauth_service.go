@@ -430,7 +430,67 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	}
 
 	clientID := account.GetCredential("client_id")
-	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
+	tokenInfo, err := s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
+	if err != nil {
+		return nil, err
+	}
+
+	// OAuth refresh responses are allowed to omit the ID token and the
+	// subscription claims. Keep the last known non-sensitive metadata as a
+	// fallback, then let enrichTokenInfo refresh it from ChatGPT when possible.
+	// Without this fallback a provider response-format change can make the
+	// account list permanently lose its plan label after the next refresh.
+	if strings.TrimSpace(tokenInfo.PlanType) == "" {
+		tokenInfo.PlanType = account.GetCredential("plan_type")
+	}
+	if strings.TrimSpace(tokenInfo.SubscriptionExpiresAt) == "" {
+		tokenInfo.SubscriptionExpiresAt = account.GetCredential("subscription_expires_at")
+	}
+	if tokenInfo.Email == "" {
+		tokenInfo.Email = account.GetCredential("email")
+	}
+	if tokenInfo.ChatGPTAccountID == "" {
+		tokenInfo.ChatGPTAccountID = account.GetCredential("chatgpt_account_id")
+	}
+	if tokenInfo.ChatGPTUserID == "" {
+		tokenInfo.ChatGPTUserID = account.GetCredential("chatgpt_user_id")
+	}
+	if tokenInfo.OrganizationID == "" {
+		tokenInfo.OrganizationID = account.GetCredential("organization_id")
+	}
+	if tokenInfo.PlanType == "" || tokenInfo.Email == "" || tokenInfo.ChatGPTAccountID == "" {
+		seedOpenAITokenInfoFromIDToken(tokenInfo, account.GetCredential("id_token"))
+	}
+	return tokenInfo, nil
+}
+
+func seedOpenAITokenInfoFromIDToken(tokenInfo *OpenAITokenInfo, idToken string) {
+	if tokenInfo == nil || strings.TrimSpace(idToken) == "" {
+		return
+	}
+	claims, err := openai.DecodeIDToken(idToken)
+	if err != nil || claims == nil {
+		return
+	}
+	userInfo := claims.GetUserInfo()
+	if userInfo == nil {
+		return
+	}
+	if tokenInfo.Email == "" {
+		tokenInfo.Email = userInfo.Email
+	}
+	if tokenInfo.ChatGPTAccountID == "" {
+		tokenInfo.ChatGPTAccountID = userInfo.ChatGPTAccountID
+	}
+	if tokenInfo.ChatGPTUserID == "" {
+		tokenInfo.ChatGPTUserID = userInfo.ChatGPTUserID
+	}
+	if tokenInfo.OrganizationID == "" {
+		tokenInfo.OrganizationID = userInfo.OrganizationID
+	}
+	if tokenInfo.PlanType == "" {
+		tokenInfo.PlanType = userInfo.PlanType
+	}
 }
 
 // BuildAccountCredentials builds credentials map from token info

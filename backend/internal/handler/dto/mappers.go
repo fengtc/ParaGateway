@@ -3,8 +3,10 @@ package dto
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -232,6 +234,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		return nil
 	}
 	redactedCreds, credsStatus := RedactCredentials(a.Credentials)
+	backfillOpenAIDisplayCredentials(a, redactedCreds)
 	extra := redactAccountManagedExtra(a.Extra)
 	var ollamaCloudUsage *service.OllamaCloudUsageState
 	if state := service.OllamaCloudUsageStateFromAccount(a); state.Eligible {
@@ -406,6 +409,37 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 	}
 
 	return out
+}
+
+// backfillOpenAIDisplayCredentials restores non-sensitive display metadata from
+// a retained ID token when older rows have no flattened plan/email fields.
+// DecodeIDToken intentionally does not validate expiry, because the token is
+// only used as a historical metadata snapshot for the admin response.
+func backfillOpenAIDisplayCredentials(a *service.Account, credentials map[string]any) {
+	if a == nil || credentials == nil || a.Platform != service.PlatformOpenAI || a.Type != service.AccountTypeOAuth {
+		return
+	}
+	claims, err := openai.DecodeIDToken(a.GetCredential("id_token"))
+	if err != nil || claims == nil {
+		return
+	}
+	info := claims.GetUserInfo()
+	if info == nil {
+		return
+	}
+	setIfMissing := func(key, value string) {
+		if strings.TrimSpace(value) == "" {
+			return
+		}
+		if current, ok := credentials[key].(string); !ok || strings.TrimSpace(current) == "" {
+			credentials[key] = strings.TrimSpace(value)
+		}
+	}
+	setIfMissing("email", info.Email)
+	setIfMissing("plan_type", info.PlanType)
+	setIfMissing("chatgpt_account_id", info.ChatGPTAccountID)
+	setIfMissing("chatgpt_user_id", info.ChatGPTUserID)
+	setIfMissing("organization_id", info.OrganizationID)
 }
 
 func redactAccountManagedExtra(extra map[string]any) map[string]any {

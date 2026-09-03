@@ -18,6 +18,22 @@ type openaiOAuthClientRefreshStub struct {
 	refreshCalls int32
 }
 
+type openaiOAuthClientTokenStub struct {
+	response *openai.TokenResponse
+}
+
+func (s *openaiOAuthClientTokenStub) ExchangeCode(context.Context, string, string, string, string, string) (*openai.TokenResponse, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *openaiOAuthClientTokenStub) RefreshToken(context.Context, string, string) (*openai.TokenResponse, error) {
+	return s.response, nil
+}
+
+func (s *openaiOAuthClientTokenStub) RefreshTokenWithClientID(context.Context, string, string, string) (*openai.TokenResponse, error) {
+	return s.response, nil
+}
+
 func (s *openaiOAuthClientRefreshStub) ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL, clientID string) (*openai.TokenResponse, error) {
 	return nil, errors.New("not implemented")
 }
@@ -60,6 +76,37 @@ func TestOpenAIOAuthService_RefreshAccountToken_NoRefreshTokenUsesExistingAccess
 	require.Equal(t, "client-id-1", info.ClientID)
 	require.Zero(t, atomic.LoadInt32(&client.refreshCalls), "existing access token should be reused without calling refresh")
 	require.Positive(t, atomic.LoadInt32(&privacyClientCalls), "existing access token should still run enrichment")
+}
+
+func TestOpenAIOAuthService_RefreshAccountToken_PreservesSubscriptionMetadataWhenRefreshOmitsIt(t *testing.T) {
+	client := &openaiOAuthClientTokenStub{response: &openai.TokenResponse{
+		AccessToken:  "new-access-token",
+		ExpiresIn:    3600,
+		RefreshToken: "new-refresh-token",
+	}}
+	svc := NewOpenAIOAuthService(nil, client)
+	defer svc.Stop()
+
+	account := &Account{
+		ID:       77,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token":            "old-access-token",
+			"refresh_token":           "old-refresh-token",
+			"id_token":                "old-id-token",
+			"plan_type":               "pro",
+			"subscription_expires_at": "2026-09-04T00:00:00Z",
+			"email":                   "user@example.com",
+		},
+	}
+
+	info, err := svc.RefreshAccountToken(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, "new-access-token", info.AccessToken)
+	require.Equal(t, "pro", info.PlanType)
+	require.Equal(t, "2026-09-04T00:00:00Z", info.SubscriptionExpiresAt)
+	require.Equal(t, "user@example.com", info.Email)
 }
 
 func TestOpenAIOAuthService_RefreshAccountToken_PATIgnoresStaleRefreshToken(t *testing.T) {

@@ -85,8 +85,12 @@ public sealed record OAuthSubscriptionDisplay(
     private static string? ReadString(Dictionary<string, JsonElement>? source, string key) =>
         source is not null
         && source.TryGetValue(key, out var value)
-        && value.ValueKind == JsonValueKind.String
-            ? value.GetString()
+            ? value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.ToString(),
+                _ => null
+            }
             : null;
 
     private static bool TryParseExpiry(string? value, out DateTimeOffset expiry)
