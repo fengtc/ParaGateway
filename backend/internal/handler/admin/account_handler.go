@@ -557,6 +557,15 @@ func (h *AccountHandler) List(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	// 账号管理页面也需要反映全局调度阈值。阈值状态原本只在实际选
+	// 账号时评估，因此仅刷新页面时 temp_unschedulable_until 可能仍为空，
+	// 即使用量快照已经超过阈值。这里复用同一评估入口；它只会对满足
+	// 条件的账号写入临时停调状态，不改变 schedulable 开关。
+	if h.rateLimitService != nil {
+		for index := range accounts {
+			h.rateLimitService.ApplyAccountSchedulingThreshold(c.Request.Context(), &accounts[index])
+		}
+	}
 	if h.ollamaCloudUsage != nil && len(accounts) > 0 {
 		accountPointers := make([]*service.Account, len(accounts))
 		for index := range accounts {
