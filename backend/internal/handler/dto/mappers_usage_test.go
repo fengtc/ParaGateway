@@ -140,6 +140,26 @@ func TestUsageLogFromService_UsesRequestedModelAndKeepsUpstreamAdminOnly(t *test
 	require.Contains(t, string(adminJSON), `"upstream_model_mismatch":true`)
 }
 
+func TestUsageLogFromService_DepartmentIsAdminOnly(t *testing.T) {
+	t.Parallel()
+
+	log := &service.UsageLog{
+		RequestID:  "req_department",
+		Model:      "gpt-5.6",
+		Department: "研发部",
+	}
+
+	userJSON, err := json.Marshal(UsageLogFromService(log))
+	require.NoError(t, err)
+	require.NotContains(t, string(userJSON), `"department"`)
+
+	adminDTO := UsageLogFromServiceAdmin(log)
+	require.Equal(t, "研发部", adminDTO.Department)
+	adminJSON, err := json.Marshal(adminDTO)
+	require.NoError(t, err)
+	require.Contains(t, string(adminJSON), `"department":"研发部"`)
+}
+
 func TestUsageLogFromService_KeepsUserBillingAndIPWithoutAdminCostFields(t *testing.T) {
 	t.Parallel()
 

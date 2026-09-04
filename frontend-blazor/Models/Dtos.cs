@@ -3827,6 +3827,7 @@ public sealed class UsageRecordDto
     public string UserEmail { get; set; } = string.Empty;
     public string ApiKeyId { get; set; } = string.Empty;
     public string ApiKeyName { get; set; } = string.Empty;
+    public string Department { get; set; } = string.Empty;
     public string Endpoint { get; set; } = string.Empty;
     public string ProviderName { get; set; } = string.Empty;
     public string PublicModel { get; set; } = string.Empty;
@@ -3847,7 +3848,8 @@ public sealed class UsageRecordDto
     public static UsageRecordDto From(GoUsageLog log) => new()
     {
         Id = log.Id.ToString(), UserEmail = log.User?.Email ?? string.Empty, ApiKeyId = log.ApiKeyId.ToString(),
-        ApiKeyName = log.ApiKey?.Name ?? string.Empty, Endpoint = log.InboundEndpoint ?? string.Empty,
+        ApiKeyName = log.ApiKey?.Name ?? string.Empty, Department = log.Department ?? string.Empty,
+        Endpoint = log.InboundEndpoint ?? string.Empty,
         PublicModel = log.Model, IpAddress = log.IpAddress, PromptTokens = log.InputTokens, CompletionTokens = log.OutputTokens,
         CacheWriteTokens = log.CacheCreationTokens, CacheReadTokens = log.CacheReadTokens,
         TotalTokens = log.InputTokens + log.OutputTokens + log.CacheCreationTokens + log.CacheReadTokens,
@@ -3864,6 +3866,7 @@ public sealed class GoUsageLog
     [JsonPropertyName("api_key_id")] public long ApiKeyId { get; set; }
     [JsonPropertyName("account_id")] public long? AccountId { get; set; }
     [JsonPropertyName("request_id")] public string RequestId { get; set; } = string.Empty;
+    [JsonPropertyName("department")] public string? Department { get; set; }
     public string Model { get; set; } = string.Empty;
     [JsonPropertyName("service_tier")] public string? ServiceTier { get; set; }
     [JsonPropertyName("reasoning_effort")] public string? ReasoningEffort { get; set; }

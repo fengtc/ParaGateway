@@ -44,6 +44,12 @@ public sealed class AdminUsagePageParityTests
         Assert.Contains("<th>来源 IP</th>", panel, StringComparison.Ordinal);
         Assert.Contains("data-label=\"来源 IP\"", panel, StringComparison.Ordinal);
         Assert.Contains("item.IpAddress", panel, StringComparison.Ordinal);
+        foreach (var label in new[] { "用户", "Key", "部门" })
+        {
+            Assert.Contains($"<th>{label}</th>", panel, StringComparison.Ordinal);
+            Assert.Contains($"data-label=\"{label}\"", panel, StringComparison.Ordinal);
+        }
+        Assert.DoesNotContain("用户 / Key", panel, StringComparison.Ordinal);
 
         var styles = ReadSource("Components", "AdminUsagePanel.razor.css");
         var errorStyles = ReadSource("Components", "AdminUsageErrorTab.razor.css");
@@ -79,12 +85,12 @@ public sealed class AdminUsagePageParityTests
     }
 
     [Fact]
-    public async Task AdminUsageClientPreservesSourceIpFromApiJson()
+    public async Task AdminUsageClientPreservesSourceIpAndDepartmentFromApiJson()
     {
         var handler = new UsageQueryHandler
         {
             UsagePayload = """
-                {"code":0,"message":"success","data":{"items":[{"id":19,"model":"gpt-5.6","ip_address":"2001:db8:85a3::8a2e:370:7334","created_at":"2026-08-25T08:30:00Z"}],"total":1,"page":1,"page_size":20,"pages":1}}
+                {"code":0,"message":"success","data":{"items":[{"id":19,"model":"gpt-5.6","department":"研发部","ip_address":"2001:db8:85a3::8a2e:370:7334","created_at":"2026-08-25T08:30:00Z"}],"total":1,"page":1,"page_size":20,"pages":1}}
                 """
         };
         var api = new ApiClient(new HttpClient(handler) { BaseAddress = new Uri("https://paragateway.test") }, new NullJsRuntime());
@@ -93,6 +99,7 @@ public sealed class AdminUsagePageParityTests
 
         var record = Assert.Single(result.Items);
         Assert.Equal("2001:db8:85a3::8a2e:370:7334", record.IpAddress);
+        Assert.Equal("研发部", record.Department);
     }
 
     [Fact]

@@ -17,6 +17,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, upstream_response_model, upstream_model_mismatch, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, image_input_tokens, image_input_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, video_count, video_resolution, video_duration_seconds, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, long_context_billing_applied, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, session_id, created_at"
@@ -282,6 +283,10 @@ func (r *usageLogRepository) hydrateUsageLogAssociations(ctx context.Context, lo
 	if err != nil {
 		return err
 	}
+	departments, err := r.loadUserDepartments(ctx, ids.userIDs)
+	if err != nil {
+		return err
+	}
 	apiKeys, err := r.loadAPIKeys(ctx, ids.apiKeyIDs)
 	if err != nil {
 		return err
@@ -303,6 +308,7 @@ func (r *usageLogRepository) hydrateUsageLogAssociations(ctx context.Context, lo
 		if user, ok := users[logs[i].UserID]; ok {
 			logs[i].User = user
 		}
+		logs[i].Department = departments[logs[i].UserID]
 		if key, ok := apiKeys[logs[i].APIKeyID]; ok {
 			logs[i].APIKey = key
 		}
@@ -321,6 +327,39 @@ func (r *usageLogRepository) hydrateUsageLogAssociations(ctx context.Context, lo
 		}
 	}
 	return nil
+}
+
+func (r *usageLogRepository) loadUserDepartments(ctx context.Context, ids []int64) (map[int64]string, error) {
+	out := make(map[int64]string)
+	if len(ids) == 0 {
+		return out, nil
+	}
+
+	rows, err := r.sql.QueryContext(ctx, `
+SELECT uav.user_id, COALESCE(NULLIF(BTRIM(uav.value), ''), '')
+FROM user_attribute_values uav
+JOIN user_attribute_definitions uad
+  ON uad.id = uav.attribute_id
+ AND uad.key = 'department'
+ AND uad.deleted_at IS NULL
+WHERE uav.user_id = ANY($1)`, pq.Array(ids))
+	if err != nil {
+		return nil, fmt.Errorf("load usage log user departments: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var userID int64
+		var department string
+		if err := rows.Scan(&userID, &department); err != nil {
+			return nil, fmt.Errorf("scan usage log user department: %w", err)
+		}
+		out[userID] = department
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate usage log user departments: %w", err)
+	}
+	return out, nil
 }
 
 type usageLogIDs struct {

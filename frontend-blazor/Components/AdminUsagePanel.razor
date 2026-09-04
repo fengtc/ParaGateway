@@ -83,14 +83,16 @@
             <div class="data-table-wrap wide-table">
                 <table class="data-table">
                     <thead>
-                        <tr><th>时间</th><th>用户 / Key</th><th>模型</th><th>来源 IP</th><th>输入 Token</th><th>缓存写入</th><th>缓存读取</th><th>输出 Token</th><th>费用</th><th>耗时</th><th>状态</th><th>记录 ID</th></tr>
+                        <tr><th>时间</th><th>用户</th><th>Key</th><th>部门</th><th>模型</th><th>来源 IP</th><th>输入 Token</th><th>缓存写入</th><th>缓存读取</th><th>输出 Token</th><th>费用</th><th>耗时</th><th>状态</th><th>记录 ID</th></tr>
                     </thead>
                     <tbody>
                         @foreach (var item in result.Items)
                         {
                             <tr @key="item.Id">
                                 <td data-label="时间">@UiFormat.DateTime(item.CreatedAt)</td>
-                                <td data-label="用户 / Key"><span class="primary-cell">@(string.IsNullOrWhiteSpace(item.UserEmail) ? "-" : item.UserEmail)</span><small>@(string.IsNullOrWhiteSpace(item.ApiKeyName) ? ShortId(item.ApiKeyId) : item.ApiKeyName)</small></td>
+                                <td data-label="用户"><span class="primary-cell">@(string.IsNullOrWhiteSpace(item.UserEmail) ? "-" : item.UserEmail)</span></td>
+                                <td data-label="Key"><span class="primary-cell">@(string.IsNullOrWhiteSpace(item.ApiKeyName) ? ShortId(item.ApiKeyId) : item.ApiKeyName)</span></td>
+                                <td data-label="部门"><span class="primary-cell">@(string.IsNullOrWhiteSpace(item.Department) ? "-" : item.Department)</span></td>
                                 <td data-label="模型"><span class="primary-cell">@item.PublicModel</span><small>@item.ProviderName</small></td>
                                 <td data-label="来源 IP"><code class="source-ip">@(string.IsNullOrWhiteSpace(item.IpAddress) ? "-" : item.IpAddress)</code></td>
                                 <td data-label="输入 Token" class="numeric-cell">@UiFormat.Integer(item.PromptTokens)</td>

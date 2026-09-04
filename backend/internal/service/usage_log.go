@@ -273,6 +273,9 @@ type UsageLog struct {
 	VideoDurationSeconds *int
 
 	CreatedAt time.Time
+	// Department is resolved from the user's current department attribute when
+	// usage-log associations are hydrated. It is not a historical snapshot.
+	Department string
 
 	// WorkAttribution contains only structured metadata and a local classifier
 	// result. It never contains request text, prompt content, or source code.
