@@ -30,6 +30,12 @@ public sealed class AdminUsagePageParityTests
         Assert.Contains("type=\"datetime-local\"", panel, StringComparison.Ordinal);
         Assert.Contains("step=\"1\"", panel, StringComparison.Ordinal);
         Assert.Contains("用户邮箱", panel, StringComparison.Ordinal);
+        Assert.Contains("for=\"admin-usage-department\">部门", panel, StringComparison.Ordinal);
+        Assert.Contains("placeholder=\"全部部门\"", panel, StringComparison.Ordinal);
+        Assert.Contains("ExportCsvAsync", panel, StringComparison.Ordinal);
+        Assert.Contains("导出 CSV", panel, StringComparison.Ordinal);
+        Assert.Contains("paraGateway.downloadBytes", panel, StringComparison.Ordinal);
+        Assert.Contains("费用（USD）", panel, StringComparison.Ordinal);
         Assert.Contains("SearchAdminUsageUsersAsync", panel, StringComparison.Ordinal);
         Assert.Contains("AdminUsageUserSelectionPolicy.FindExact", panel, StringComparison.Ordinal);
         Assert.Contains("AdminUsageUserSelectionPolicy.OrderOptions", panel, StringComparison.Ordinal);
@@ -156,12 +162,14 @@ public sealed class AdminUsagePageParityTests
             Timezone = "Asia/Shanghai",
             UserId = 17,
             Model = "gpt-5.6",
+            Department = "研发部",
             SortBy = "created_at",
-            SortOrder = "desc"
+            SortOrder = "desc",
+            ExactTotal = true
         });
 
         Assert.Equal("/api/v1/admin/usage", handler.LastPath);
-        AssertQuery(handler, "page=2", "page_size=50", "start_date=2026-08-23T00:00:00", "end_date=2026-08-24T00:00:00", "timezone=Asia/Shanghai", "user_id=17", "model=gpt-5.6");
+        AssertQuery(handler, "page=2", "page_size=50", "start_date=2026-08-23T00:00:00", "end_date=2026-08-24T00:00:00", "timezone=Asia/Shanghai", "user_id=17", "model=gpt-5.6", "department=研发部", "exact_total=true");
 
         await api.GetAdminOpsErrorLogsAsync(new OpsErrorListQueryDto
         {

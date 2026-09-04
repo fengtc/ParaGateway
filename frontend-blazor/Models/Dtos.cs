@@ -3941,6 +3941,7 @@ public sealed class AdminUsageQuery
     public long? AccountId { get; set; }
     public long? GroupId { get; set; }
     public string Model { get; set; } = string.Empty;
+    public string Department { get; set; } = string.Empty;
     public string RequestType { get; set; } = string.Empty;
     public int? BillingType { get; set; }
     public string BillingMode { get; set; } = string.Empty;
@@ -3949,6 +3950,7 @@ public sealed class AdminUsageQuery
     public string Timezone { get; set; } = string.Empty;
     public string SortBy { get; set; } = "created_at";
     public string SortOrder { get; set; } = "desc";
+    public bool ExactTotal { get; set; }
 }
 
 public sealed class AdminUsageUserOptionDto

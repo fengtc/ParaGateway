@@ -1,12 +1,15 @@
 @using System.Globalization
+@using System.Text
 @inject ApiClient Api
+@inject IJSRuntime JS
+@inject ToastService Toasts
 
 <div class="page-header">
     <div>
         <h1>用量记录</h1>
         <p>模型请求、Token 消耗与费用明细</p>
     </div>
-    <button type="button" class="button secondary" disabled="@(activeTab == "usage" && loading)" @onclick="RefreshAsync"><Icon Name="refresh" Size="16" /> 刷新</button>
+    <button type="button" class="button secondary" disabled="@(activeTab == "usage" && (loading || exporting))" @onclick="RefreshAsync"><Icon Name="refresh" Size="16" /> 刷新</button>
 </div>
 
 <div class="admin-usage-tabs" role="tablist" aria-label="用量详情视图">
@@ -39,6 +42,10 @@
         @if (activeTab == "usage")
         {
             <div class="filter-field compact">
+                <label for="admin-usage-department">部门</label>
+                <input id="admin-usage-department" type="search" placeholder="全部部门" @bind="draftDepartment" />
+            </div>
+            <div class="filter-field compact">
                 <label for="admin-usage-page-size">每页</label>
                 <select id="admin-usage-page-size" value="@pageSize" @onchange="PageSizeChangedAsync">
                     <option value="20">20 条</option>
@@ -53,8 +60,12 @@
         {
             <span class="result-count">共 @UiFormat.Integer(result?.Total ?? 0) 条记录</span>
         }
-        <button type="button" class="button secondary" disabled="@loading" @onclick="ResetFiltersAsync"><Icon Name="rotate-ccw" Size="16" /> 重置</button>
-        <button type="button" class="button primary" disabled="@loading" @onclick="ApplyFiltersAsync"><Icon Name="search" Size="16" /> 查询</button>
+        <button type="button" class="button secondary" disabled="@(loading || exporting)" @onclick="ResetFiltersAsync"><Icon Name="rotate-ccw" Size="16" /> 重置</button>
+        <button type="button" class="button primary" disabled="@(loading || exporting)" @onclick="ApplyFiltersAsync"><Icon Name="search" Size="16" /> 查询</button>
+        @if (activeTab == "usage")
+        {
+            <button type="button" class="button secondary" disabled="@(loading || exporting || result is null || result.Total == 0)" @onclick="ExportCsvAsync"><Icon Name="download" Size="16" /> @(exporting ? "正在导出" : "导出 CSV")</button>
+        }
     </div>
 </section>
 
@@ -148,6 +159,7 @@ else
     private int page = 1;
     private int pageSize = 20;
     private bool loading = true;
+    private bool exporting;
     private string? error;
     private string? filterMessage;
     private string activeTab = "usage";
@@ -156,10 +168,12 @@ else
     private string draftEndDate = string.Empty;
     private string draftUserEmail = string.Empty;
     private string draftModel = string.Empty;
+    private string draftDepartment = string.Empty;
     private string selectedStartDate = string.Empty;
     private string selectedEndDate = string.Empty;
     private long? selectedUserId;
     private string selectedModel = string.Empty;
+    private string selectedDepartment = string.Empty;
     private readonly List<AdminUsageUserOptionDto> userOptions = [];
     private int userSearchVersion;
     private int TotalPages => Math.Max(1, result?.TotalPages > 0 ? result.TotalPages : (int)Math.Ceiling((result?.Total ?? 0) / (double)pageSize));
@@ -191,16 +205,7 @@ else
         error = null;
         try
         {
-            result = await Api.GetUsageAsync(new AdminUsageQuery
-            {
-                Page = page,
-                PageSize = pageSize,
-                UserId = selectedUserId,
-                Model = selectedModel,
-                StartDate = selectedStartDate,
-                EndDate = selectedEndDate,
-                Timezone = TimeZoneInfo.Local.Id
-            });
+            result = await Api.GetUsageAsync(BuildUsageQuery(page, pageSize));
             if (result.Page > 0) page = result.Page;
         }
         catch (ApiException ex) { error = ex.Message; }
@@ -230,6 +235,7 @@ else
         SetDefaultDates();
         draftUserEmail = string.Empty;
         draftModel = string.Empty;
+        draftDepartment = string.Empty;
         await ApplyFiltersAsync();
     }
 
@@ -255,7 +261,94 @@ else
         selectedStartDate = start.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
         selectedEndDate = end.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
         selectedModel = draftModel.Trim();
+        selectedDepartment = draftDepartment.Trim();
         return true;
+    }
+
+    private AdminUsageQuery BuildUsageQuery(int targetPage, int targetPageSize, bool exactTotal = false) => new()
+    {
+        Page = targetPage,
+        PageSize = targetPageSize,
+        UserId = selectedUserId,
+        Model = selectedModel,
+        Department = selectedDepartment,
+        StartDate = selectedStartDate,
+        EndDate = selectedEndDate,
+        Timezone = TimeZoneInfo.Local.Id,
+        ExactTotal = exactTotal
+    };
+
+    private async Task ExportCsvAsync()
+    {
+        if (result is null || result.Total <= 0)
+        {
+            Toasts.Info("没有可导出的数据");
+            return;
+        }
+
+        exporting = true;
+        try
+        {
+            const int exportPageSize = 1000;
+            var first = await Api.GetUsageAsync(BuildUsageQuery(1, exportPageSize, exactTotal: true));
+            var rows = new List<UsageRecordDto>(first.Items);
+            for (var current = 2; current <= first.TotalPages; current++)
+            {
+                var next = await Api.GetUsageAsync(BuildUsageQuery(current, exportPageSize));
+                rows.AddRange(next.Items);
+            }
+
+            var csv = new StringBuilder();
+            csv.AppendLine("时间,用户,Key,部门,模型,来源 IP,输入 Token,缓存写入 Token,缓存读取 Token,输出 Token,费用（USD）,耗时（ms）,状态,记录 ID");
+            foreach (var row in rows)
+            {
+                var values = new object?[]
+                {
+                    row.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                    row.UserEmail,
+                    string.IsNullOrWhiteSpace(row.ApiKeyName) ? row.ApiKeyId : row.ApiKeyName,
+                    row.Department,
+                    row.PublicModel,
+                    row.IpAddress,
+                    row.PromptTokens,
+                    row.CacheWriteTokens,
+                    row.CacheReadTokens,
+                    row.CompletionTokens,
+                    (row.CostMicros / 1_000_000m).ToString("0.000000", CultureInfo.InvariantCulture),
+                    row.DurationMs,
+                    row.Success ? "成功" : $"失败 {row.StatusCode}",
+                    row.Id
+                };
+                csv.AppendLine(string.Join(',', values.Select(CsvValue)));
+            }
+
+            var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(csv.ToString())).ToArray();
+            await JS.InvokeVoidAsync("paraGateway.downloadBytes", Convert.ToBase64String(bytes), "text/csv;charset=utf-8", ExportFileName());
+            Toasts.Success($"已导出 {rows.Count} 条用量记录");
+        }
+        catch (Exception ex) when (ex is ApiException or JSException)
+        {
+            Toasts.Error($"导出失败：{ex.Message}");
+        }
+        finally
+        {
+            exporting = false;
+        }
+    }
+
+    private string ExportFileName()
+    {
+        _ = TryParseDateTime(selectedStartDate, out var start);
+        _ = TryParseDateTime(selectedEndDate, out var end);
+        return $"usage_{start:yyyyMMdd-HHmmss}_to_{end:yyyyMMdd-HHmmss}.csv";
+    }
+
+    private static string CsvValue(object? value)
+    {
+        if (value is null) return string.Empty;
+        var text = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+        if (text.Length > 0 && "=+-@\t\r".Contains(text[0])) text = "'" + text;
+        return text.IndexOfAny([',', '"', '\r', '\n']) >= 0 ? $"\"{text.Replace("\"", "\"\"")}\"" : text;
     }
 
     private async Task<bool> TryResolveUserAsync()

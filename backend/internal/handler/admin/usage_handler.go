@@ -136,6 +136,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 	}
 
 	model := c.Query("model")
+	department := strings.TrimSpace(c.Query("department"))
 	requestID := strings.TrimSpace(c.Query("request_id"))
 	billingMode := strings.TrimSpace(c.Query("billing_mode"))
 
@@ -217,6 +218,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		GroupID:               groupID,
 		RequestID:             requestID,
 		Model:                 model,
+		Department:            department,
 		ModelFilterSource:     usagestats.ModelSourceRequested,
 		RequestType:           requestType,
 		Stream:                stream,

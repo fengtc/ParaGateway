@@ -3151,7 +3151,7 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         var query = new List<string>
         {
             $"page={Math.Max(1, value.Page)}",
-            $"page_size={Math.Clamp(value.PageSize, 1, 100)}",
+            $"page_size={Math.Clamp(value.PageSize, 1, 1000)}",
             $"sort_by={Uri.EscapeDataString(string.IsNullOrWhiteSpace(value.SortBy) ? "created_at" : value.SortBy)}",
             $"sort_order={(string.Equals(value.SortOrder, "asc", StringComparison.OrdinalIgnoreCase) ? "asc" : "desc")}"
         };
@@ -3159,6 +3159,7 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         AddUserUsageQuery(query, "end_date", value.EndDate);
         AddUserUsageQuery(query, "timezone", value.Timezone);
         AddUserUsageQuery(query, "model", value.Model);
+        AddUserUsageQuery(query, "department", value.Department);
         AddUserUsageQuery(query, "request_type", value.RequestType);
         AddUserUsageQuery(query, "billing_mode", value.BillingMode);
         if (value.UserId is > 0) query.Add($"user_id={value.UserId.Value}");
@@ -3166,6 +3167,7 @@ public sealed class ApiClient(HttpClient http, IJSRuntime js)
         if (value.AccountId is > 0) query.Add($"account_id={value.AccountId.Value}");
         if (value.GroupId is > 0) query.Add($"group_id={value.GroupId.Value}");
         if (value.BillingType.HasValue) query.Add($"billing_type={value.BillingType.Value}");
+        if (value.ExactTotal) query.Add("exact_total=true");
         return string.Join("&", query);
     }
 

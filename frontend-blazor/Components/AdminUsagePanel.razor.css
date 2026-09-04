@@ -44,7 +44,7 @@
     gap: 13px;
 }
 
-.admin-usage-filter-grid.with-page-size { grid-template-columns: repeat(5, minmax(140px, 1fr)); }
+.admin-usage-filter-grid.with-page-size { grid-template-columns: repeat(6, minmax(130px, 1fr)); }
 
 .admin-usage-filter-grid .filter-field { min-width: 0; gap: 6px; }
 .admin-usage-filter-grid .filter-field label { color: var(--muted); font-size: .68rem; font-weight: 700; }
