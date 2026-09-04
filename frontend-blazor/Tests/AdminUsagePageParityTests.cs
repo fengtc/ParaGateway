@@ -32,6 +32,9 @@ public sealed class AdminUsagePageParityTests
         Assert.Contains("用户邮箱", panel, StringComparison.Ordinal);
         Assert.Contains("for=\"admin-usage-department\">部门", panel, StringComparison.Ordinal);
         Assert.Contains("placeholder=\"全部部门\"", panel, StringComparison.Ordinal);
+        Assert.True(
+            panel.IndexOf("admin-usage-department", StringComparison.Ordinal) < panel.IndexOf("admin-usage-user-email", StringComparison.Ordinal),
+            "部门查询条件应显示在用户邮箱查询条件之前");
         Assert.Contains("ExportCsvAsync", panel, StringComparison.Ordinal);
         Assert.Contains("导出 CSV", panel, StringComparison.Ordinal);
         Assert.Contains("paraGateway.downloadBytes", panel, StringComparison.Ordinal);

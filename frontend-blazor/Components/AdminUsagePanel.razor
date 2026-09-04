@@ -28,6 +28,13 @@
             <label for="admin-usage-end-date">结束时间</label>
             <input id="admin-usage-end-date" type="datetime-local" step="1" value="@draftEndDate" @onchange="args => draftEndDate = args.Value?.ToString() ?? string.Empty" />
         </div>
+        @if (activeTab == "usage")
+        {
+            <div class="filter-field compact">
+                <label for="admin-usage-department">部门</label>
+                <input id="admin-usage-department" type="search" placeholder="全部部门" @bind="draftDepartment" />
+            </div>
+        }
         <div class="filter-field compact">
             <label for="admin-usage-user-email">用户邮箱</label>
             <input id="admin-usage-user-email" type="search" list="admin-usage-user-options" value="@draftUserEmail" placeholder="全部用户" autocomplete="off" @oninput="SearchUserEmailsAsync" />
@@ -41,10 +48,6 @@
         </div>
         @if (activeTab == "usage")
         {
-            <div class="filter-field compact">
-                <label for="admin-usage-department">部门</label>
-                <input id="admin-usage-department" type="search" placeholder="全部部门" @bind="draftDepartment" />
-            </div>
             <div class="filter-field compact">
                 <label for="admin-usage-page-size">每页</label>
                 <select id="admin-usage-page-size" value="@pageSize" @onchange="PageSizeChangedAsync">
